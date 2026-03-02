@@ -1,0 +1,90 @@
+generator client {
+  provider        = "prisma-client-js"
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["marathon_match"]
+}
+
+enum PhaseConfigType {
+  EXAMPLE
+  PROVISIONAL
+  SYSTEM
+
+  @@schema("marathon_match")
+}
+
+enum CompilationStatus {
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@schema("marathon_match")
+}
+
+model tester {
+  id                String                 @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
+  name              String
+  version           String
+  sourceCode        String                 @db.Text
+  jarFile           Bytes?
+  className         String
+  compilationStatus CompilationStatus      @default(PENDING)
+  compilationError  String?                @db.Text
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  configs           marathonMatchConfig[]
+
+  @@index([id])
+  @@index([name])
+  @@index([compilationStatus])
+  @@schema("marathon_match")
+}
+
+model marathonMatchConfig {
+  id                    String        @id @db.VarChar(36)
+  name                  String
+  active                Boolean       @default(true)
+  submissionApiUrl      String        @default("https://api.topcoder-dev.com/v6")
+  reviewScorecardId     String
+  testerId              String        @db.VarChar(14)
+  testTimeout           Int
+  compileTimeout        Int
+  taskDefinitionName    String
+  taskDefinitionVersion String
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  createdBy             String?
+  updatedBy             String?
+  tester                tester        @relation(fields: [testerId], references: [id])
+  phaseConfigs          phaseConfig[]
+
+  @@index([id])
+  @@index([testerId])
+  @@index([active])
+  @@schema("marathon_match")
+}
+
+model phaseConfig {
+  id                    String              @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
+  marathonMatchConfigId String              @db.VarChar(36)
+  configType            PhaseConfigType
+  startSeed             Int
+  numberOfTests         Int
+  phaseId               String
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  marathonMatchConfig   marathonMatchConfig @relation(fields: [marathonMatchConfigId], references: [id], onDelete: Cascade)
+
+  @@index([marathonMatchConfigId])
+  @@index([configType])
+  @@index([phaseId])
+  @@unique([marathonMatchConfigId, configType])
+  @@schema("marathon_match")
+}

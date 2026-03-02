@@ -1,0 +1,90 @@
+services:
+  mm-postgres:
+    image: postgres:16-alpine
+    container_name: mm-postgres
+    environment:
+      POSTGRES_USER: johndoe
+      POSTGRES_PASSWORD: randompassword
+      POSTGRES_DB: mydb
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U johndoe -d mydb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mm-network
+
+  mm-zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: mm-zookeeper
+    hostname: mm-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2182:2181"
+    networks:
+      - mm-network
+
+  mm-kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: mm-kafka
+    hostname: mm-kafka
+    depends_on:
+      - mm-zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: mm-zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://mm-kafka:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9093:9092"
+    networks:
+      - mm-network
+
+  mm-kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: mm-kafka-ui
+    depends_on:
+      - mm-kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: mm-kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: mm-zookeeper:2181
+    ports:
+      - "8081:8080"
+    networks:
+      - mm-network
+
+  mm-api:
+    build:
+      context: .
+    container_name: mm-api
+    env_file:
+      - .env
+    environment:
+      PORT: 3013
+      DATABASE_URL: postgresql://johndoe:randompassword@mm-postgres:5432/mydb?schema=${POSTGRES_SCHEMA:-marathon_match}
+      KAFKA_BROKERS: mm-kafka:29092
+    depends_on:
+      mm-postgres:
+        condition: service_healthy
+      mm-kafka:
+        condition: service_started
+    ports:
+      - "3013:3013"
+    networks:
+      - mm-network
+
+networks:
+  mm-network:
+    driver: bridge
