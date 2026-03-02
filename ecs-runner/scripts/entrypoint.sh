@@ -1,6 +1,6 @@
 #!/bin/sh
+set -eu
 
-java -Xms512M -Xmx512M -jar /app/mm-ecs-runner.jar
-EXIT_CODE=$?
+JAVA_HEAP_OPTS="${JAVA_HEAP_OPTS:--Xms256M -Xmx512M}"
 
-exit $EXIT_CODE
+exec java ${JAVA_HEAP_OPTS} ${JAVA_OPTS:-} -jar /app/mm-ecs-runner.jar

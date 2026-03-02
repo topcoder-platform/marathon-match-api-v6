@@ -200,6 +200,22 @@ Before live scoring, verify:
 - `GET /challenge/:challengeId` to verify stored config and phase mappings.
 - `GET /challenge/:challengeId/tester-jar` to verify compiled jar retrieval.
 
+## ECS runner image (ECR)
+
+The scorer task launched by `EcsService` must reference an ECR image built from:
+
+- `ecs-runner/Dockerfile`
+
+Recommended publish flow:
+
+```bash
+AWS_REGION=us-east-1 ECR_REPOSITORY=mm-ecs-runner ./ecs-runner/scripts/build-and-push-ecr.sh
+```
+
+Detailed runner image and tagging guidance:
+
+- `ecs-runner/README.md`
+
 ## Submission scoring flow (Kafka to score)
 
 ```mermaid
