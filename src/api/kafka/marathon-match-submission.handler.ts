@@ -154,6 +154,11 @@ export class MarathonMatchSubmissionHandler
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
         },
+        {
+          configType: matchingPhaseConfig.configType,
+          startSeed: matchingPhaseConfig.startSeed,
+          numberOfTests: matchingPhaseConfig.numberOfTests,
+        },
       );
 
       this.logger.log({

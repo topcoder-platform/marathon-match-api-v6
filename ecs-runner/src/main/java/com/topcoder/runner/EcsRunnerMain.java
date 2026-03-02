@@ -12,26 +12,34 @@ import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
 /**
  * ECS entrypoint that fetches marathon match config and tester artifacts from API,
- * runs the tester against a submission, and posts the resulting review summation.
+ * runs tester execution, uploads artifacts, and reports results back to the
+ * marathon-match API for TypeScript-side review processing.
  */
 public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -49,28 +57,25 @@ public class EcsRunnerMain {
             String testerConfigId = getRequiredEnv("TESTER_CONFIG_ID");
             String submissionId = getRequiredEnv("SUBMISSION_ID");
             String accessToken = getRequiredEnv("ACCESS_TOKEN");
-            String marathonMatchApiUrl = normalizeBaseUrl(
+            String marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
-            String reviewApiUrl = normalizeBaseUrl(getRequiredEnv("REVIEW_API_URL"));
             String reviewTypeId = getRequiredEnv("REVIEW_TYPE_ID");
+            String testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
+            int phaseStartSeed = getOptionalIntEnv("PHASE_START_SEED", 0);
+            int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
 
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
                 MarathonMatchConfigResponse config = fetchJson(
                     httpClient,
-                    marathonMatchApiUrl
-                        + "/v6/marathon-match/challenge/"
-                        + testerConfigId,
+                    marathonMatchBaseUrl + "/challenge/" + testerConfigId,
                     accessToken,
                     MarathonMatchConfigResponse.class
                 );
 
                 byte[] testerJarBytes = fetchBinary(
                     httpClient,
-                    marathonMatchApiUrl
-                        + "/v6/marathon-match/challenge/"
-                        + testerConfigId
-                        + "/tester-jar",
+                    marathonMatchBaseUrl + "/challenge/" + testerConfigId + "/tester-jar",
                     accessToken
                 );
 
@@ -78,9 +83,7 @@ public class EcsRunnerMain {
 
                 TesterResponse tester = fetchJson(
                     httpClient,
-                    marathonMatchApiUrl
-                        + "/v6/marathon-match/testers/"
-                        + config.getTesterId(),
+                    marathonMatchBaseUrl + "/testers/" + config.getTesterId(),
                     accessToken,
                     TesterResponse.class
                 );
@@ -90,46 +93,51 @@ public class EcsRunnerMain {
                     config.getSubmissionApiUrl(),
                     accessToken
                 );
-                submissionService.downloadSubmission(
-                    submissionId,
-                    submissionDir.toString()
-                );
+                submissionService.downloadSubmission(submissionId, submissionDir.toString());
 
                 ScorerConfig scorerConfig = buildScorerConfig(
                     config,
                     tester,
-                    reviewTypeId
+                    reviewTypeId,
+                    phaseStartSeed,
+                    phaseNumberOfTests
                 );
 
-                double score = runTester(
+                TesterExecutionResult testerExecution = runTester(
                     tester.getClassName(),
                     submissionDir.toString(),
                     scorerConfig,
                     testerJarPath
                 );
 
-                Map<String, Object> metadata = new HashMap<String, Object>();
-                metadata.put("testType", "provisional");
-                metadata.put("reviewTypeId", reviewTypeId);
-
-                ReviewSummationRequest reviewSummation = new ReviewSummationRequest(
-                    submissionId,
-                    score,
-                    scorerConfig.getScoreCardId(),
-                    true,
-                    Boolean.FALSE,
-                    Boolean.TRUE,
-                    Boolean.FALSE,
-                    metadata
-                );
-                postReviewSummation(
+                uploadArtifacts(
                     httpClient,
-                    reviewApiUrl,
+                    config.getSubmissionApiUrl(),
                     accessToken,
-                    reviewSummation
+                    submissionId,
+                    testPhase,
+                    submissionDir
                 );
 
-                ScoringResult result = new ScoringResult(score, "completed");
+                ScoringCallbackRequest callbackRequest = new ScoringCallbackRequest(
+                    submissionId,
+                    testerExecution.getScore(),
+                    testPhase,
+                    reviewTypeId,
+                    scorerConfig.getScoreCardId(),
+                    buildCallbackMetadata(testerExecution.getMetadata(), testPhase, reviewTypeId),
+                    readOptionalJsonMap(findArtifactFile(submissionDir, "private/current.json")),
+                    readOptionalJsonList(findArtifactFile(submissionDir, "private/reviews.json"))
+                );
+
+                postScoringCallback(
+                    httpClient,
+                    marathonMatchBaseUrl,
+                    accessToken,
+                    callbackRequest
+                );
+
+                ScoringResult result = new ScoringResult(testerExecution.getScore(), "completed");
                 System.out.println(OBJECT_MAPPER.writeValueAsString(result));
                 exitCode = 0;
             }
@@ -144,9 +152,6 @@ public class EcsRunnerMain {
 
     /**
      * Reads a required environment variable.
-     * @param variableName Environment variable name.
-     * @return Trimmed environment variable value.
-     * @throws IllegalArgumentException When the variable is missing or blank.
      */
     private static String getRequiredEnv(String variableName) {
         String value = System.getenv(variableName);
@@ -159,9 +164,41 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Removes trailing slashes from an API base URL.
-     * @param baseUrl Candidate base URL.
-     * @return URL without trailing slash suffixes.
+     * Reads an optional environment variable and returns a default when missing.
+     */
+    private static String getOptionalEnv(String variableName, String defaultValue) {
+        String value = System.getenv(variableName);
+        if (value == null) {
+            return defaultValue;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? defaultValue : trimmed;
+    }
+
+    /**
+     * Reads an optional integer environment variable and returns a default when missing.
+     */
+    private static int getOptionalIntEnv(String variableName, int defaultValue) {
+        String value = System.getenv(variableName);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(
+                "Environment variable "
+                    + variableName
+                    + " must be an integer. Received: "
+                    + value
+            );
+        }
+    }
+
+    /**
+     * Removes trailing slashes from a URL.
      */
     private static String normalizeBaseUrl(String baseUrl) {
         String normalized = baseUrl;
@@ -172,14 +209,38 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Performs an authorized HTTP GET and deserializes the JSON body to a class.
-     * @param httpClient Shared HTTP client.
-     * @param url URL to request.
-     * @param accessToken Bearer token.
-     * @param responseType Target response class.
-     * @param <T> Response type parameter.
-     * @return Parsed response object.
-     * @throws Exception When the request fails or JSON parsing fails.
+     * Normalizes to marathon-match API base URL.
+     */
+    private static String buildMarathonMatchBaseUrl(String marathonMatchApiUrl) {
+        String normalized = normalizeBaseUrl(marathonMatchApiUrl);
+
+        if (normalized.endsWith("/v6/marathon-match")) {
+            return normalized;
+        }
+        if (normalized.endsWith("/v6")) {
+            return normalized + "/marathon-match";
+        }
+
+        return normalized + "/v6/marathon-match";
+    }
+
+    /**
+     * Normalizes test phase aliases to one of example/provisional/system.
+     */
+    private static String normalizeTestPhase(String testPhase) {
+        String normalized = (testPhase == null ? "" : testPhase.trim().toLowerCase());
+        if ("example".equals(normalized)) {
+            return "example";
+        }
+        if ("system".equals(normalized) || "final".equals(normalized)) {
+            return "system";
+        }
+
+        return "provisional";
+    }
+
+    /**
+     * Performs an authorized HTTP GET and deserializes JSON body to a class.
      */
     private static <T> T fetchJson(
         CloseableHttpClient httpClient,
@@ -192,12 +253,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Performs an authorized HTTP GET and reads the raw binary response.
-     * @param httpClient Shared HTTP client.
-     * @param url URL to request.
-     * @param accessToken Bearer token.
-     * @return Binary response bytes.
-     * @throws Exception When the request fails or stream reading fails.
+     * Performs an authorized HTTP GET and reads raw binary response.
      */
     private static byte[] fetchBinary(
         CloseableHttpClient httpClient,
@@ -212,7 +268,7 @@ public class EcsRunnerMain {
             if (statusCode < 200 || statusCode >= 300) {
                 String responseBody = response.getEntity() == null
                     ? ""
-                    : EntityUtils.toString(response.getEntity(), "UTF-8");
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
                 throw new RuntimeException(
                     "GET " + url + " failed: HTTP " + statusCode + " - " + responseBody
                 );
@@ -229,12 +285,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Executes an authorized GET request and returns the response body as UTF-8 text.
-     * @param httpClient Shared HTTP client.
-     * @param url URL to request.
-     * @param accessToken Bearer token.
-     * @return Response body text.
-     * @throws Exception When the request fails.
+     * Executes an authorized GET request and returns response body as UTF-8 text.
      */
     private static String executeGetAsString(
         CloseableHttpClient httpClient,
@@ -249,7 +300,7 @@ public class EcsRunnerMain {
             int statusCode = response.getStatusLine().getStatusCode();
             String responseBody = response.getEntity() == null
                 ? ""
-                : EntityUtils.toString(response.getEntity(), "UTF-8");
+                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
 
             if (statusCode < 200 || statusCode >= 300) {
                 throw new RuntimeException(
@@ -262,33 +313,16 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Builds the review summation endpoint URL.
-     * @param reviewApiUrl Base review API URL with no trailing slash.
-     * @return Fully qualified review summation URL.
+     * Posts scoring callback payload to marathon-match API.
      */
-    private static String buildReviewSummationUrl(String reviewApiUrl) {
-        if (reviewApiUrl.endsWith("/v6")) {
-            return reviewApiUrl + "/reviews/summations";
-        }
-        return reviewApiUrl + "/v6/reviews/summations";
-    }
-
-    /**
-     * Posts a review summation record to review-api-v6.
-     * @param httpClient Shared HTTP client.
-     * @param reviewApiUrl Review API base URL.
-     * @param accessToken Bearer token.
-     * @param reviewSummation Review summation payload.
-     * @throws Exception When the API call fails.
-     */
-    private static void postReviewSummation(
+    private static void postScoringCallback(
         CloseableHttpClient httpClient,
-        String reviewApiUrl,
+        String marathonMatchBaseUrl,
         String accessToken,
-        ReviewSummationRequest reviewSummation
+        ScoringCallbackRequest callbackRequest
     ) throws Exception {
-        String url = buildReviewSummationUrl(reviewApiUrl);
-        String payload = OBJECT_MAPPER.writeValueAsString(reviewSummation);
+        String url = marathonMatchBaseUrl + "/internal/scoring-results";
+        String payload = OBJECT_MAPPER.writeValueAsString(callbackRequest);
 
         HttpPost request = new HttpPost(url);
         request.setHeader("Authorization", "Bearer " + accessToken);
@@ -310,11 +344,315 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Writes tester JAR bytes to a deterministic tmp path.
-     * @param testerConfigId Marathon match configuration ID.
-     * @param jarBytes Compiled tester jar bytes.
-     * @return Path to the saved JAR file.
-     * @throws IOException When file writing fails.
+     * Builds callback metadata with enforced testType and reviewTypeId.
+     */
+    private static Map<String, Object> buildCallbackMetadata(
+        Map<String, Object> metadata,
+        String testPhase,
+        String reviewTypeId
+    ) {
+        Map<String, Object> result = metadata == null
+            ? new LinkedHashMap<String, Object>()
+            : new LinkedHashMap<String, Object>(metadata);
+
+        result.put("testType", normalizeTestPhase(testPhase));
+        result.put("reviewTypeId", reviewTypeId);
+        return result;
+    }
+
+    /**
+     * Uploads public and private submission artifacts when present.
+     */
+    private static void uploadArtifacts(
+        CloseableHttpClient httpClient,
+        String submissionApiUrl,
+        String accessToken,
+        String submissionId,
+        String testPhase,
+        Path submissionDir
+    ) throws Exception {
+        Path artifactBaseDir = resolveArtifactBaseDir(submissionDir);
+        if (artifactBaseDir == null) {
+            return;
+        }
+
+        Path artifactsDir = artifactBaseDir.resolve("artifacts");
+        if (!Files.isDirectory(artifactsDir)) {
+            return;
+        }
+
+        String baseArtifactName = submissionId + "-" + testPhase;
+        String internalArtifactName = baseArtifactName + "-internal";
+
+        Path publicZip = null;
+        Path privateZip = null;
+
+        try {
+            publicZip = createPublicArtifactZip(artifactsDir, submissionId, baseArtifactName);
+            if (publicZip != null) {
+                uploadArtifactZip(
+                    httpClient,
+                    submissionApiUrl,
+                    accessToken,
+                    submissionId,
+                    baseArtifactName,
+                    publicZip
+                );
+            }
+
+            privateZip = createDirectoryZip(
+                artifactsDir.resolve("private"),
+                internalArtifactName
+            );
+            if (privateZip != null) {
+                uploadArtifactZip(
+                    httpClient,
+                    submissionApiUrl,
+                    accessToken,
+                    submissionId,
+                    internalArtifactName,
+                    privateZip
+                );
+            }
+        } finally {
+            deletePathRecursively(publicZip);
+            deletePathRecursively(privateZip);
+        }
+    }
+
+    /**
+     * Creates public artifact archive with execution/error logs and public artifacts.
+     */
+    private static Path createPublicArtifactZip(
+        Path artifactsDir,
+        String submissionId,
+        String artifactName
+    ) throws Exception {
+        Path executionLog = artifactsDir.resolve("execution-" + submissionId + ".log");
+        Path errorLog = artifactsDir.resolve("error-" + submissionId + ".log");
+        Path publicDir = artifactsDir.resolve("public");
+
+        boolean hasPublicArtifacts =
+            Files.isRegularFile(executionLog)
+                || Files.isRegularFile(errorLog)
+                || Files.isDirectory(publicDir);
+
+        if (!hasPublicArtifacts) {
+            return null;
+        }
+
+        Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(
+            Files.newOutputStream(zipPath)
+        )) {
+            addFileToZip(zipOutputStream, executionLog, executionLog.getFileName().toString());
+            addFileToZip(zipOutputStream, errorLog, errorLog.getFileName().toString());
+            addDirectoryToZip(zipOutputStream, publicDir, "");
+        }
+
+        return zipPath;
+    }
+
+    /**
+     * Creates a zip archive from a directory. Returns null when directory is missing.
+     */
+    private static Path createDirectoryZip(Path directoryPath, String artifactName)
+        throws Exception {
+        if (!Files.isDirectory(directoryPath)) {
+            return null;
+        }
+
+        Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(
+            Files.newOutputStream(zipPath)
+        )) {
+            addDirectoryToZip(zipOutputStream, directoryPath, "");
+        }
+
+        return zipPath;
+    }
+
+    /**
+     * Adds a file to zip when it exists.
+     */
+    private static void addFileToZip(
+        ZipOutputStream zipOutputStream,
+        Path filePath,
+        String entryName
+    ) throws Exception {
+        if (!Files.isRegularFile(filePath)) {
+            return;
+        }
+
+        zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
+        Files.copy(filePath, zipOutputStream);
+        zipOutputStream.closeEntry();
+    }
+
+    /**
+     * Recursively adds directory contents to a zip stream.
+     */
+    private static void addDirectoryToZip(
+        ZipOutputStream zipOutputStream,
+        Path directoryPath,
+        String entryPrefix
+    ) throws Exception {
+        if (!Files.isDirectory(directoryPath)) {
+            return;
+        }
+
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            List<Path> paths = new ArrayList<Path>();
+            stream.forEach(paths::add);
+
+            for (Path entryPath : paths) {
+                if (!Files.isRegularFile(entryPath)) {
+                    continue;
+                }
+
+                String relativePath = directoryPath
+                    .relativize(entryPath)
+                    .toString()
+                    .replace('\\', '/');
+                String entryName = entryPrefix + relativePath;
+
+                zipOutputStream.putNextEntry(new ZipEntry(entryName));
+                Files.copy(entryPath, zipOutputStream);
+                zipOutputStream.closeEntry();
+            }
+        }
+    }
+
+    /**
+     * Uploads zip artifact to submission-api using multipart form data.
+     */
+    private static void uploadArtifactZip(
+        CloseableHttpClient httpClient,
+        String submissionApiUrl,
+        String accessToken,
+        String submissionId,
+        String artifactName,
+        Path zipPath
+    ) throws Exception {
+        String encodedFilename = URLEncoder.encode(artifactName, "UTF-8")
+            .replace("+", "%20");
+
+        String url =
+            normalizeBaseUrl(submissionApiUrl)
+                + "/submissions/"
+                + submissionId
+                + "/artifacts?filename="
+                + encodedFilename;
+
+        HttpPost request = new HttpPost(url);
+        request.setHeader("Authorization", "Bearer " + accessToken);
+
+        HttpEntity entity = MultipartEntityBuilder
+            .create()
+            .addBinaryBody(
+                "file",
+                zipPath.toFile(),
+                ContentType.APPLICATION_OCTET_STREAM,
+                artifactName + ".zip"
+            )
+            .build();
+
+        request.setEntity(entity);
+
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            int statusCode = response.getStatusLine().getStatusCode();
+            String responseBody = response.getEntity() == null
+                ? ""
+                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+
+            if (statusCode < 200 || statusCode >= 300) {
+                throw new RuntimeException(
+                    "POST " + url + " failed: HTTP " + statusCode + " - " + responseBody
+                );
+            }
+        }
+    }
+
+    /**
+     * Locates an artifact file across known runner workspace roots.
+     */
+    private static Path findArtifactFile(Path submissionDir, String relativePath) {
+        for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
+            Path candidate = baseDir.resolve("artifacts").resolve(relativePath);
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Locates the base directory that contains artifacts.
+     */
+    private static Path resolveArtifactBaseDir(Path submissionDir) {
+        for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
+            if (Files.isDirectory(baseDir.resolve("artifacts"))) {
+                return baseDir;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Returns possible workspace roots used by MM runner/tester layouts.
+     */
+    private static List<Path> getArtifactBaseCandidates(Path submissionDir) {
+        List<Path> candidates = new ArrayList<Path>();
+
+        if (submissionDir != null) {
+            candidates.add(submissionDir.resolve("submission"));
+            candidates.add(submissionDir);
+        }
+
+        candidates.add(Paths.get("/workdir/submission"));
+        candidates.add(Paths.get("/workdir"));
+
+        return candidates;
+    }
+
+    /**
+     * Reads JSON map when file exists.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> readOptionalJsonMap(Path path) throws Exception {
+        if (path == null || !Files.isRegularFile(path)) {
+            return null;
+        }
+
+        return (Map<String, Object>) OBJECT_MAPPER.readValue(path.toFile(), Map.class);
+    }
+
+    /**
+     * Reads JSON list when file exists.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> readOptionalJsonList(Path path)
+        throws Exception {
+        if (path == null || !Files.isRegularFile(path)) {
+            return null;
+        }
+
+        List<Object> rawList = OBJECT_MAPPER.readValue(path.toFile(), List.class);
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+
+        for (Object entry : rawList) {
+            if (entry instanceof Map) {
+                result.add((Map<String, Object>) entry);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Writes tester JAR bytes to deterministic tmp path.
      */
     private static Path writeTesterJar(String testerConfigId, byte[] jarBytes)
         throws IOException {
@@ -324,16 +662,14 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Builds the scorer config consumed by tester runTester(String, ScorerConfig).
-     * @param config Marathon match config response.
-     * @param tester Tester response containing class name.
-     * @param reviewTypeId Review type ID for review submission.
-     * @return ScorerConfig object for tester execution.
+     * Builds scorer config consumed by tester runTester(String, ScorerConfig).
      */
     private static ScorerConfig buildScorerConfig(
         MarathonMatchConfigResponse config,
         TesterResponse tester,
-        String reviewTypeId
+        String reviewTypeId,
+        int phaseStartSeed,
+        int phaseNumberOfTests
     ) {
         ScorerConfig scorerConfig = new ScorerConfig();
         scorerConfig.setName(config.getId());
@@ -341,19 +677,18 @@ public class EcsRunnerMain {
         scorerConfig.setScoreCardId(config.getReviewScorecardId());
         scorerConfig.setReviewerId(UUID.randomUUID().toString());
         scorerConfig.setTypeId(reviewTypeId);
+        scorerConfig.setStartSeed(phaseStartSeed);
+        scorerConfig.setNumberOfTests(phaseNumberOfTests);
+        scorerConfig.setTimeLimit(config.getTestTimeout());
+        scorerConfig.setTimeout(config.getTestTimeout());
+        scorerConfig.setCompileTimeout(config.getCompileTimeout());
         return scorerConfig;
     }
 
     /**
      * Loads tester class from downloaded JAR and invokes runTester(String, ScorerConfig).
-     * @param testerClassName Fully qualified tester class name.
-     * @param submissionDir Local submission extraction path.
-     * @param scorerConfig Scorer config passed to tester.
-     * @param testerJarPath Local tester jar path.
-     * @return Computed score.
-     * @throws Exception When class loading or reflection fails.
      */
-    private static double runTester(
+    private static TesterExecutionResult runTester(
         String testerClassName,
         String submissionDir,
         ScorerConfig scorerConfig,
@@ -370,19 +705,100 @@ public class EcsRunnerMain {
                 String.class,
                 ScorerConfig.class
             );
-            Object score = runTesterMethod.invoke(null, submissionDir, scorerConfig);
-            if (!(score instanceof Number)) {
-                throw new RuntimeException(
-                    "runTester returned non-numeric value for class " + testerClassName
-                );
-            }
-            return ((Number) score).doubleValue();
+            Object runResult = runTesterMethod.invoke(null, submissionDir, scorerConfig);
+            return parseTesterExecutionResult(runResult, testerClassName);
         }
     }
 
     /**
+     * Parses tester return values. Supports numeric score, ScoringResult, and map payloads.
+     */
+    @SuppressWarnings("unchecked")
+    private static TesterExecutionResult parseTesterExecutionResult(
+        Object runResult,
+        String testerClassName
+    ) throws Exception {
+        if (runResult == null) {
+            throw new RuntimeException(
+                "runTester returned null for class " + testerClassName
+            );
+        }
+
+        if (runResult instanceof Number) {
+            return new TesterExecutionResult(
+                ((Number) runResult).doubleValue(),
+                new LinkedHashMap<String, Object>()
+            );
+        }
+
+        if (runResult instanceof ScoringResult) {
+            return new TesterExecutionResult(
+                ((ScoringResult) runResult).getScore(),
+                new LinkedHashMap<String, Object>()
+            );
+        }
+
+        if (runResult instanceof Map) {
+            Map<String, Object> resultMap = (Map<String, Object>) runResult;
+            Double mapScore = parseNumeric(resultMap.get("score"));
+            if (mapScore == null) {
+                mapScore = parseNumeric(resultMap.get("aggregateScore"));
+            }
+
+            if (mapScore == null) {
+                throw new RuntimeException(
+                    "runTester map result is missing numeric score for class "
+                        + testerClassName
+                );
+            }
+
+            return new TesterExecutionResult(
+                mapScore.doubleValue(),
+                asMap(resultMap.get("metadata"))
+            );
+        }
+
+        throw new RuntimeException(
+            "runTester returned unsupported type "
+                + runResult.getClass().getName()
+                + " for class "
+                + testerClassName
+        );
+    }
+
+    /**
+     * Safely casts to map.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        if (value instanceof Map) {
+            return new LinkedHashMap<String, Object>((Map<String, Object>) value);
+        }
+
+        return new LinkedHashMap<String, Object>();
+    }
+
+    /**
+     * Parses numeric values from Number or numeric String values.
+     */
+    private static Double parseNumeric(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+
+        if (value instanceof String) {
+            try {
+                return Double.valueOf(((String) value).trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Deletes a file or directory recursively and ignores cleanup failures.
-     * @param path Path to delete.
      */
     private static void deletePathRecursively(Path path) {
         if (path == null) {
@@ -423,9 +839,6 @@ public class EcsRunnerMain {
 
     /**
      * Reads all bytes from an input stream for Java 8 compatibility.
-     * @param inputStream Input stream to drain.
-     * @return All stream bytes.
-     * @throws IOException When stream reading fails.
      */
     private static byte[] readAllBytes(InputStream inputStream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -438,60 +851,79 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Payload for review summation creation via /v6/reviews/summations.
+     * Callback payload posted to marathon-match API after scorer execution.
      */
-    private static class ReviewSummationRequest {
+    private static class ScoringCallbackRequest {
         @JsonProperty("submissionId")
         private final String submissionId;
 
-        @JsonProperty("aggregateScore")
-        private final double aggregateScore;
+        @JsonProperty("score")
+        private final double score;
+
+        @JsonProperty("testPhase")
+        private final String testPhase;
+
+        @JsonProperty("reviewTypeId")
+        private final String reviewTypeId;
 
         @JsonProperty("scorecardId")
         private final String scorecardId;
 
-        @JsonProperty("isPassing")
-        private final boolean isPassing;
-
-        @JsonProperty("isFinal")
-        private final Boolean isFinal;
-
-        @JsonProperty("isProvisional")
-        private final Boolean isProvisional;
-
-        @JsonProperty("isExample")
-        private final Boolean isExample;
-
-        @JsonProperty("reviewedDate")
-        private final String reviewedDate;
-
         @JsonProperty("metadata")
         private final Map<String, Object> metadata;
 
-        ReviewSummationRequest(
+        @JsonProperty("currentReview")
+        private final Map<String, Object> currentReview;
+
+        @JsonProperty("impactedReviews")
+        private final List<Map<String, Object>> impactedReviews;
+
+        ScoringCallbackRequest(
             String submissionId,
-            double aggregateScore,
+            double score,
+            String testPhase,
+            String reviewTypeId,
             String scorecardId,
-            boolean isPassing,
-            Boolean isFinal,
-            Boolean isProvisional,
-            Boolean isExample,
-            Map<String, Object> metadata
+            Map<String, Object> metadata,
+            Map<String, Object> currentReview,
+            List<Map<String, Object>> impactedReviews
         ) {
             this.submissionId = submissionId;
-            this.aggregateScore = aggregateScore;
+            this.score = score;
+            this.testPhase = testPhase;
+            this.reviewTypeId = reviewTypeId;
             this.scorecardId = scorecardId;
-            this.isPassing = isPassing;
-            this.isFinal = isFinal;
-            this.isProvisional = isProvisional;
-            this.isExample = isExample;
-            this.reviewedDate = Instant.now().toString();
             this.metadata = metadata;
+            this.currentReview = currentReview;
+            this.impactedReviews = impactedReviews;
         }
     }
 
     /**
-     * Partial marathon match config response used by the ECS runner bootstrap flow.
+     * Captures tester execution output consumed by callback/reporting logic.
+     */
+    private static class TesterExecutionResult {
+        private final double score;
+        private final Map<String, Object> metadata;
+
+        TesterExecutionResult(double score, Map<String, Object> metadata) {
+            this.score = score;
+            this.metadata = metadata == null
+                ? new LinkedHashMap<String, Object>()
+                : metadata;
+        }
+
+        double getScore() {
+            return score;
+        }
+
+        Map<String, Object> getMetadata() {
+            return metadata;
+        }
+    }
+
+    /**
+     * Partial marathon match config response used by ECS runner bootstrap flow.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class MarathonMatchConfigResponse {
@@ -506,6 +938,12 @@ public class EcsRunnerMain {
 
         @JsonProperty("testerId")
         private String testerId;
+
+        @JsonProperty("testTimeout")
+        private Integer testTimeout;
+
+        @JsonProperty("compileTimeout")
+        private Integer compileTimeout;
 
         public String getId() {
             return id;
@@ -522,10 +960,18 @@ public class EcsRunnerMain {
         public String getTesterId() {
             return testerId;
         }
+
+        public int getTestTimeout() {
+            return testTimeout == null ? 0 : testTimeout.intValue();
+        }
+
+        public int getCompileTimeout() {
+            return compileTimeout == null ? 0 : compileTimeout.intValue();
+        }
     }
 
     /**
-     * Partial tester response used by the ECS runner to discover tester class name.
+     * Partial tester response used by ECS runner to discover tester class name.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class TesterResponse {

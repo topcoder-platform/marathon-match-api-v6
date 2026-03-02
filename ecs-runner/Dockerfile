@@ -2,7 +2,7 @@
 FROM maven:3.8-openjdk-8 AS builder
 WORKDIR /app
 COPY ecs-runner/pom.xml /app/pom.xml
-COPY src/java/boilerplate/src/ /app/src/
+COPY ecs-runner/boilerplate/src/ /app/src/
 COPY ecs-runner/src/ /app/src/
 RUN mvn clean package -DskipTests
 

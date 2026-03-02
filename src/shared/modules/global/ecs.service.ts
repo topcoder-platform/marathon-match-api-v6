@@ -13,6 +13,12 @@ interface MarathonMatchTaskConfig {
   taskDefinitionVersion: string;
 }
 
+export interface MarathonMatchScoringPhase {
+  configType: string;
+  startSeed: number;
+  numberOfTests: number;
+}
+
 /**
  * Wraps AWS ECS Fargate task orchestration for the marathon match scoring
  * pipeline. This service is a globally provided singleton that can be injected
@@ -34,25 +40,27 @@ export class EcsService {
    * @param testerConfigId ID of the marathonMatchConfig record passed to the ECS container.
    * @param submissionId Submission ID passed to the ECS container.
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
+   * @param scoringPhase Active phase settings used by the runner for flags and seed range.
    * @returns ECS task ARN of the launched Fargate task.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
-   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_API_URL, REVIEW_TYPE_ID.
+   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID.
    * @throws Error when required ENV vars are missing, token fetch fails, or ECS launch fails.
    */
   async launchScorerTask(
     testerConfigId: string,
     submissionId: string,
     mmConfig: MarathonMatchTaskConfig,
+    scoringPhase: MarathonMatchScoringPhase,
   ): Promise<string> {
     const cluster = this.getRequiredEnv('ECS_CLUSTER');
     const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
     const subnets = this.getRequiredCsvEnv('ECS_SUBNETS');
     const securityGroups = this.getRequiredCsvEnv('ECS_SECURITY_GROUPS');
     const marathonMatchApiUrl = this.getRequiredEnv('MARATHON_MATCH_API_URL');
-    const reviewApiUrl = this.getRequiredEnv('REVIEW_API_URL');
     const reviewTypeId = this.getRequiredEnv('REVIEW_TYPE_ID');
     const taskDefinitionName = mmConfig.taskDefinitionName?.trim();
     const taskDefinitionVersion = mmConfig.taskDefinitionVersion?.trim();
+    const testPhase = this.mapConfigTypeToTestPhase(scoringPhase.configType);
 
     if (!taskDefinitionName) {
       throw new Error('Missing required task definition name in mmConfig.');
@@ -105,12 +113,24 @@ export class EcsService {
                     value: marathonMatchApiUrl,
                   },
                   {
-                    name: 'REVIEW_API_URL',
-                    value: reviewApiUrl,
-                  },
-                  {
                     name: 'REVIEW_TYPE_ID',
                     value: reviewTypeId,
+                  },
+                  {
+                    name: 'TEST_PHASE',
+                    value: testPhase,
+                  },
+                  {
+                    name: 'PHASE_CONFIG_TYPE',
+                    value: scoringPhase.configType,
+                  },
+                  {
+                    name: 'PHASE_START_SEED',
+                    value: String(scoringPhase.startSeed),
+                  },
+                  {
+                    name: 'PHASE_NUMBER_OF_TESTS',
+                    value: String(scoringPhase.numberOfTests),
                   },
                 ],
               },
@@ -235,5 +255,22 @@ export class EcsService {
     }
 
     return values;
+  }
+
+  private mapConfigTypeToTestPhase(configType: string): string {
+    const normalizedConfigType = configType?.trim().toUpperCase();
+    if (normalizedConfigType === 'EXAMPLE') {
+      return 'example';
+    }
+    if (normalizedConfigType === 'SYSTEM') {
+      return 'system';
+    }
+    if (normalizedConfigType === 'PROVISIONAL') {
+      return 'provisional';
+    }
+
+    throw new Error(
+      `Unsupported phase config type '${configType}' for ECS runner launch.`,
+    );
   }
 }

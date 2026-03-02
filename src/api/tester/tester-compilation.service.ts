@@ -33,7 +33,7 @@ export class TesterCompilationService {
   private readonly mavenBinary = process.env.MVN_BINARY?.trim() || 'mvn';
   private readonly boilerplateDir =
     process.env.BOILERPLATE_DIR?.trim() ||
-    path.resolve(process.cwd(), 'src/java/boilerplate');
+    path.resolve(process.cwd(), 'ecs-runner/boilerplate');
 
   constructor(
     private readonly prisma: PrismaService,
