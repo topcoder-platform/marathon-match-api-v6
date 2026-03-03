@@ -22,6 +22,14 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = LoggerService.forRoot('CompilationWorkerService');
   private readonly compileQueueName = 'compile-tester';
   private readonly pgBossDisabled = process.env.DISABLE_PG_BOSS === 'true';
+  private readonly compileWorkerTeamSize = this.getPositiveIntEnv(
+    'PG_BOSS_COMPILE_TEAM_SIZE',
+    1,
+  );
+  private readonly compileWorkerTeamConcurrency = this.getPositiveIntEnv(
+    'PG_BOSS_COMPILE_TEAM_CONCURRENCY',
+    1,
+  );
   private readonly handlePgBossError = (error: unknown): void => {
     const trace =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -53,7 +61,10 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
 
     await this.pgBoss.work<CompileTesterJobData>(
       this.compileQueueName,
-      { teamSize: 2, teamConcurrency: 1 } as unknown as PgBoss.WorkOptions,
+      {
+        teamSize: this.compileWorkerTeamSize,
+        teamConcurrency: this.compileWorkerTeamConcurrency,
+      } as unknown as PgBoss.WorkOptions,
       async (
         jobOrJobs:
           | PgBoss.Job<CompileTesterJobData>[]
@@ -68,7 +79,7 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
     );
 
     this.logger.log(
-      'Registered pg-boss worker for compile-tester jobs and ensured queue exists.',
+      `Registered pg-boss worker for compile-tester jobs and ensured queue exists (teamSize=${this.compileWorkerTeamSize}, teamConcurrency=${this.compileWorkerTeamConcurrency}).`,
     );
   }
 
@@ -83,5 +94,22 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
 
     this.pgBoss.off('error', this.handlePgBossError);
     await this.pgBoss.stop();
+  }
+
+  /**
+   * Parses a positive integer environment variable with fallback.
+   * @param envName Environment variable name.
+   * @param defaultValue Value used when env is missing/invalid.
+   * @returns Parsed positive integer or fallback.
+   */
+  private getPositiveIntEnv(envName: string, defaultValue: number): number {
+    const rawValue = process.env[envName];
+    const parsed = Number.parseInt(rawValue ?? '', 10);
+
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+
+    return defaultValue;
   }
 }

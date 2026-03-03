@@ -35,6 +35,9 @@ export class TesterCompilationService {
     process.env.BOILERPLATE_DIR?.trim() ||
     path.resolve(process.cwd(), 'ecs-runner/boilerplate');
   private readonly pgBossDisabled = process.env.DISABLE_PG_BOSS === 'true';
+  private readonly compileJavaMaxHeapMb = this.getCompileJavaMaxHeapMb();
+  private readonly compileMavenOpts = this.getCompileMavenOpts();
+  private inlineCompilationChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -43,7 +46,8 @@ export class TesterCompilationService {
 
   /**
    * Marks a tester for compilation and enqueues an async compile job.
-   * When `DISABLE_PG_BOSS=true`, compilation runs inline on this API instance.
+   * When `DISABLE_PG_BOSS=true`, compilation runs inline on this API instance
+   * using a serialized in-memory chain to avoid spawning overlapping Maven jobs.
    * @param testerId ID of the tester whose source should be compiled.
    * @param sourceCode Source code revision that should be compiled.
    * @returns Promise that resolves when DB status is updated and compilation is queued or started.
@@ -78,7 +82,11 @@ export class TesterCompilationService {
         this.logger.warn(
           `DISABLE_PG_BOSS=true, running compilation inline for tester ${testerId}.`,
         );
-        void this.runCompilation(payload);
+        this.inlineCompilationChain = this.inlineCompilationChain
+          .catch(() => undefined)
+          .then(async () => {
+            await this.runCompilation(payload);
+          });
         return;
       }
 
@@ -221,6 +229,42 @@ export class TesterCompilationService {
   }
 
   /**
+   * Parses JVM heap cap (MB) used for Maven compilation child processes.
+   * @returns Heap cap in MB with a default of 384MB.
+   */
+  private getCompileJavaMaxHeapMb(): number {
+    const parsed = Number.parseInt(
+      process.env.COMPILE_JAVA_MAX_HEAP_MB ?? '',
+      10,
+    );
+
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+
+    return 384;
+  }
+
+  /**
+   * Builds `MAVEN_OPTS` for compilation workers with a default heap cap.
+   * Priority: `COMPILE_MAVEN_OPTS` > `MAVEN_OPTS` > generated `-Xmx`.
+   * If no `-Xmx` is present, an `-Xmx` cap is appended automatically.
+   * @returns Effective MAVEN_OPTS string for `mvn` child process.
+   */
+  private getCompileMavenOpts(): string {
+    const compileSpecificOptions = process.env.COMPILE_MAVEN_OPTS?.trim() ?? '';
+    const inheritedOptions = process.env.MAVEN_OPTS?.trim() ?? '';
+    const baseOptions = compileSpecificOptions || inheritedOptions;
+
+    if (/-Xmx\S+/i.test(baseOptions)) {
+      return baseOptions;
+    }
+
+    const heapCapOption = `-Xmx${this.compileJavaMaxHeapMb}m`;
+    return baseOptions ? `${baseOptions} ${heapCapOption}` : heapCapOption;
+  }
+
+  /**
    * Calculates the immutable hash marker used to associate jobs with source revisions.
    * @param sourceCode Tester source string.
    * @returns SHA-256 hash hex digest for the provided source.
@@ -316,11 +360,16 @@ export class TesterCompilationService {
     pomPath: string,
   ): Promise<MavenCompileResult> {
     return await new Promise<MavenCompileResult>((resolve) => {
+      const compileEnv = {
+        ...process.env,
+        MAVEN_OPTS: this.compileMavenOpts,
+      };
+
       const child = spawn(
         this.mavenBinary,
         ['clean', 'package', '-f', pomPath, '-q'],
         {
-          env: process.env,
+          env: compileEnv,
         },
       );
 

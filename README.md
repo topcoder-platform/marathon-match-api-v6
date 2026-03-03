@@ -72,9 +72,14 @@ The service is configured via environment variables.
 | Variable | Required | Default | Used for |
 | --- | --- | --- | --- |
 | `CHALLENGE_API_URL` | No | `https://api.topcoder-dev.com` | Challenge API lookup for current active phase |
+| `DISABLE_PG_BOSS` | No | `false` | Disable pg-boss queue/worker and run tester compilation inline |
 | `COMPILE_TIMEOUT_MS` | No | `120000` | Maven tester compilation timeout |
+| `COMPILE_JAVA_MAX_HEAP_MB` | No | `384` | Max JVM heap (MB) enforced for tester compilation Maven process when `-Xmx` is not already provided |
+| `COMPILE_MAVEN_OPTS` | No | (auto-derived) | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap |
 | `MVN_BINARY` | No | `mvn` | Maven executable for tester compilation |
 | `BOILERPLATE_DIR` | No | `<repo>/ecs-runner/boilerplate` | Java boilerplate project copied for compilation |
+| `PG_BOSS_COMPILE_TEAM_SIZE` | No | `1` | Number of pg-boss compile workers processing jobs in parallel |
+| `PG_BOSS_COMPILE_TEAM_CONCURRENCY` | No | `1` | Per-worker concurrency for compile jobs |
 
 ### ECS launch configuration
 
@@ -102,6 +107,25 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 - `PHASE_CONFIG_TYPE`
 - `PHASE_START_SEED`
 - `PHASE_NUMBER_OF_TESTS`
+
+## Exit code 137 (OOM) mitigation
+
+`137` usually means the process was killed by the container runtime due to memory pressure.
+For development environments with tight memory limits, use these settings first:
+
+```bash
+COMPILE_JAVA_MAX_HEAP_MB=256
+COMPILE_MAVEN_OPTS="-Xms128m -Xmx256m"
+PG_BOSS_COMPILE_TEAM_SIZE=1
+PG_BOSS_COMPILE_TEAM_CONCURRENCY=1
+```
+
+If you are not actively consuming submission events or async compile queues in a dev smoke test, also disable background workers:
+
+```bash
+DISABLE_KAFKA=true
+DISABLE_PG_BOSS=true
+```
 
 ## Endpoints and auth
 

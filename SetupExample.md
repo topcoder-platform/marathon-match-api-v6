@@ -2,11 +2,7 @@
 
 This document is a concrete setup flow for wiring one dev challenge to `marathon-match-api-v6`, using this example tester:
 
-`/home/jmgasper/Documents/Git/v6/marathon-match-api-v6/examples/BridgeRunnersTester.java`
-
-That file is based on the original MM-164 source:
-
-`/home/jmgasper/Documents/Git/marathon-match-testers/tc-mm-164/tester_code/tester/src/main/java/com/topcoder/BridgeRunnersTester.java`
+`./examples/BridgeRunnersTester.java`
 
 ## 1. Prerequisites
 
@@ -33,6 +29,15 @@ export DISABLE_PG_BOSS=true
 export MVN_BINARY="/path/to/mvn"   # required if `mvn` is not on PATH
 ```
 
+If this service is being killed with exit code `137` in dev, cap compile-worker memory/concurrency:
+
+```bash
+export COMPILE_JAVA_MAX_HEAP_MB=256
+export COMPILE_MAVEN_OPTS="-Xms128m -Xmx256m"
+export PG_BOSS_COMPILE_TEAM_SIZE=1
+export PG_BOSS_COMPILE_TEAM_CONCURRENCY=1
+```
+
 ## 2. Prepare an API-Compatible BridgeRunners Tester
 
 The baseline MM-164 `BridgeRunnersTester.java` is not directly compatible with this runner.
@@ -44,7 +49,7 @@ The in-repo example file above already includes the required adapter method.
 
 Before creating the tester record:
 
-1. Use `/home/jmgasper/Documents/Git/v6/marathon-match-api-v6/examples/BridgeRunnersTester.java`
+1. Use `./examples/BridgeRunnersTester.java`
    as your initial tester source.
 2. Ensure the static `runTester(...)` method:
    - compiles/launches the submission from `submissionPath`,
@@ -64,7 +69,7 @@ Set common variables:
 ```bash
 export MM_API_BASE="https://api.topcoder-dev.com/v6/marathon-match"
 export TOKEN="<admin-or-m2m-bearer-token>"
-export TESTER_SOURCE_FILE="/home/jmgasper/Documents/Git/v6/marathon-match-api-v6/examples/BridgeRunnersTester.java"
+export TESTER_SOURCE_FILE="./examples/BridgeRunnersTester.java"
 ```
 
 Create tester:
