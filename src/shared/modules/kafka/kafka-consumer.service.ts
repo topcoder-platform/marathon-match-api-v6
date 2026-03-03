@@ -148,6 +148,18 @@ export class KafkaConsumerService
 
   connect(): void {
     try {
+      this.logger.log({
+        message: 'Initializing Kafka client',
+        brokers: this.options.brokers,
+        clientId: this.options.clientId,
+        groupId: this.options.groupId,
+        sslEnabled: this.options.ssl ?? false,
+        saslEnabled: Boolean(this.options.sasl),
+        saslMechanism: this.options.sasl?.mechanism,
+        connectionTimeoutMs: this.options.connectionTimeout,
+        requestTimeoutMs: this.options.requestTimeout,
+      });
+
       this.consumer = new Consumer(this.createConsumerOptions());
       this.producer = new Producer(this.createProducerOptions());
 
@@ -641,8 +653,18 @@ export class KafkaConsumerService
     }
 
     if (this.options.requestTimeout !== undefined) {
-      consumerOptions.timeout = this.options.requestTimeout;
-      consumerOptions.maxWaitTime = this.options.requestTimeout;
+      const requestTimeoutMs = this.options.requestTimeout;
+      consumerOptions.timeout = requestTimeoutMs;
+
+      // Keep fetch max-wait below request timeout to avoid edge timing races.
+      if (requestTimeoutMs <= 1) {
+        consumerOptions.maxWaitTime = 0;
+      } else {
+        consumerOptions.maxWaitTime = Math.max(
+          Math.min(requestTimeoutMs - 1000, 5000),
+          1,
+        );
+      }
     }
 
     if (this.options.retry?.retries !== undefined) {

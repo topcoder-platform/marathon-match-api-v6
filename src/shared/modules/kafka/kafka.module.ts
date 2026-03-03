@@ -33,8 +33,15 @@ export class KafkaModule {
   }
 
   static forRoot(): DynamicModule {
+    const configuredBrokers = process.env.KAFKA_URL?.split(',')
+      .map((broker) => broker.trim())
+      .filter((broker) => broker.length > 0);
+
     const kafkaOptions: KafkaModuleOptions = {
-      brokers: process.env.KAFKA_URL?.split(',') || ['localhost:9092'],
+      brokers:
+        configuredBrokers && configuredBrokers.length > 0
+          ? configuredBrokers
+          : ['localhost:9092'],
       clientId: process.env.KAFKA_CLIENT_ID || 'tc-marathon-match-api',
       groupId: process.env.KAFKA_GROUP_ID || 'tc-marathon-match-consumer-group',
       ssl: process.env.KAFKA_SSL_ENABLED === 'true',
