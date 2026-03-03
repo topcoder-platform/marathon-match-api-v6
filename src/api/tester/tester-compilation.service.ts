@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CompilationStatus, Prisma, tester } from '@prisma/client';
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
+import { constants as fsConstants, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -144,7 +144,8 @@ export class TesterCompilationService {
         return;
       }
 
-      tempDir = path.join(os.tmpdir(), `${testerId}-${Date.now()}`);
+      const tempRootDir = await this.resolveWritableTempRoot();
+      tempDir = path.join(tempRootDir, `${testerId}-${Date.now()}`);
       await fs.mkdir(tempDir, { recursive: true });
       await fs.cp(this.boilerplateDir, tempDir, { recursive: true });
 
@@ -271,6 +272,83 @@ export class TesterCompilationService {
    */
   private hashSourceCode(sourceCode: string): string {
     return createHash('sha256').update(sourceCode).digest('hex');
+  }
+
+  /**
+   * Finds a writable root directory for compilation temp workspaces.
+   *
+   * Candidate order:
+   * 1) `COMPILATION_TMP_DIR`
+   * 2) `TMPDIR`
+   * 3) `/dev/shm` (Linux memory-backed tmpfs)
+   * 4) `os.tmpdir()`
+   * 5) `<process.cwd()>/tmp`
+   *
+   * @returns Absolute writable directory path.
+   * @throws Error When none of the candidates can be created or written.
+   */
+  private async resolveWritableTempRoot(): Promise<string> {
+    const configuredTmpDir = process.env.COMPILATION_TMP_DIR?.trim();
+    const envTmpDir = process.env.TMPDIR?.trim();
+    const linuxRamTmpfsDir = process.platform === 'linux' ? '/dev/shm' : null;
+    const fallbackTmpDir = path.resolve(process.cwd(), 'tmp');
+
+    const candidates = Array.from(
+      new Set(
+        [
+          configuredTmpDir,
+          envTmpDir,
+          linuxRamTmpfsDir,
+          os.tmpdir(),
+          fallbackTmpDir,
+        ].filter((value): value is string =>
+          Boolean(value && value.length > 0),
+        ),
+      ),
+    );
+
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        await this.ensureWritableDirectory(candidate);
+        return candidate;
+      } catch (error) {
+        lastError = error;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Temp root candidate is not writable: ${candidate}. ${errorMessage}`,
+        );
+      }
+    }
+
+    const detail =
+      lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `No writable temporary directory is available for tester compilation. Last error: ${detail}`,
+    );
+  }
+
+  /**
+   * Verifies a candidate temp root exists and is writable by creating a probe file.
+   * @param candidate Absolute candidate path.
+   * @returns Promise that resolves when write access is confirmed.
+   * @throws Error When directory creation or probe write fails.
+   */
+  private async ensureWritableDirectory(candidate: string): Promise<void> {
+    await fs.mkdir(candidate, { recursive: true });
+    await fs.access(candidate, fsConstants.W_OK);
+
+    const probeFile = path.join(
+      candidate,
+      `.mm-compile-probe-${process.pid}-${Date.now()}`,
+    );
+
+    try {
+      await fs.writeFile(probeFile, 'ok', 'utf8');
+    } finally {
+      await fs.rm(probeFile, { force: true }).catch(() => undefined);
+    }
   }
 
   /**
