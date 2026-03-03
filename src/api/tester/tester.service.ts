@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CompilationStatus, Prisma, tester } from '@prisma/client';
+import { nanoid } from 'nanoid';
 import {
   CreateTesterDto,
   SearchTesterQueryDto,
@@ -52,6 +53,7 @@ export class TesterService {
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const created = await this.prisma.tester.create({
         data: {
+          id: nanoid(14),
           ...body,
           compilationStatus: CompilationStatus.PENDING,
           compilationError: null,

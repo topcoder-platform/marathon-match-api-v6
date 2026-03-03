@@ -21,6 +21,7 @@ import {
 export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = LoggerService.forRoot('CompilationWorkerService');
   private readonly compileQueueName = 'compile-tester';
+  private readonly pgBossDisabled = process.env.DISABLE_PG_BOSS === 'true';
   private readonly handlePgBossError = (error: unknown): void => {
     const trace =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -39,6 +40,13 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
    * @throws Error If queue startup, queue creation, or worker registration fails.
    */
   async onModuleInit(): Promise<void> {
+    if (this.pgBossDisabled) {
+      this.logger.warn(
+        'DISABLE_PG_BOSS=true, skipping pg-boss worker startup. Tester compilation will run inline.',
+      );
+      return;
+    }
+
     this.pgBoss.on('error', this.handlePgBossError);
     await this.pgBoss.start();
     await this.pgBoss.createQueue(this.compileQueueName);
@@ -69,6 +77,10 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
    * @returns Promise that resolves after worker shutdown completes.
    */
   async onModuleDestroy(): Promise<void> {
+    if (this.pgBossDisabled) {
+      return;
+    }
+
     this.pgBoss.off('error', this.handlePgBossError);
     await this.pgBoss.stop();
   }

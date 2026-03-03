@@ -10,6 +10,7 @@ import {
   Prisma,
   phaseConfig,
 } from '@prisma/client';
+import { nanoid } from 'nanoid';
 import {
   CreateMarathonMatchConfigDto,
   MarathonMatchConfigPaginatedResponseDto,
@@ -106,6 +107,7 @@ export class MarathonMatchConfigService {
 
           await prisma.phaseConfig.create({
             data: {
+              id: nanoid(14),
               marathonMatchConfigId: challengeId,
               configType,
               startSeed: phase.startSeed,
@@ -221,6 +223,7 @@ export class MarathonMatchConfigService {
               phaseId: phase.phaseId,
             },
             create: {
+              id: nanoid(14),
               marathonMatchConfigId: challengeId,
               configType,
               startSeed: phase.startSeed,

@@ -34,6 +34,7 @@ export class TesterCompilationService {
   private readonly boilerplateDir =
     process.env.BOILERPLATE_DIR?.trim() ||
     path.resolve(process.cwd(), 'ecs-runner/boilerplate');
+  private readonly pgBossDisabled = process.env.DISABLE_PG_BOSS === 'true';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,10 +42,11 @@ export class TesterCompilationService {
   ) {}
 
   /**
-   * Marks a tester for compilation and pushes an async compile job to pg-boss.
+   * Marks a tester for compilation and enqueues an async compile job.
+   * When `DISABLE_PG_BOSS=true`, compilation runs inline on this API instance.
    * @param testerId ID of the tester whose source should be compiled.
    * @param sourceCode Source code revision that should be compiled.
-   * @returns Promise that resolves when DB status is updated and the job is sent.
+   * @returns Promise that resolves when DB status is updated and compilation is queued or started.
    * @throws Error If queueing fails; the tester is marked FAILED for the same source revision.
    */
   async enqueueCompilation(
@@ -72,6 +74,14 @@ export class TesterCompilationService {
     }
 
     try {
+      if (this.pgBossDisabled) {
+        this.logger.warn(
+          `DISABLE_PG_BOSS=true, running compilation inline for tester ${testerId}.`,
+        );
+        void this.runCompilation(payload);
+        return;
+      }
+
       await this.pgBoss.send('compile-tester', payload);
     } catch (error) {
       const errorMessage =
