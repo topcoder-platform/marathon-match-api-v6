@@ -47,7 +47,8 @@ The service is configured via environment variables.
 | Variable | Required | Default | Used for |
 | --- | --- | --- | --- |
 | `DISABLE_KAFKA` | No | `false` | Fully disable Kafka connection/consumption |
-| `KAFKA_URL` | No | `localhost:9092` | Broker list (comma-separated) |
+| `KAFKA_URL` | No | `localhost:9092` | Broker list (comma-separated). If unset, `KAFKA_BROKERS` is also accepted |
+| `KAFKA_BROKERS` | No | (fallback only) | Alternative broker list env key (review-api compatibility) |
 | `KAFKA_CLIENT_ID` | No | `tc-marathon-match-api` | Kafka client ID |
 | `KAFKA_GROUP_ID` | No | `tc-marathon-match-consumer-group` | Consumer group ID |
 | `KAFKA_SSL_ENABLED` | No | `false` | Enable TLS |
@@ -56,6 +57,9 @@ The service is configured via environment variables.
 | `KAFKA_SASL_PASSWORD` | No | empty string | SASL password |
 | `KAFKA_CONNECTION_TIMEOUT` | No | `10000` | Kafka connect timeout (ms) |
 | `KAFKA_REQUEST_TIMEOUT` | No | `30000` | Kafka request timeout (ms) |
+| `KAFKA_MAXBYTES` / `KAFKA_MAX_BYTES` | No | Kafka client default | Consumer fetch max bytes (dev parity with review-api usage) |
+| `KAFKA_MIN_BYTES` | No | Kafka client default | Consumer fetch minimum bytes |
+| `KAFKA_MAX_WAIT_TIME` | No | Auto-derived from request timeout | Consumer fetch max wait (ms) |
 | `KAFKA_RETRY_ATTEMPTS` | No | `5` | Client reconnection retry count |
 | `KAFKA_INITIAL_RETRY_TIME` | No | `100` | Initial retry delay (ms) |
 | `KAFKA_MAX_RETRY_TIME` | No | `30000` | Max exponential retry delay (ms) |
@@ -264,5 +268,5 @@ sequenceDiagram
   end
 
   C->>C: Commit offset on success/skip
-  Note over C: On failures, retries with exponential backoff; if DLQ is enabled and retries are exhausted, publish to <topic>.dlq and commit.
+  Note over C: On failures, retries with exponential backoff; if DLQ is enabled and retries are exhausted, publish to topic.dlq and commit.
 ```

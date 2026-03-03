@@ -51,6 +51,9 @@ export interface KafkaModuleOptions {
   sasl?: KafkaSaslOptions;
   connectionTimeout?: number;
   requestTimeout?: number;
+  minBytes?: number;
+  maxBytes?: number;
+  maxWaitTime?: number;
   retry?: {
     retries: number;
     initialRetryTime: number;
@@ -158,6 +161,9 @@ export class KafkaConsumerService
         saslMechanism: this.options.sasl?.mechanism,
         connectionTimeoutMs: this.options.connectionTimeout,
         requestTimeoutMs: this.options.requestTimeout,
+        minBytes: this.options.minBytes,
+        maxBytes: this.options.maxBytes,
+        maxWaitTime: this.options.maxWaitTime,
       });
 
       this.consumer = new Consumer(this.createConsumerOptions());
@@ -655,6 +661,20 @@ export class KafkaConsumerService
     if (this.options.requestTimeout !== undefined) {
       const requestTimeoutMs = this.options.requestTimeout;
       consumerOptions.timeout = requestTimeoutMs;
+    }
+
+    if (this.options.minBytes !== undefined) {
+      consumerOptions.minBytes = this.options.minBytes;
+    }
+
+    if (this.options.maxBytes !== undefined) {
+      consumerOptions.maxBytes = this.options.maxBytes;
+    }
+
+    if (this.options.maxWaitTime !== undefined) {
+      consumerOptions.maxWaitTime = this.options.maxWaitTime;
+    } else if (this.options.requestTimeout !== undefined) {
+      const requestTimeoutMs = this.options.requestTimeout;
 
       // Keep fetch max-wait below request timeout to avoid edge timing races.
       if (requestTimeoutMs <= 1) {
