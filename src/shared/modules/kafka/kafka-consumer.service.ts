@@ -99,14 +99,26 @@ export class KafkaConsumerService
       );
       return;
     }
-    this.connect();
+    try {
+      this.connect();
+    } catch (error) {
+      this.handleKafkaFailure(
+        'Kafka initialization failed during module startup',
+        error,
+      );
+    }
   }
 
-  async onApplicationBootstrap() {
+  onApplicationBootstrap() {
     if (this.isDisabled) {
       return;
     }
-    await this.startConsumer();
+    void this.startConsumer().catch((error) => {
+      this.handleKafkaFailure(
+        'Kafka consumer startup failed during application bootstrap',
+        error,
+      );
+    });
   }
 
   async onModuleDestroy() {
@@ -216,31 +228,24 @@ export class KafkaConsumerService
       return;
     }
 
-    try {
-      await this.producer.connectToBrokers(null);
+    await this.producer.connectToBrokers(null);
 
-      this.stream = await this.consumer.consume({
-        topics,
-        autocommit: false,
-      });
+    this.stream = await this.consumer.consume({
+      topics,
+      autocommit: false,
+    });
 
-      this.stream.on('error', (error) => {
-        this.handleKafkaFailure('Kafka consumer stream error', error);
-      });
+    this.stream.on('error', (error) => {
+      this.handleKafkaFailure('Kafka consumer stream error', error);
+    });
 
-      this.consumerLoop = this.consumeStream(this.stream);
+    this.consumerLoop = this.consumeStream(this.stream);
 
-      this.kafkaState = KafkaConnectionState.ready;
-      this.kafkaFailureReason = undefined;
-      this.kafkaReconnectAttempts = 0;
+    this.kafkaState = KafkaConnectionState.ready;
+    this.kafkaFailureReason = undefined;
+    this.kafkaReconnectAttempts = 0;
 
-      this.logger.log('Kafka consumer started successfully');
-    } catch (error) {
-      const trace =
-        error instanceof Error ? (error.stack ?? error.message) : String(error);
-      this.logger.error('Failed to start Kafka consumer', trace);
-      throw error;
-    }
+    this.logger.log('Kafka consumer started successfully');
   }
 
   private async consumeStream(

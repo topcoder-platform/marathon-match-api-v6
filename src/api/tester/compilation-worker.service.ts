@@ -20,6 +20,12 @@ import {
 @Injectable()
 export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = LoggerService.forRoot('CompilationWorkerService');
+  private readonly compileQueueName = 'compile-tester';
+  private readonly handlePgBossError = (error: unknown): void => {
+    const trace =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    this.logger.error('pg-boss emitted an error event', trace);
+  };
 
   constructor(
     @Inject(PG_BOSS_TOKEN) private readonly pgBoss: PgBoss,
@@ -27,15 +33,18 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   /**
-   * Starts pg-boss and registers a worker for tester compilation jobs.
+   * Starts pg-boss, ensures the compile queue exists, and registers a worker
+   * for tester compilation jobs.
    * @returns Promise that resolves after worker registration is complete.
-   * @throws Error If queue startup or worker registration fails.
+   * @throws Error If queue startup, queue creation, or worker registration fails.
    */
   async onModuleInit(): Promise<void> {
+    this.pgBoss.on('error', this.handlePgBossError);
     await this.pgBoss.start();
+    await this.pgBoss.createQueue(this.compileQueueName);
 
     await this.pgBoss.work<CompileTesterJobData>(
-      'compile-tester',
+      this.compileQueueName,
       { teamSize: 2, teamConcurrency: 1 } as unknown as PgBoss.WorkOptions,
       async (
         jobOrJobs:
@@ -50,7 +59,9 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.logger.log('Registered pg-boss worker for compile-tester jobs.');
+    this.logger.log(
+      'Registered pg-boss worker for compile-tester jobs and ensured queue exists.',
+    );
   }
 
   /**
@@ -58,6 +69,7 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
    * @returns Promise that resolves after worker shutdown completes.
    */
   async onModuleDestroy(): Promise<void> {
+    this.pgBoss.off('error', this.handlePgBossError);
     await this.pgBoss.stop();
   }
 }
