@@ -16,6 +16,7 @@ This document is a concrete setup flow for wiring one dev challenge to `marathon
   - `REVIEW_API_URL`
   - `REVIEW_TYPE_ID`
 - ECS task definition revision for runner is registered and points at your ECR image (see `ecs-runner/README.md`).
+- The `marathon-match-api-v6` runtime image includes Java + Maven (`mvn`) for tester compilation jobs.
 - You have an admin or M2M token with these scopes:
   - `all:marathon-match` (or `create:marathon-match`, `read:marathon-match`, `update:marathon-match`)
   - `all:marathon-match-tester` (or `create:marathon-match-tester`, `read:marathon-match-tester`, `update:marathon-match-tester`)

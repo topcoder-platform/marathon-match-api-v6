@@ -2,7 +2,7 @@
 
 FROM node:22.13.1-alpine
 
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash maven openjdk17-jdk
 RUN apk update
 
 ARG RESET_DB_ARG=false
