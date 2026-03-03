@@ -35,6 +35,63 @@ Optional variables:
 
 The script prints the final pushed image URI(s), which can be referenced directly in an ECS task definition.
 
+## Configure marathon-match-api-v6 to use the image
+
+`marathon-match-api-v6` does not store image URI directly. It launches ECS tasks by
+`taskDefinitionName:taskDefinitionVersion`, so you need to publish a new ECS task definition revision that points to your new ECR image.
+
+### 1. Register a new ECS task definition revision with the new image
+
+```bash
+export AWS_REGION="us-east-1"
+export TASK_FAMILY="mm-ecs-runner"
+export CONTAINER_NAME="tc-mm-runner"
+export NEW_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/mm-ecs-runner:<tag>"
+
+aws ecs describe-task-definition \
+  --region "$AWS_REGION" \
+  --task-definition "$TASK_FAMILY" \
+  --query 'taskDefinition' > /tmp/mm-taskdef.json
+
+jq --arg C "$CONTAINER_NAME" --arg I "$NEW_IMAGE" '
+  .containerDefinitions |= map(if .name == $C then .image = $I else . end)
+  | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+' /tmp/mm-taskdef.json > /tmp/mm-taskdef.new.json
+
+NEW_REVISION=$(
+  aws ecs register-task-definition \
+    --region "$AWS_REGION" \
+    --cli-input-json file:///tmp/mm-taskdef.new.json \
+    --query 'taskDefinition.revision' \
+    --output text
+)
+
+echo "Registered: ${TASK_FAMILY}:${NEW_REVISION}"
+```
+
+### 2. Ensure marathon-match-api-v6 ECS env vars are set
+
+Set these in the API service environment:
+
+- `ECS_CLUSTER`
+- `ECS_SUBNETS`
+- `ECS_SECURITY_GROUPS`
+- `ECS_CONTAINER_NAME` (must match `CONTAINER_NAME` above)
+- `AWS_REGION`
+- `MARATHON_MATCH_API_URL`
+- `REVIEW_TYPE_ID`
+
+### 3. Update challenge config to use that task definition revision
+
+```bash
+curl -X PUT "https://api.topcoder-dev.com/v6/marathon-match/challenge/<challengeId>" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"taskDefinitionName\":\"${TASK_FAMILY}\",\"taskDefinitionVersion\":\"${NEW_REVISION}\"}"
+```
+
+Once this is saved and the config is active, new scoring launches use the new ECR image through that ECS task definition revision.
+
 ## Local smoke test
 
 ```bash
