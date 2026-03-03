@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { LoggerService } from './logger.service';
 import { PrismaErrorService } from './prisma-error.service';
@@ -9,6 +10,46 @@ enum auditField {
   createdBy = 'createdBy',
   updatedBy = 'updatedBy',
 }
+
+/**
+ * Resolves the database connection URL required by Prisma.
+ *
+ * @returns The datasource URL from `DATABASE_URL`.
+ * @throws Error when `DATABASE_URL` is not defined.
+ */
+const getDatasourceUrl = (): string => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      'DATABASE_URL must be set to initialize the Prisma connection.',
+    );
+  }
+
+  return databaseUrl;
+};
+
+/**
+ * Resolves schema name for PostgreSQL adapter configuration.
+ *
+ * Priority:
+ * 1) `POSTGRES_SCHEMA`
+ * 2) `schema` query param from `DATABASE_URL`
+ * 3) `public`
+ *
+ * @param datasourceUrl - Database URL used by Prisma.
+ * @returns PostgreSQL schema name.
+ */
+const getSchemaName = (datasourceUrl: string): string => {
+  if (process.env.POSTGRES_SCHEMA) {
+    return process.env.POSTGRES_SCHEMA;
+  }
+
+  try {
+    return new URL(datasourceUrl).searchParams.get('schema') || 'public';
+  } catch {
+    return 'public';
+  }
+};
 
 /**
  * Checks if a given Prisma model contains a specific field.
@@ -195,10 +236,15 @@ export class PrismaService
   private readonly logger: LoggerService;
 
   constructor(private readonly prismaErrorService?: PrismaErrorService) {
-    // Get the schema name from environment variable or use 'public' as default
-    const schema = process.env.POSTGRES_SCHEMA || 'public';
+    const datasourceUrl = getDatasourceUrl();
+    const schema = getSchemaName(datasourceUrl);
+    const adapter = new PrismaPg(
+      { connectionString: datasourceUrl },
+      { schema },
+    );
 
     super({
+      adapter,
       ...Utils.getPrismaTimeout(),
       log: [
         { level: 'query', emit: 'event' },
@@ -206,12 +252,6 @@ export class PrismaService
         { level: 'warn', emit: 'event' },
         { level: 'error', emit: 'event' },
       ],
-      // Set connection pool configuration
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL,
-        },
-      },
     });
 
     this.logger = LoggerService.forRoot('PrismaService');
