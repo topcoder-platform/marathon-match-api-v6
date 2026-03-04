@@ -28,7 +28,7 @@ For local smoke tests without Kafka/pg-boss dependencies:
 export DISABLE_KAFKA=true
 export DISABLE_PG_BOSS=true
 export MVN_BINARY="/path/to/mvn"   # required if `mvn` is not on PATH
-export COMPILATION_TMP_DIR="/dev/shm"  # recommended for read-only containers (memory-backed tmpfs)
+export COMPILATION_TMP_DIR="/app/tmp"  # optional; must be writable and executable (not mounted with `noexec`)
 ```
 
 If this service is being killed with exit code `137` in dev, cap compile-worker memory/concurrency:

@@ -280,9 +280,8 @@ export class TesterCompilationService {
    * Candidate order:
    * 1) `COMPILATION_TMP_DIR`
    * 2) `TMPDIR`
-   * 3) `/dev/shm` (Linux memory-backed tmpfs)
-   * 4) `os.tmpdir()`
-   * 5) `<process.cwd()>/tmp`
+   * 3) `os.tmpdir()`
+   * 4) `<process.cwd()>/tmp`
    *
    * @returns Absolute writable directory path.
    * @throws Error When none of the candidates can be created or written.
@@ -290,19 +289,12 @@ export class TesterCompilationService {
   private async resolveWritableTempRoot(): Promise<string> {
     const configuredTmpDir = process.env.COMPILATION_TMP_DIR?.trim();
     const envTmpDir = process.env.TMPDIR?.trim();
-    const linuxRamTmpfsDir = process.platform === 'linux' ? '/dev/shm' : null;
     const fallbackTmpDir = path.resolve(process.cwd(), 'tmp');
 
     const candidates = Array.from(
       new Set(
-        [
-          configuredTmpDir,
-          envTmpDir,
-          linuxRamTmpfsDir,
-          os.tmpdir(),
-          fallbackTmpDir,
-        ].filter((value): value is string =>
-          Boolean(value && value.length > 0),
+        [configuredTmpDir, envTmpDir, os.tmpdir(), fallbackTmpDir].filter(
+          (value): value is string => Boolean(value && value.length > 0),
         ),
       ),
     );
@@ -343,12 +335,55 @@ export class TesterCompilationService {
       candidate,
       `.mm-compile-probe-${process.pid}-${Date.now()}`,
     );
+    const execProbeScript = `${probeFile}.sh`;
 
     try {
       await fs.writeFile(probeFile, 'ok', 'utf8');
+      await fs.writeFile(execProbeScript, '#!/bin/sh\nexit 0\n', {
+        mode: 0o755,
+      });
+      await this.verifyDirectoryExecSupport(execProbeScript);
     } finally {
       await fs.rm(probeFile, { force: true }).catch(() => undefined);
+      await fs.rm(execProbeScript, { force: true }).catch(() => undefined);
     }
+  }
+
+  /**
+   * Executes a small probe script to verify the candidate filesystem is not mounted `noexec`.
+   * @param scriptPath Absolute path to the probe script.
+   * @returns Promise that resolves when script execution succeeds.
+   * @throws Error When the script cannot execute on the candidate filesystem.
+   */
+  private async verifyDirectoryExecSupport(scriptPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(scriptPath, [], { env: process.env });
+      let stderr = '';
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('error', (error: Error) => {
+        reject(error);
+      });
+
+      child.on('close', (code: number | null) => {
+        if ((code ?? -1) === 0) {
+          resolve();
+          return;
+        }
+
+        const detail = stderr.trim();
+        reject(
+          new Error(
+            detail
+              ? `execution probe failed with code ${code}: ${detail}`
+              : `execution probe failed with code ${code}`,
+          ),
+        );
+      });
+    });
   }
 
   /**
@@ -444,6 +479,7 @@ export class TesterCompilationService {
         this.compileMavenOpts,
         `-Djava.io.tmpdir=${compileTempDir}`,
         `-Djansi.tmpdir=${compileTempDir}`,
+        '-Djansi.mode=off',
       ]
         .join(' ')
         .trim();
@@ -452,6 +488,7 @@ export class TesterCompilationService {
         TMPDIR: compileTempDir,
         TMP: compileTempDir,
         TEMP: compileTempDir,
+        JANSI_MODE: 'off',
         JANSI_TMPDIR: compileTempDir,
         MAVEN_OPTS: mavenOptsWithTmpDir,
       };
