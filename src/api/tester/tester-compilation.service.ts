@@ -152,7 +152,7 @@ export class TesterCompilationService {
       await this.writeTesterSource(tempDir, testerRecord);
 
       const pomPath = path.join(tempDir, 'pom.xml');
-      const compileResult = await this.executeMavenBuild(pomPath);
+      const compileResult = await this.executeMavenBuild(pomPath, tempDir);
 
       if (!compileResult.timedOut && compileResult.exitCode === 0) {
         const jarBytes = await this.readCompiledJar(tempDir);
@@ -432,15 +432,28 @@ export class TesterCompilationService {
   /**
    * Runs Maven package for the prepared boilerplate project and captures stderr.
    * @param pomPath Absolute path to the temporary `pom.xml` file.
+   * @param compileTempDir Writable temp directory used for Maven/JVM temp files.
    * @returns Compile result including exit code, stderr and timeout state.
    */
   private async executeMavenBuild(
     pomPath: string,
+    compileTempDir: string,
   ): Promise<MavenCompileResult> {
     return await new Promise<MavenCompileResult>((resolve) => {
+      const mavenOptsWithTmpDir = [
+        this.compileMavenOpts,
+        `-Djava.io.tmpdir=${compileTempDir}`,
+        `-Djansi.tmpdir=${compileTempDir}`,
+      ]
+        .join(' ')
+        .trim();
       const compileEnv = {
         ...process.env,
-        MAVEN_OPTS: this.compileMavenOpts,
+        TMPDIR: compileTempDir,
+        TMP: compileTempDir,
+        TEMP: compileTempDir,
+        JANSI_TMPDIR: compileTempDir,
+        MAVEN_OPTS: mavenOptsWithTmpDir,
       };
 
       const child = spawn(
