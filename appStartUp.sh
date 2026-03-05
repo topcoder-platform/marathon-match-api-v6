@@ -24,4 +24,4 @@ else
 fi
 
 # Start the app
-pnpm start:prod
+exec node dist/src/main
