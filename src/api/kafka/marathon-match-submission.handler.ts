@@ -7,7 +7,11 @@ import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
 import { EcsService } from 'src/shared/modules/global/ecs.service';
 import { BaseEventHandler } from 'src/shared/modules/kafka/base-event.handler';
-import { MarathonMatchSubmissionEventPayload } from 'src/shared/modules/kafka/handlers/marathon-match-submission.handler';
+import {
+  MarathonMatchSubmissionEventEnvelope,
+  MarathonMatchSubmissionEventPayload,
+  MarathonMatchSubmissionKafkaMessage,
+} from 'src/shared/modules/kafka/handlers/marathon-match-submission.handler';
 import { KafkaHandlerRegistry } from 'src/shared/modules/kafka/kafka-handler.registry';
 
 interface ChallengePhaseResponse {
@@ -76,12 +80,13 @@ export class MarathonMatchSubmissionHandler
 
   /**
    * Processes a marathon match submission message.
-   * @param message Kafka payload parsed from the message body.
+   * @param message Kafka message parsed from the body. Supports both event-bus
+   * envelope (`{ topic, payload }`) and direct payload publish formats.
    * @returns Resolves when the message is fully handled.
    * @throws Error When required fields are missing, config is missing, challenge API
    * lookup fails, tester compilation is not successful, or ECS task launch fails.
    */
-  async handle(message: MarathonMatchSubmissionEventPayload): Promise<void> {
+  async handle(message: MarathonMatchSubmissionKafkaMessage): Promise<void> {
     try {
       this.logger.log({
         message: 'Processing marathon match submission event',
@@ -94,7 +99,9 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const { submissionId, challengeId } = message;
+      const submissionPayload = this.resolveSubmissionPayload(message);
+      const submissionId = (submissionPayload.submissionId ?? '').trim();
+      const challengeId = (submissionPayload.challengeId ?? '').trim();
       if (!submissionId || !challengeId) {
         throw new Error(
           'Missing required message fields: submissionId and challengeId are required.',
@@ -102,7 +109,7 @@ export class MarathonMatchSubmissionHandler
       }
 
       const config = await this.prisma.marathonMatchConfig.findUnique({
-        where: { id: challengeId },
+        where: { challengeId },
         include: { phaseConfigs: true, tester: true },
       });
 
@@ -148,7 +155,7 @@ export class MarathonMatchSubmissionHandler
       }
 
       const taskArn = await this.ecsService.launchScorerTask(
-        config.id,
+        config.challengeId,
         submissionId,
         {
           taskDefinitionName: config.taskDefinitionName,
@@ -316,5 +323,41 @@ export class MarathonMatchSubmissionHandler
     }
 
     return responseBody;
+  }
+
+  /**
+   * Normalizes marathon match Kafka messages to direct submission payload.
+   * @param message Raw parsed Kafka message.
+   * @returns Submission payload consumed by scorer orchestration logic.
+   */
+  private resolveSubmissionPayload(
+    message: MarathonMatchSubmissionKafkaMessage,
+  ): MarathonMatchSubmissionEventPayload {
+    if (this.isEventEnvelope(message)) {
+      const emptyPayload: MarathonMatchSubmissionEventPayload = {
+        submissionId: '',
+        challengeId: '',
+        submissionUrl: '',
+        memberHandle: '',
+        memberId: '',
+        submittedDate: '',
+      };
+      return message.payload ?? emptyPayload;
+    }
+
+    return message;
+  }
+
+  /**
+   * Detects event-bus envelopes that wrap submission data in `payload`.
+   * @param message Parsed Kafka message.
+   * @returns True when the message has an envelope structure.
+   */
+  private isEventEnvelope(
+    message: MarathonMatchSubmissionKafkaMessage,
+  ): message is MarathonMatchSubmissionEventEnvelope {
+    return (
+      typeof message === 'object' && message !== null && 'payload' in message
+    );
   }
 }

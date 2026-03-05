@@ -99,7 +99,7 @@ The service is configured via environment variables.
 
 These are required by `ecs-runner` and are passed in container overrides when a task is launched:
 
-- `TESTER_CONFIG_ID`
+- `TESTER_CONFIG_ID` (contains the challenge ID used by `/challenge/:challengeId` endpoints)
 - `SUBMISSION_ID`
 - `ACCESS_TOKEN`
 - `MARATHON_MATCH_API_URL`
@@ -209,6 +209,11 @@ Create config on the challenge id (`POST /challenge/:challengeId`) and include a
   - `startSeed`
   - `numberOfTests`
 
+Config identity semantics:
+
+- `id` is an internal nano-id for the marathon match config record.
+- `challengeId` stores the challenge identifier and is used for `/challenge/:challengeId` CRUD endpoints.
+
 Important runtime behavior:
 
 - Incoming submission events are only processed when config is `active = true`.
@@ -261,7 +266,7 @@ sequenceDiagram
   participant SA as Submission API
   participant RA as review-api-v6
 
-  K->>C: Submission event (submissionId, challengeId, ...)
+  K->>C: Submission event envelope ({topic, payload{submissionId, challengeId, ...}})
   C->>H: handle(payload)
   H->>DB: Load marathonMatchConfig + tester + phaseConfigs
 

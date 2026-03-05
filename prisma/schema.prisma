@@ -46,7 +46,8 @@ model tester {
 }
 
 model marathonMatchConfig {
-  id                    String        @id @db.VarChar(36)
+  id                    String        @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
+  challengeId           String        @unique @db.VarChar(36)
   name                  String
   active                Boolean       @default(true)
   submissionApiUrl      String        @default("https://api.topcoder-dev.com/v6")
@@ -63,7 +64,6 @@ model marathonMatchConfig {
   tester                tester        @relation(fields: [testerId], references: [id])
   phaseConfigs          phaseConfig[]
 
-  @@index([id])
   @@index([testerId])
   @@index([active])
   @@schema("marathon_match")
@@ -71,7 +71,7 @@ model marathonMatchConfig {
 
 model phaseConfig {
   id                    String              @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
-  marathonMatchConfigId String              @db.VarChar(36)
+  marathonMatchConfigId String              @db.VarChar(14)
   configType            PhaseConfigType
   startSeed             Int
   numberOfTests         Int

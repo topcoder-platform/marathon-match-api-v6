@@ -82,10 +82,12 @@ export class MarathonMatchConfigService {
       this.validateSafeStartSeeds(challengeId, phaseConfigs);
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
+      const configId = nanoid(14);
       await this.prisma.$transaction(async (prisma) => {
         await prisma.marathonMatchConfig.create({
           data: {
-            id: challengeId,
+            id: configId,
+            challengeId,
             name: body.name,
             active: body.active,
             submissionApiUrl: body.submissionApiUrl,
@@ -108,7 +110,7 @@ export class MarathonMatchConfigService {
           await prisma.phaseConfig.create({
             data: {
               id: nanoid(14),
-              marathonMatchConfigId: challengeId,
+              marathonMatchConfigId: configId,
               configType,
               startSeed: phase.startSeed,
               numberOfTests: phase.numberOfTests,
@@ -163,7 +165,7 @@ export class MarathonMatchConfigService {
   ): Promise<MarathonMatchConfigResponseDto> {
     try {
       const existing = await this.prisma.marathonMatchConfig.findUnique({
-        where: { id: challengeId },
+        where: { challengeId },
       });
 
       if (!existing) {
@@ -198,7 +200,7 @@ export class MarathonMatchConfigService {
 
       await this.prisma.$transaction(async (prisma) => {
         await prisma.marathonMatchConfig.update({
-          where: { id: challengeId },
+          where: { challengeId },
           data: {
             ...scalarFields,
             updatedBy: actor,
@@ -213,7 +215,7 @@ export class MarathonMatchConfigService {
           await prisma.phaseConfig.upsert({
             where: {
               marathonMatchConfigId_configType: {
-                marathonMatchConfigId: challengeId,
+                marathonMatchConfigId: existing.id,
                 configType,
               },
             },
@@ -224,7 +226,7 @@ export class MarathonMatchConfigService {
             },
             create: {
               id: nanoid(14),
-              marathonMatchConfigId: challengeId,
+              marathonMatchConfigId: existing.id,
               configType,
               startSeed: phase.startSeed,
               numberOfTests: phase.numberOfTests,
@@ -309,7 +311,7 @@ export class MarathonMatchConfigService {
   async getTesterJar(challengeId: string): Promise<Buffer> {
     try {
       const config = await this.prisma.marathonMatchConfig.findUnique({
-        where: { id: challengeId },
+        where: { challengeId },
         include: {
           tester: true,
         },
@@ -362,7 +364,7 @@ export class MarathonMatchConfigService {
   ): Promise<{ message: string }> {
     try {
       await this.prisma.marathonMatchConfig.delete({
-        where: { id: challengeId },
+        where: { challengeId },
       });
 
       return {
@@ -446,14 +448,14 @@ export class MarathonMatchConfigService {
 
   /**
    * Loads a marathon match config with all associated phase configs.
-   * @param id Challenge ID for the config.
+   * @param challengeId Challenge ID for the config.
    * @returns Config record with related phase configs, or null when missing.
    */
   private async fetchConfig(
-    id: string,
+    challengeId: string,
   ): Promise<MarathonMatchConfigWithPhaseConfigs | null> {
     return await this.prisma.marathonMatchConfig.findUnique({
-      where: { id },
+      where: { challengeId },
       include: {
         phaseConfigs: true,
       },
@@ -479,6 +481,7 @@ export class MarathonMatchConfigService {
 
     return {
       id: config.id,
+      challengeId: config.challengeId,
       name: config.name,
       active: config.active,
       submissionApiUrl: config.submissionApiUrl,
@@ -508,7 +511,6 @@ export class MarathonMatchConfigService {
   ): PhaseConfigResponseDto {
     return {
       id: phaseConfigData.id,
-      marathonMatchConfigId: phaseConfigData.marathonMatchConfigId,
       configType: phaseConfigData.configType,
       startSeed: phaseConfigData.startSeed,
       numberOfTests: phaseConfigData.numberOfTests,

@@ -302,12 +302,6 @@ export class PhaseConfigResponseDto extends PhaseConfigDto {
   id: string;
 
   @ApiProperty({
-    description: 'Parent marathon match configuration ID',
-    example: '30000123',
-  })
-  marathonMatchConfigId: string;
-
-  @ApiProperty({
     description: 'Creation timestamp',
     example: '2026-01-01T00:00:00.000Z',
   })
@@ -326,10 +320,16 @@ export class PhaseConfigResponseDto extends PhaseConfigDto {
  */
 export class MarathonMatchConfigResponseDto {
   @ApiProperty({
+    description: 'Unique marathon match configuration ID',
+    example: 'V1StGXR8_Z5jdH',
+  })
+  id: string;
+
+  @ApiProperty({
     description: 'Challenge ID',
     example: '30000123',
   })
-  id: string;
+  challengeId: string;
 
   @ApiProperty({
     description: 'Display name of the marathon match configuration',

@@ -37,7 +37,7 @@ export class EcsService {
 
   /**
    * Launches a scorer task in ECS Fargate for a marathon match submission.
-   * @param testerConfigId ID of the marathonMatchConfig record passed to the ECS container.
+   * @param challengeId Challenge ID used by the ECS runner to load config endpoints.
    * @param submissionId Submission ID passed to the ECS container.
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
@@ -47,7 +47,7 @@ export class EcsService {
    * @throws Error when required ENV vars are missing, token fetch fails, or ECS launch fails.
    */
   async launchScorerTask(
-    testerConfigId: string,
+    challengeId: string,
     submissionId: string,
     mmConfig: MarathonMatchTaskConfig,
     scoringPhase: MarathonMatchScoringPhase,
@@ -105,7 +105,7 @@ export class EcsService {
               {
                 name: containerName,
                 environment: [
-                  { name: 'TESTER_CONFIG_ID', value: testerConfigId },
+                  { name: 'TESTER_CONFIG_ID', value: challengeId },
                   { name: 'SUBMISSION_ID', value: submissionId },
                   { name: 'ACCESS_TOKEN', value: token },
                   {
@@ -154,7 +154,7 @@ export class EcsService {
 
       this.logger.log({
         message: 'Launched ECS scorer task',
-        testerConfigId,
+        challengeId,
         submissionId,
         taskDefinition,
         cluster,

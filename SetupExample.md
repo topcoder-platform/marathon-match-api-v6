@@ -230,7 +230,7 @@ Trigger options:
 export SUBMISSION_ID="<submission_id_for_challenge>"
 export KAFKA_BROKERS="<broker1:9092,broker2:9092>"
 
-echo "{\"submissionId\":\"$SUBMISSION_ID\",\"challengeId\":\"$CHALLENGE_ID\",\"submissionUrl\":\"\",\"memberHandle\":\"dev-user\",\"memberId\":\"123456\",\"submittedDate\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}" \
+echo "{\"mime-type\":\"application/json\",\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",\"topic\":\"marathonmatch.submission.received\",\"originator\":\"manual-test\",\"payload\":{\"submissionId\":\"$SUBMISSION_ID\",\"challengeId\":\"$CHALLENGE_ID\",\"submissionUrl\":\"\",\"memberHandle\":\"dev-user\",\"memberId\":\"123456\",\"submittedDate\":\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}}" \
   | kcat -P -b "$KAFKA_BROKERS" -t marathonmatch.submission.received
 ```
 

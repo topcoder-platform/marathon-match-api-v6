@@ -54,7 +54,7 @@ public class EcsRunnerMain {
         Path testerJarPath = null;
 
         try {
-            String testerConfigId = getRequiredEnv("TESTER_CONFIG_ID");
+            String challengeId = getRequiredEnv("TESTER_CONFIG_ID");
             String submissionId = getRequiredEnv("SUBMISSION_ID");
             String accessToken = getRequiredEnv("ACCESS_TOKEN");
             String marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
@@ -68,18 +68,18 @@ public class EcsRunnerMain {
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
                 MarathonMatchConfigResponse config = fetchJson(
                     httpClient,
-                    marathonMatchBaseUrl + "/challenge/" + testerConfigId,
+                    marathonMatchBaseUrl + "/challenge/" + challengeId,
                     accessToken,
                     MarathonMatchConfigResponse.class
                 );
 
                 byte[] testerJarBytes = fetchBinary(
                     httpClient,
-                    marathonMatchBaseUrl + "/challenge/" + testerConfigId + "/tester-jar",
+                    marathonMatchBaseUrl + "/challenge/" + challengeId + "/tester-jar",
                     accessToken
                 );
 
-                testerJarPath = writeTesterJar(testerConfigId, testerJarBytes);
+                testerJarPath = writeTesterJar(challengeId, testerJarBytes);
 
                 TesterResponse tester = fetchJson(
                     httpClient,
@@ -672,7 +672,7 @@ public class EcsRunnerMain {
         int phaseNumberOfTests
     ) {
         ScorerConfig scorerConfig = new ScorerConfig();
-        scorerConfig.setName(config.getId());
+        scorerConfig.setName(config.getChallengeIdOrId());
         scorerConfig.setTesterClass(tester.getClassName());
         scorerConfig.setScoreCardId(config.getReviewScorecardId());
         scorerConfig.setReviewerId(UUID.randomUUID().toString());
@@ -930,6 +930,9 @@ public class EcsRunnerMain {
         @JsonProperty("id")
         private String id;
 
+        @JsonProperty("challengeId")
+        private String challengeId;
+
         @JsonProperty("submissionApiUrl")
         private String submissionApiUrl;
 
@@ -947,6 +950,13 @@ public class EcsRunnerMain {
 
         public String getId() {
             return id;
+        }
+
+        public String getChallengeIdOrId() {
+            if (challengeId == null || challengeId.trim().isEmpty()) {
+                return id;
+            }
+            return challengeId;
         }
 
         public String getSubmissionApiUrl() {
