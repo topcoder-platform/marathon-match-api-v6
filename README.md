@@ -298,5 +298,5 @@ sequenceDiagram
   end
 
   C->>C: Commit offset on success/skip
-  Note over C: On failures, retries with exponential backoff; if DLQ is enabled and retries are exhausted, publish to topic.dlq and commit.
+  Note over C: On failures retries with exponential backoff. If DLQ is enabled and retries are exhausted, publish to topic.dlq and commit.
 ```
