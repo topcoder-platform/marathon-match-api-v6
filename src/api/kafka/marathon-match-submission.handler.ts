@@ -126,24 +126,25 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const activePhaseId = await this.getActivePhaseId(challengeId);
-      if (!activePhaseId) {
+      const openPhaseIds = await this.getOpenPhaseIds(challengeId);
+      if (openPhaseIds.length === 0) {
         this.logger.log(
-          `Challenge ${challengeId} has no active phase. Skipping submission ${submissionId}.`,
+          `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
         );
         return;
       }
 
-      const matchingPhaseConfig = config.phaseConfigs.find(
-        (phaseConfig) => phaseConfig.phaseId === activePhaseId,
+      const matchingPhaseConfig = this.findMatchingPhaseConfig(
+        config.phaseConfigs,
+        openPhaseIds,
       );
       if (!matchingPhaseConfig) {
         this.logger.log({
           message:
-            'No configured marathon match phase for active challenge phase',
+            'No configured marathon match phase for open challenge phases',
           challengeId,
           submissionId,
-          activePhaseId,
+          openPhaseIds,
         });
         return;
       }
@@ -172,7 +173,8 @@ export class MarathonMatchSubmissionHandler
         message: 'Marathon match submission event processed successfully',
         challengeId,
         submissionId,
-        activePhaseId,
+        openPhaseIds,
+        matchedPhaseId: matchingPhaseConfig.phaseId,
         matchedPhaseConfigId: matchingPhaseConfig.id,
         taskArn,
       });
@@ -192,12 +194,12 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Calls challenge-api-v6 and returns the ID of the active phase.
+   * Calls challenge-api-v6 and returns currently open phase IDs.
    * @param challengeId Challenge identifier to fetch.
-   * @returns Active phase ID or null when not present.
+   * @returns Ordered open phase IDs. Falls back to currentPhase when needed.
    * @throws Error When token retrieval or HTTP request fails.
    */
-  private async getActivePhaseId(challengeId: string): Promise<string | null> {
+  private async getOpenPhaseIds(challengeId: string): Promise<string[]> {
     const token = await this.m2mService.getM2MToken();
     if (!token) {
       throw new Error('Unable to get M2M token for challenge API call.');
@@ -212,68 +214,83 @@ export class MarathonMatchSubmissionHandler
       }),
     );
 
-    return this.extractActivePhaseId(response.data);
+    return this.extractOpenPhaseIds(response.data);
   }
 
   /**
-   * Extracts active phase ID from challenge-api response payload.
+   * Extracts ordered open phase IDs from challenge-api response payload.
    * @param responseBody HTTP response body from challenge-api.
-   * @returns Active phase ID when found, otherwise null.
+   * @returns Ordered open phase IDs, or a currentPhase fallback ID.
    */
-  private extractActivePhaseId(responseBody: ChallengeResponse): string | null {
+  private extractOpenPhaseIds(responseBody: ChallengeResponse): string[] {
     const challengeData = this.resolveChallengePayload(responseBody);
-    if (challengeData.currentPhase) {
-      const currentPhaseId = this.extractPhaseId(challengeData.currentPhase);
-      if (currentPhaseId) {
-        return currentPhaseId;
-      }
+    const openPhaseIds = this.resolveOpenPhaseIds(challengeData.phases);
+    if (openPhaseIds.length > 0) {
+      return openPhaseIds;
     }
 
-    const activePhase = this.resolveLatestStartedOpenPhase(
-      challengeData.phases,
-    );
-    return this.extractPhaseId(activePhase);
+    const currentPhaseId = this.extractPhaseId(challengeData.currentPhase);
+    return currentPhaseId ? [currentPhaseId] : [];
   }
 
   /**
-   * Selects the latest-started open phase using actual/scheduled start timestamps.
+   * Resolves open phase IDs ordered by latest start, then timeline order.
    * @param phases Challenge phases.
-   * @returns Latest-started open phase or null when no open phase exists.
+   * @returns Ordered open phase IDs.
    */
-  private resolveLatestStartedOpenPhase(
-    phases?: ChallengePhaseResponse[],
-  ): ChallengePhaseResponse | null {
+  private resolveOpenPhaseIds(phases?: ChallengePhaseResponse[]): string[] {
     if (!Array.isArray(phases) || phases.length === 0) {
-      return null;
+      return [];
     }
 
-    const openPhases = phases.filter((phase) => phase?.isOpen === true);
+    const openPhases = phases
+      .map((phase, index) => ({ phase, index }))
+      .filter(({ phase }) => phase?.isOpen === true);
     if (openPhases.length === 0) {
-      return null;
+      return [];
     }
 
-    return openPhases.reduce((latestOpenPhase, phase) => {
-      const latestStartTimestamp = this.toTimestamp(
-        latestOpenPhase.actualStartDate ?? latestOpenPhase.scheduledStartDate,
-      );
-      const phaseStartTimestamp = this.toTimestamp(
-        phase.actualStartDate ?? phase.scheduledStartDate,
-      );
+    const orderedPhaseIds = openPhases
+      .sort((left, right) => {
+        const leftStartTimestamp = this.toTimestamp(
+          left.phase.actualStartDate ?? left.phase.scheduledStartDate,
+        );
+        const rightStartTimestamp = this.toTimestamp(
+          right.phase.actualStartDate ?? right.phase.scheduledStartDate,
+        );
 
-      if (phaseStartTimestamp > latestStartTimestamp) {
-        return phase;
-      }
-
-      if (phaseStartTimestamp === latestStartTimestamp) {
-        const latestPhaseId = this.extractPhaseId(latestOpenPhase) ?? '';
-        const phaseId = this.extractPhaseId(phase) ?? '';
-        if (phaseId > latestPhaseId) {
-          return phase;
+        if (leftStartTimestamp !== rightStartTimestamp) {
+          return rightStartTimestamp - leftStartTimestamp;
         }
-      }
 
-      return latestOpenPhase;
-    });
+        return right.index - left.index;
+      })
+      .map(({ phase }) => this.extractPhaseId(phase))
+      .filter((phaseId): phaseId is string => Boolean(phaseId));
+
+    return [...new Set(orderedPhaseIds)];
+  }
+
+  /**
+   * Finds a configured phase mapping for the highest-priority open challenge phase.
+   * @param phaseConfigs Stored phase configuration rows for a challenge.
+   * @param openPhaseIds Open challenge phase IDs ordered by priority.
+   * @returns Matching phase config or null when no mapping exists.
+   */
+  private findMatchingPhaseConfig<TPhaseConfig extends { phaseId: string }>(
+    phaseConfigs: TPhaseConfig[],
+    openPhaseIds: string[],
+  ): TPhaseConfig | null {
+    for (const openPhaseId of openPhaseIds) {
+      const matchingPhaseConfig = phaseConfigs.find(
+        (phaseConfig) => phaseConfig.phaseId === openPhaseId,
+      );
+      if (matchingPhaseConfig) {
+        return matchingPhaseConfig;
+      }
+    }
+
+    return null;
   }
 
   /**

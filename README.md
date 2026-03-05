@@ -217,7 +217,7 @@ Config identity semantics:
 Important runtime behavior:
 
 - Incoming submission events are only processed when config is `active = true`.
-- The handler resolves the challenge’s active phase from challenge-api and requires a matching `phaseConfig.phaseId`.
+- The handler resolves currently open challenge phases from challenge-api (`phases[].isOpen = true`) and requires a matching `phaseConfig.phaseId`.
 - If no matching phase config exists, the submission is skipped.
 
 ### 4. Ensure scorer infrastructure is configured
@@ -276,7 +276,7 @@ sequenceDiagram
     H->>CA: GET /v6/challenges/:challengeId (M2M token)
     CA-->>H: current/open phases
 
-    alt No active phase or no mapped phaseId
+    alt No open phases or no mapped phaseId
       H-->>C: Skip message
     else Phase is mapped
       alt Tester compilationStatus != SUCCESS
