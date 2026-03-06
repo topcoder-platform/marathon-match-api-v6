@@ -86,6 +86,26 @@ export class EcsService {
     }
 
     const taskDefinition = `${taskDefinitionName}:${taskDefinitionVersion}`;
+    const runnerEnvironment = [
+      { name: 'TESTER_CONFIG_ID', value: challengeId },
+      { name: 'SUBMISSION_ID', value: submissionId },
+      { name: 'ACCESS_TOKEN', value: token },
+      { name: 'MARATHON_MATCH_API_URL', value: marathonMatchApiUrl },
+      { name: 'REVIEW_TYPE_ID', value: reviewTypeId },
+      { name: 'TEST_PHASE', value: testPhase },
+      { name: 'PHASE_CONFIG_TYPE', value: scoringPhase.configType },
+      { name: 'PHASE_START_SEED', value: String(scoringPhase.startSeed) },
+      {
+        name: 'PHASE_NUMBER_OF_TESTS',
+        value: String(scoringPhase.numberOfTests),
+      },
+    ];
+
+    this.appendOptionalEnvOverride(runnerEnvironment, 'DEBUG_LOG_ACCESS_TOKEN');
+    this.appendOptionalEnvOverride(
+      runnerEnvironment,
+      'DEBUG_LOG_FULL_ACCESS_TOKEN',
+    );
 
     try {
       const response = await this.ecsClient.send(
@@ -104,35 +124,7 @@ export class EcsService {
             containerOverrides: [
               {
                 name: containerName,
-                environment: [
-                  { name: 'TESTER_CONFIG_ID', value: challengeId },
-                  { name: 'SUBMISSION_ID', value: submissionId },
-                  { name: 'ACCESS_TOKEN', value: token },
-                  {
-                    name: 'MARATHON_MATCH_API_URL',
-                    value: marathonMatchApiUrl,
-                  },
-                  {
-                    name: 'REVIEW_TYPE_ID',
-                    value: reviewTypeId,
-                  },
-                  {
-                    name: 'TEST_PHASE',
-                    value: testPhase,
-                  },
-                  {
-                    name: 'PHASE_CONFIG_TYPE',
-                    value: scoringPhase.configType,
-                  },
-                  {
-                    name: 'PHASE_START_SEED',
-                    value: String(scoringPhase.startSeed),
-                  },
-                  {
-                    name: 'PHASE_NUMBER_OF_TESTS',
-                    value: String(scoringPhase.numberOfTests),
-                  },
-                ],
+                environment: runnerEnvironment,
               },
             ],
           },
@@ -255,6 +247,22 @@ export class EcsService {
     }
 
     return values;
+  }
+
+  /**
+   * Adds a process env var to ECS container overrides only when set.
+   * @param environment Mutable ECS env override list.
+   * @param envName Environment variable to pass through.
+   */
+  private appendOptionalEnvOverride(
+    environment: Array<{ name: string; value: string }>,
+    envName: string,
+  ): void {
+    const value = process.env[envName]?.trim();
+    if (!value) {
+      return;
+    }
+    environment.push({ name: envName, value });
   }
 
   private mapConfigTypeToTestPhase(configType: string): string {

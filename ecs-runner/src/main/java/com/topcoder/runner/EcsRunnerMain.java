@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +58,8 @@ public class EcsRunnerMain {
             String challengeId = getRequiredEnv("TESTER_CONFIG_ID");
             String submissionId = getRequiredEnv("SUBMISSION_ID");
             String accessToken = getRequiredEnv("ACCESS_TOKEN");
+            boolean debugLogAccessToken = isTruthyEnv("DEBUG_LOG_ACCESS_TOKEN");
+            boolean debugLogFullAccessToken = isTruthyEnv("DEBUG_LOG_FULL_ACCESS_TOKEN");
             String marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
@@ -64,6 +67,10 @@ public class EcsRunnerMain {
             String testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
             int phaseStartSeed = getOptionalIntEnv("PHASE_START_SEED", 0);
             int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
+
+            if (debugLogAccessToken) {
+                logAccessTokenDebug(accessToken, debugLogFullAccessToken);
+            }
 
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
                 MarathonMatchConfigResponse config = fetchJson(
@@ -195,6 +202,112 @@ public class EcsRunnerMain {
                     + value
             );
         }
+    }
+
+    /**
+     * Parses boolean-like environment values.
+     * @param variableName Environment variable name.
+     * @returns True for "1", "true", "yes", or "on" (case-insensitive), otherwise false.
+     */
+    private static boolean isTruthyEnv(String variableName) {
+        String value = getOptionalEnv(variableName, "false");
+        String normalized = value.trim().toLowerCase();
+        return "1".equals(normalized)
+            || "true".equals(normalized)
+            || "yes".equals(normalized)
+            || "on".equals(normalized);
+    }
+
+    /**
+     * Emits token debugging information for auth troubleshooting.
+     * @param accessToken Access token provided to the ECS runner.
+     * @param logFullToken Whether to print the full token value.
+     */
+    private static void logAccessTokenDebug(String accessToken, boolean logFullToken) {
+        System.out.println("[DEBUG] ACCESS_TOKEN length: " + accessToken.length());
+        System.out.println(
+            "[DEBUG] ACCESS_TOKEN value: "
+                + (logFullToken ? accessToken : redactToken(accessToken))
+        );
+
+        String headerJson = decodeJwtSection(accessToken, 0);
+        if (headerJson != null) {
+            System.out.println("[DEBUG] ACCESS_TOKEN header: " + headerJson);
+        } else {
+            System.out.println("[DEBUG] ACCESS_TOKEN header: <unavailable>");
+        }
+
+        String payloadJson = decodeJwtSection(accessToken, 1);
+        if (payloadJson != null) {
+            System.out.println("[DEBUG] ACCESS_TOKEN payload: " + payloadJson);
+        } else {
+            System.out.println("[DEBUG] ACCESS_TOKEN payload: <unavailable>");
+        }
+    }
+
+    /**
+     * Produces a partially redacted token string suitable for logs.
+     * @param token Raw token value.
+     * @returns Token preview with middle characters masked.
+     */
+    private static String redactToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return "<empty>";
+        }
+
+        if (token.length() <= 24) {
+            return "<redacted-length-" + token.length() + ">";
+        }
+
+        return token.substring(0, 12) + "..." + token.substring(token.length() - 8);
+    }
+
+    /**
+     * Decodes a JWT section without signature verification.
+     * @param token Raw JWT token.
+     * @param sectionIndex Section index (0=header, 1=payload).
+     * @returns Decoded JSON string or null when token format is invalid.
+     */
+    private static String decodeJwtSection(String token, int sectionIndex) {
+        if (token == null) {
+            return null;
+        }
+
+        String[] parts = token.split("\\.");
+        if (parts.length <= sectionIndex) {
+            return null;
+        }
+
+        String section = parts[sectionIndex];
+        if (section == null || section.isEmpty()) {
+            return null;
+        }
+
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(padBase64Url(section));
+            return new String(decoded, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException error) {
+            return null;
+        }
+    }
+
+    /**
+     * Adds missing base64url padding when needed.
+     * @param encodedValue Raw base64url string.
+     * @returns Padded base64url string.
+     */
+    private static String padBase64Url(String encodedValue) {
+        int mod = encodedValue.length() % 4;
+        if (mod == 0) {
+            return encodedValue;
+        }
+        if (mod == 2) {
+            return encodedValue + "==";
+        }
+        if (mod == 3) {
+            return encodedValue + "=";
+        }
+        return encodedValue + "===";
     }
 
     /**

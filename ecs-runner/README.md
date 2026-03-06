@@ -80,6 +80,8 @@ Set these in the API service environment:
 - `AWS_REGION`
 - `MARATHON_MATCH_API_URL`
 - `REVIEW_TYPE_ID`
+- `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
+- `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
 
 ### 3. Update challenge config to use that task definition revision
 

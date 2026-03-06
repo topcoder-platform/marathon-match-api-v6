@@ -94,6 +94,8 @@ The service is configured via environment variables.
 | `MARATHON_MATCH_API_URL` | Yes (for scoring) | None | Base URL passed to ECS runner |
 | `REVIEW_API_URL` | Yes (for scoring) | None | Review API base URL used by NestJS scoring callback processor |
 | `REVIEW_TYPE_ID` | Yes (for scoring) | None | Review type ID passed to ECS runner callback payload |
+| `DEBUG_LOG_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
+| `DEBUG_LOG_FULL_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true` |
 
 ### ECS runner task environment (injected at launch)
 
@@ -108,6 +110,11 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 - `PHASE_CONFIG_TYPE`
 - `PHASE_START_SEED`
 - `PHASE_NUMBER_OF_TESTS`
+
+Optional debug vars (set on API service env to be forwarded to runner):
+
+- `DEBUG_LOG_ACCESS_TOKEN`
+- `DEBUG_LOG_FULL_ACCESS_TOKEN` (prints full bearer token; use only for short-lived debugging)
 
 ## Exit code 137 (OOM) mitigation
 
