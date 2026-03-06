@@ -7,6 +7,10 @@ This image is the runtime container for marathon match scoring tasks launched by
 - Java 8 runtime (`eclipse-temurin:8-jre-jammy`)
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
+- C++ toolchain support for tester-side submission compilation (`g++`)
+- Python runtime support for tester-side submission execution (`python3`)
+- C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
+- C# (.NET 7) SDK support for tester-side submission compilation (`dotnet publish`)
 - non-root runtime user (`runner`)
 
 ## Recommended ECR naming and tags
