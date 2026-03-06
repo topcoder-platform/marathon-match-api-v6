@@ -145,8 +145,8 @@ export class MarathonMatchConfigController {
   /**
    * Streams the compiled tester JAR for a challenge configuration.
    * @param challengeId Challenge ID.
-   * @param res HTTP response used for download headers.
-   * @returns Raw tester JAR bytes.
+   * @param res HTTP response used for download headers and binary payload.
+   * @returns Promise that resolves after writing binary response.
    */
   @Get('/:challengeId/tester-jar')
   @Roles(UserRole.Admin)
@@ -172,12 +172,12 @@ export class MarathonMatchConfigController {
   })
   async getTesterJar(
     @Param('challengeId') challengeId: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<Buffer> {
+    @Res() res: Response,
+  ): Promise<void> {
     const jar = await this.marathonMatchConfigService.getTesterJar(challengeId);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="tester.jar"');
-    return jar;
+    res.send(jar);
   }
 
   /**
