@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import {
   DescribeTasksCommand,
+  DescribeTaskDefinitionCommand,
   ECSClient,
   RunTaskCommand,
   Task,
 } from '@aws-sdk/client-ecs';
+import { PhaseConfigType } from '@prisma/client';
 import { LoggerService } from './logger.service';
 import { M2MService } from './m2m.service';
+import { PrismaService } from './prisma.service';
 
 interface MarathonMatchTaskConfig {
   taskDefinitionName: string;
@@ -19,6 +22,25 @@ export interface MarathonMatchScoringPhase {
   numberOfTests: number;
 }
 
+export interface MarathonMatchScorerTaskLaunchResult {
+  taskArn: string;
+  taskId: string;
+  cluster: string;
+  containerName: string;
+  taskDefinition: string;
+  logGroup?: string;
+  logStreamPrefix?: string;
+  logStreamName?: string;
+  cloudWatchLogsConsoleUrl?: string;
+}
+
+interface PersistSubmissionRunnerLogInput {
+  challengeId: string;
+  submissionId: string;
+  scoringPhase: MarathonMatchScoringPhase;
+  launchResult: MarathonMatchScorerTaskLaunchResult;
+}
+
 /**
  * Wraps AWS ECS Fargate task orchestration for the marathon match scoring
  * pipeline. This service is a globally provided singleton that can be injected
@@ -29,7 +51,10 @@ export class EcsService {
   private readonly logger = LoggerService.forRoot('EcsService');
   private readonly ecsClient: ECSClient;
 
-  constructor(private readonly m2mService: M2MService) {
+  constructor(
+    private readonly m2mService: M2MService,
+    private readonly prisma: PrismaService,
+  ) {
     this.ecsClient = new ECSClient({
       region: process.env.AWS_REGION || 'us-east-1',
     });
@@ -41,7 +66,7 @@ export class EcsService {
    * @param submissionId Submission ID passed to the ECS container.
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
-   * @returns ECS task ARN of the launched Fargate task.
+   * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID.
    * @throws Error when required ENV vars are missing, token fetch fails, or ECS launch fails.
@@ -51,7 +76,7 @@ export class EcsService {
     submissionId: string,
     mmConfig: MarathonMatchTaskConfig,
     scoringPhase: MarathonMatchScoringPhase,
-  ): Promise<string> {
+  ): Promise<MarathonMatchScorerTaskLaunchResult> {
     const cluster = this.getRequiredEnv('ECS_CLUSTER');
     const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
     const subnets = this.getRequiredCsvEnv('ECS_SUBNETS');
@@ -144,6 +169,35 @@ export class EcsService {
         );
       }
 
+      const taskId = this.extractTaskId(taskArn);
+      const logConfiguration = await this.resolveAwsLogsConfiguration(
+        taskDefinition,
+        containerName,
+      );
+      const logGroup = logConfiguration.logGroup;
+      const logStreamPrefix = logConfiguration.logStreamPrefix;
+      const logStreamName = this.buildAwsLogsStreamName(
+        logStreamPrefix,
+        containerName,
+        taskId,
+      );
+      const cloudWatchLogsConsoleUrl = this.buildCloudWatchLogsConsoleUrl(
+        logGroup,
+        logStreamName,
+      );
+
+      const launchResult: MarathonMatchScorerTaskLaunchResult = {
+        taskArn,
+        taskId,
+        cluster,
+        containerName,
+        taskDefinition,
+        logGroup,
+        logStreamPrefix,
+        logStreamName,
+        cloudWatchLogsConsoleUrl,
+      };
+
       this.logger.log({
         message: 'Launched ECS scorer task',
         challengeId,
@@ -151,9 +205,35 @@ export class EcsService {
         taskDefinition,
         cluster,
         taskArn,
+        taskId,
+        logGroup: logGroup ?? null,
+        logStreamPrefix: logStreamPrefix ?? null,
+        logStreamName: logStreamName ?? null,
+        cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
       });
 
-      return taskArn;
+      this.logger.log({
+        message: 'Submission to ECS runner log mapping',
+        submissionId,
+        challengeId,
+        taskArn,
+        taskId,
+        cluster,
+        containerName,
+        logGroup: logGroup ?? null,
+        logStreamPrefix: logStreamPrefix ?? null,
+        logStreamName: logStreamName ?? null,
+        cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
+      });
+
+      await this.persistSubmissionRunnerLogMapping({
+        challengeId,
+        submissionId,
+        scoringPhase,
+        launchResult,
+      });
+
+      return launchResult;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -280,5 +360,186 @@ export class EcsService {
     throw new Error(
       `Unsupported phase config type '${configType}' for ECS runner launch.`,
     );
+  }
+
+  /**
+   * Extracts the task ID suffix from a full ECS task ARN.
+   * @param taskArn ECS task ARN.
+   * @returns Parsed task ID.
+   */
+  private extractTaskId(taskArn: string): string {
+    const arn = taskArn.trim();
+    const slashIndex = arn.lastIndexOf('/');
+    if (slashIndex < 0 || slashIndex + 1 >= arn.length) {
+      return arn;
+    }
+
+    return arn.slice(slashIndex + 1);
+  }
+
+  /**
+   * Attempts to resolve awslogs configuration from task definition container config.
+   * @param taskDefinition ECS task definition name:revision.
+   * @param containerName Container name to inspect.
+   * @returns awslogs group/prefix metadata when configured.
+   */
+  private async resolveAwsLogsConfiguration(
+    taskDefinition: string,
+    containerName: string,
+  ): Promise<{ logGroup?: string; logStreamPrefix?: string }> {
+    try {
+      const response = await this.ecsClient.send(
+        new DescribeTaskDefinitionCommand({
+          taskDefinition,
+        }),
+      );
+
+      const containerDefinition =
+        response.taskDefinition?.containerDefinitions?.find(
+          (definition) => definition.name === containerName,
+        );
+      const awsLogsGroup =
+        containerDefinition?.logConfiguration?.options?.[
+          'awslogs-group'
+        ]?.trim();
+      const awsLogsStreamPrefix =
+        containerDefinition?.logConfiguration?.options?.[
+          'awslogs-stream-prefix'
+        ]?.trim();
+
+      return {
+        logGroup: awsLogsGroup || undefined,
+        logStreamPrefix: awsLogsStreamPrefix || undefined,
+      };
+    } catch (error) {
+      this.logger.warn({
+        message: 'Unable to resolve ECS task definition awslogs configuration',
+        taskDefinition,
+        containerName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {};
+    }
+  }
+
+  /**
+   * Builds awslogs stream name from task definition prefix + container + task id.
+   * @param logStreamPrefix awslogs stream prefix configured in task definition.
+   * @param containerName ECS container name.
+   * @param taskId Task ID suffix parsed from task ARN.
+   * @returns Deterministic CloudWatch log stream name when prefix exists.
+   */
+  private buildAwsLogsStreamName(
+    logStreamPrefix: string | undefined,
+    containerName: string,
+    taskId: string,
+  ): string | undefined {
+    const normalizedPrefix = logStreamPrefix?.trim();
+    const normalizedContainerName = containerName?.trim();
+    const normalizedTaskId = taskId?.trim();
+    if (!normalizedPrefix || !normalizedContainerName || !normalizedTaskId) {
+      return undefined;
+    }
+
+    return `${normalizedPrefix}/${normalizedContainerName}/${normalizedTaskId}`;
+  }
+
+  /**
+   * Builds a CloudWatch logs console URL for a specific log group/stream pair.
+   * @param logGroup CloudWatch log group.
+   * @param logStreamName CloudWatch log stream name.
+   * @returns Deep link URL when both values are available.
+   */
+  private buildCloudWatchLogsConsoleUrl(
+    logGroup?: string,
+    logStreamName?: string,
+  ): string | undefined {
+    if (!logGroup || !logStreamName) {
+      return undefined;
+    }
+
+    const region = process.env.AWS_REGION?.trim() || 'us-east-1';
+    return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${encodeURIComponent(region)}#logsV2:log-groups/log-group/${encodeURIComponent(logGroup)}/log-events/${encodeURIComponent(logStreamName)}`;
+  }
+
+  /**
+   * Persists submission-to-runner-log mapping for later retrieval APIs.
+   * @param input Mapping payload derived from the task launch.
+   */
+  private async persistSubmissionRunnerLogMapping(
+    input: PersistSubmissionRunnerLogInput,
+  ): Promise<void> {
+    const phaseConfigType = this.normalizePhaseConfigType(
+      input.scoringPhase.configType,
+    );
+    const launchResult = input.launchResult;
+
+    try {
+      await this.prisma.submissionRunnerLog.upsert({
+        where: { taskArn: launchResult.taskArn },
+        create: {
+          submissionId: input.submissionId,
+          challengeId: input.challengeId,
+          taskArn: launchResult.taskArn,
+          taskId: launchResult.taskId,
+          cluster: launchResult.cluster,
+          containerName: launchResult.containerName,
+          taskDefinition: launchResult.taskDefinition,
+          phaseConfigType,
+          logGroup: launchResult.logGroup,
+          logStreamPrefix: launchResult.logStreamPrefix,
+          logStreamName: launchResult.logStreamName,
+          cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+        },
+        update: {
+          submissionId: input.submissionId,
+          challengeId: input.challengeId,
+          taskId: launchResult.taskId,
+          cluster: launchResult.cluster,
+          containerName: launchResult.containerName,
+          taskDefinition: launchResult.taskDefinition,
+          phaseConfigType,
+          logGroup: launchResult.logGroup,
+          logStreamPrefix: launchResult.logStreamPrefix,
+          logStreamName: launchResult.logStreamName,
+          cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+        },
+      });
+
+      this.logger.log({
+        message: 'Persisted submission runner log mapping',
+        submissionId: input.submissionId,
+        challengeId: input.challengeId,
+        taskArn: launchResult.taskArn,
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to persist submission runner log mapping',
+        submissionId: input.submissionId,
+        challengeId: input.challengeId,
+        taskArn: launchResult.taskArn,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Normalizes string config type to Prisma enum.
+   * @param configType Raw config type from marathon match phase config.
+   * @returns Prisma enum value.
+   */
+  private normalizePhaseConfigType(configType: string): PhaseConfigType {
+    const normalized = configType?.trim().toUpperCase();
+    if (normalized === PhaseConfigType.EXAMPLE) {
+      return PhaseConfigType.EXAMPLE;
+    }
+    if (normalized === PhaseConfigType.SYSTEM) {
+      return PhaseConfigType.SYSTEM;
+    }
+    if (normalized === PhaseConfigType.PROVISIONAL) {
+      return PhaseConfigType.PROVISIONAL;
+    }
+
+    throw new Error(`Unsupported phase config type '${configType}'.`);
   }
 }

@@ -5,7 +5,10 @@ import { firstValueFrom } from 'rxjs';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { EcsService } from 'src/shared/modules/global/ecs.service';
+import {
+  EcsService,
+  MarathonMatchScorerTaskLaunchResult,
+} from 'src/shared/modules/global/ecs.service';
 import { BaseEventHandler } from 'src/shared/modules/kafka/base-event.handler';
 import {
   MarathonMatchSubmissionEventEnvelope,
@@ -155,7 +158,7 @@ export class MarathonMatchSubmissionHandler
         );
       }
 
-      const taskArn = await this.ecsService.launchScorerTask(
+      const launchResult = await this.ecsService.launchScorerTask(
         config.challengeId,
         submissionId,
         {
@@ -168,6 +171,7 @@ export class MarathonMatchSubmissionHandler
           numberOfTests: matchingPhaseConfig.numberOfTests,
         },
       );
+      this.logSubmissionRunnerMapping(challengeId, submissionId, launchResult);
 
       this.logger.log({
         message: 'Marathon match submission event processed successfully',
@@ -176,7 +180,12 @@ export class MarathonMatchSubmissionHandler
         openPhaseIds,
         matchedPhaseId: matchingPhaseConfig.phaseId,
         matchedPhaseConfigId: matchingPhaseConfig.id,
-        taskArn,
+        taskArn: launchResult.taskArn,
+        taskId: launchResult.taskId,
+        logGroup: launchResult.logGroup ?? null,
+        logStreamPrefix: launchResult.logStreamPrefix ?? null,
+        logStreamName: launchResult.logStreamName ?? null,
+        cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl ?? null,
       });
     } catch (error) {
       const resolvedError =
@@ -269,6 +278,33 @@ export class MarathonMatchSubmissionHandler
       .filter((phaseId): phaseId is string => Boolean(phaseId));
 
     return [...new Set(orderedPhaseIds)];
+  }
+
+  /**
+   * Logs the submission-to-runner-log mapping emitted at ECS launch time.
+   * @param challengeId Challenge ID.
+   * @param submissionId Submission ID.
+   * @param launchResult ECS launch metadata with task/log fields.
+   */
+  private logSubmissionRunnerMapping(
+    challengeId: string,
+    submissionId: string,
+    launchResult: MarathonMatchScorerTaskLaunchResult,
+  ): void {
+    this.logger.log({
+      message: 'Submission runner log mapping ready',
+      challengeId,
+      submissionId,
+      taskArn: launchResult.taskArn,
+      taskId: launchResult.taskId,
+      cluster: launchResult.cluster,
+      containerName: launchResult.containerName,
+      taskDefinition: launchResult.taskDefinition,
+      logGroup: launchResult.logGroup ?? null,
+      logStreamPrefix: launchResult.logStreamPrefix ?? null,
+      logStreamName: launchResult.logStreamName ?? null,
+      cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl ?? null,
+    });
   }
 
   /**

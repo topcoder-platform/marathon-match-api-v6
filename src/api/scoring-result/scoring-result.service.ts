@@ -309,11 +309,15 @@ export class ScoringResultService {
       process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
     ).replace(/\/+$/, '');
 
-    if (baseUrl.endsWith('/v6')) {
-      return `${baseUrl}/reviews/summations`;
+    if (baseUrl.endsWith('/reviewSummations')) {
+      return baseUrl;
     }
 
-    return `${baseUrl}/v6/reviews/summations`;
+    if (baseUrl.endsWith('/v6')) {
+      return `${baseUrl}/reviewSummations`;
+    }
+
+    return `${baseUrl}/v6/reviewSummations`;
   }
 
   private normalizeTestPhase(testPhase: string | undefined): string {

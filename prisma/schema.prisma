@@ -86,3 +86,26 @@ model phaseConfig {
   @@unique([marathonMatchConfigId, configType])
   @@schema("marathon_match")
 }
+
+model submissionRunnerLog {
+  id                       String          @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
+  submissionId             String
+  challengeId              String          @db.VarChar(36)
+  taskArn                  String          @unique
+  taskId                   String
+  cluster                  String
+  containerName            String
+  taskDefinition           String
+  phaseConfigType          PhaseConfigType?
+  logGroup                 String?
+  logStreamPrefix          String?
+  logStreamName            String?
+  cloudWatchLogsConsoleUrl String?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  @@index([submissionId])
+  @@index([challengeId])
+  @@index([createdAt])
+  @@schema("marathon_match")
+}

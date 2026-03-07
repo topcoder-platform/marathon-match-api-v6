@@ -87,6 +87,22 @@ Set these in the API service environment:
 - `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
 - `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
 
+When submissions are launched, API logs now emit a `Submission to ECS runner log mapping` record that includes:
+
+- `submissionId`
+- `taskArn`
+- `taskId`
+- `cluster`
+- `containerName`
+- `logGroup` (resolved from ECS task definition `awslogs-group`)
+- `logStreamPrefix` (resolved from ECS task definition `awslogs-stream-prefix`)
+- `logStreamName` (deterministic value `<prefix>/<containerName>/<taskId>`)
+- `cloudWatchLogsConsoleUrl` (when both log group + stream are available)
+
+The same mapping is also persisted in `marathon_match.submissionRunnerLog`, and can be queried via:
+
+- `GET /v6/marathon-match/submissions/:submissionId/runner-logs`
+
 ### 3. Update challenge config to use that task definition revision
 
 ```bash

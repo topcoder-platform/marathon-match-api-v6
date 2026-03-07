@@ -245,8 +245,17 @@ echo "{\"mime-type\":\"application/json\",\"timestamp\":\"$(date -u +"%Y-%m-%dT%
 3. Marathon-match API logs should show:
    - submission event consumed,
    - phase mapping found,
-   - ECS task ARN logged.
-4. Review side:
+   - ECS task ARN logged,
+   - `Submission runner log mapping ready` (submissionId + taskArn + logGroup/logStream when available).
+4. API log retrieval (new mapping-backed endpoint):
+   - `GET /v6/marathon-match/submissions/:submissionId/runner-logs`
+   - optional query: `taskArn`, `limit`, `nextToken`, `startFromHead`
+5. ECS runner logs should now be highly verbose for the submission:
+   - each workflow step,
+   - all outbound API calls (URL + status + payload previews),
+   - tester execution metadata and individual test scores (`testScores` when provided by tester),
+   - artifact upload/callback payload summaries.
+6. Review side:
    - verify review/review-summation update on the submission in dev.
 
 ## 9. Safe Rollback

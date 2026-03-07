@@ -108,13 +108,30 @@ public class MarathonController {
         }
     }
 
+    /**
+     * Loads a tester class using the thread context class loader first.
+     * This is required when the tester class is loaded dynamically from a downloaded JAR.
+     */
+    private Class<?> loadTesterClass(String className) throws ClassNotFoundException {
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader != null) {
+            try {
+                return Class.forName(className, true, contextClassLoader);
+            } catch (ClassNotFoundException ignored) {
+                // Fall back to default class loading below.
+            }
+        }
+
+        return Class.forName(className);
+    }
+
     //Called by server tester using a direct call
     public MarathonTestResult run(String className, long seed, String exec, int timeLimit) {
         MarathonTestResult result = new MarathonTestResult();
         MarathonTester tester = null;
         Constructor<?> constructor = null;
         try {
-            Class<?> c = Class.forName(className);
+            Class<?> c = loadTesterClass(className);
             constructor = c.getConstructors()[0];
             tester = (MarathonTester) constructor.newInstance();
         } catch (Exception e) {
@@ -263,7 +280,7 @@ public class MarathonController {
         double es = -1;
         boolean im = true;
         try {
-            c = Class.forName(className);
+            c = loadTesterClass(className);
             ct = c.getConstructors()[0];
             //Create an instance to check it is accessible and get its configuration 
             MarathonTester tester = (MarathonTester) ct.newInstance();

@@ -173,6 +173,12 @@ Auth model in code:
 | `PUT` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `update:marathon-match` |
 | `DELETE` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `delete:marathon-match` |
 
+### Submission runner log endpoint
+
+| Method | Path | Required role/scope |
+| --- | --- | --- |
+| `GET` | `/v6/marathon-match/submissions/:submissionId/runner-logs` | `administrator` OR `read:marathon-match` |
+
 ### Internal scoring callback endpoint
 
 | Method | Path | Required role/scope |
@@ -297,7 +303,7 @@ sequenceDiagram
         F->>SA: Download submission artifacts
         F->>F: Load tester JAR + invoke runTester(...)
         F->>MM: POST /internal/scoring-results (score + legacy review payload)
-        MM->>RA: POST/PUT /v6/reviews/summations
+        MM->>RA: POST/PUT /v6/reviewSummations
         F-->>ECS: Task exits
         H-->>C: Success
       end
