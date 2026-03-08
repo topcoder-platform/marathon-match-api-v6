@@ -43,6 +43,7 @@ interface SummationBuildInput {
 @Injectable()
 export class ScoringResultService {
   private readonly logger = LoggerService.forRoot('ScoringResultService');
+  private readonly scorecardIdLookupCache = new Map<string, string | null>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -67,6 +68,10 @@ export class ScoringResultService {
       normalizedPhase,
       payload.reviewTypeId,
     );
+    const fallbackScorecardId = await this.resolveScorecardId(
+      token,
+      payload.scorecardId,
+    );
 
     if (
       payload.currentReview &&
@@ -76,7 +81,7 @@ export class ScoringResultService {
         legacyReview: payload.currentReview,
         fallbackSubmissionId: payload.submissionId,
         fallbackScore: payload.score,
-        fallbackScorecardId: payload.scorecardId,
+        fallbackScorecardId,
         fallbackMetadata,
         testPhase: normalizedPhase,
       });
@@ -86,7 +91,7 @@ export class ScoringResultService {
           legacyReview: impactedReview,
           fallbackSubmissionId: payload.submissionId,
           fallbackScore: payload.score,
-          fallbackScorecardId: payload.scorecardId,
+          fallbackScorecardId,
           fallbackMetadata,
           testPhase: normalizedPhase,
         });
@@ -98,7 +103,7 @@ export class ScoringResultService {
     const reviewPayload = this.buildSummationPayload({
       submissionId: payload.submissionId,
       score: payload.score,
-      scorecardId: payload.scorecardId,
+      scorecardId: fallbackScorecardId,
       metadata: fallbackMetadata,
       testPhase: normalizedPhase,
     });
@@ -128,11 +133,12 @@ export class ScoringResultService {
       throw new Error('Legacy review payload is missing submissionId.');
     }
 
-    const scorecardId = this.coalesceString(
+    const rawScorecardId = this.coalesceString(
       this.asString(reviewObject.scorecardId),
       this.asString(reviewObject.scoreCardId),
       args.fallbackScorecardId,
     );
+    const scorecardId = await this.resolveScorecardId(token, rawScorecardId);
 
     const metadata = this.normalizeMetadata(
       this.asRecord(reviewObject.metadata),
@@ -266,14 +272,18 @@ export class ScoringResultService {
         }),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const errorDetails = this.extractHttpError(error);
       this.logger.error({
         message: 'Failed to create review summation',
         url,
         payload,
-        error: message,
+        statusCode: errorDetails.statusCode ?? null,
+        responseBody: errorDetails.responseBody ?? null,
+        error: errorDetails.message,
       });
-      throw new Error(`Failed to create review summation: ${message}`);
+      throw new Error(
+        `Failed to create review summation: ${errorDetails.message}`,
+      );
     }
   }
 
@@ -293,14 +303,78 @@ export class ScoringResultService {
         }),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const errorDetails = this.extractHttpError(error);
       this.logger.error({
         message: 'Failed to update review summation',
         url,
         payload,
-        error: message,
+        statusCode: errorDetails.statusCode ?? null,
+        responseBody: errorDetails.responseBody ?? null,
+        error: errorDetails.message,
       });
-      throw new Error(`Failed to update review summation: ${message}`);
+      throw new Error(
+        `Failed to update review summation: ${errorDetails.message}`,
+      );
+    }
+  }
+
+  /**
+   * Resolves scorecard references to canonical review-api ids.
+   * The input can be either the internal id or legacy id.
+   */
+  private async resolveScorecardId(
+    token: string,
+    scorecardId?: string,
+  ): Promise<string | undefined> {
+    const rawScorecardId = this.asString(scorecardId);
+    if (!rawScorecardId) {
+      return undefined;
+    }
+
+    const cached = this.scorecardIdLookupCache.get(rawScorecardId);
+    if (cached !== undefined) {
+      return cached ?? undefined;
+    }
+
+    const url = this.buildScorecardLookupUrl(rawScorecardId);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      const resolvedScorecardId = this.asString(
+        this.asRecord(response.data).id,
+      );
+      if (!resolvedScorecardId) {
+        this.logger.warn({
+          message: 'Scorecard lookup response did not include an id',
+          requestedScorecardId: rawScorecardId,
+          url,
+        });
+        return undefined;
+      }
+
+      this.scorecardIdLookupCache.set(rawScorecardId, resolvedScorecardId);
+      return resolvedScorecardId;
+    } catch (error) {
+      const errorDetails = this.extractHttpError(error);
+      this.logger.warn({
+        message:
+          'Unable to resolve scorecardId from review-api. scorecardId will be omitted from review summation payload.',
+        requestedScorecardId: rawScorecardId,
+        url,
+        statusCode: errorDetails.statusCode ?? null,
+        responseBody: errorDetails.responseBody ?? null,
+        error: errorDetails.message,
+      });
+      if (errorDetails.statusCode === 400 || errorDetails.statusCode === 404) {
+        this.scorecardIdLookupCache.set(rawScorecardId, null);
+      }
+      return undefined;
     }
   }
 
@@ -318,6 +392,15 @@ export class ScoringResultService {
     }
 
     return `${baseUrl}/v6/reviewSummations`;
+  }
+
+  private buildScorecardLookupUrl(scorecardId: string): string {
+    const reviewApiBaseUrl = this.buildReviewSummationUrl().replace(
+      /\/reviewSummations$/,
+      '',
+    );
+
+    return `${reviewApiBaseUrl}/scorecards/${encodeURIComponent(scorecardId)}`;
   }
 
   private normalizeTestPhase(testPhase: string | undefined): string {
@@ -395,5 +478,45 @@ export class ScoringResultService {
     }
 
     return undefined;
+  }
+
+  private extractHttpError(error: unknown): {
+    message: string;
+    statusCode?: number;
+    responseBody?: unknown;
+  } {
+    const fallbackMessage =
+      error instanceof Error ? error.message : String(error);
+
+    if (!error || typeof error !== 'object') {
+      return { message: fallbackMessage };
+    }
+
+    const response = (
+      error as {
+        response?: {
+          status?: unknown;
+          data?: unknown;
+        };
+      }
+    ).response;
+
+    const statusCode =
+      typeof response?.status === 'number' ? response.status : undefined;
+    const responseBody = response?.data;
+
+    const responseMessage = this.asString(this.asRecord(responseBody).message);
+    const message =
+      statusCode !== undefined
+        ? responseMessage
+          ? `HTTP ${statusCode}: ${responseMessage}`
+          : `HTTP ${statusCode}`
+        : fallbackMessage;
+
+    return {
+      message,
+      statusCode,
+      responseBody,
+    };
   }
 }

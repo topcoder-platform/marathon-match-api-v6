@@ -163,6 +163,8 @@ export PROVISIONAL_PHASE_ID="<provisional_phase_id>"
 export SYSTEM_PHASE_ID="<system_phase_id>"
 ```
 
+`REVIEW_SCORECARD_ID` accepts either the review-api scorecard id or legacy id.
+
 Create config (start with `active: false` until you are ready to process submissions):
 
 ```bash

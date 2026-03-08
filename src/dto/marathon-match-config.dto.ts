@@ -88,7 +88,8 @@ export class CreateMarathonMatchConfigDto {
   submissionApiUrl?: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID used for provisional/system review flow',
+    description:
+      'Review scorecard identifier used for provisional/system review flow. Supports review-api scorecard id or legacy id.',
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
   @IsString()
@@ -200,7 +201,8 @@ export class UpdateMarathonMatchConfigDto {
   submissionApiUrl?: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID used for provisional/system review flow',
+    description:
+      'Review scorecard identifier used for provisional/system review flow. Supports review-api scorecard id or legacy id.',
     required: false,
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
@@ -350,7 +352,7 @@ export class MarathonMatchConfigResponseDto {
   submissionApiUrl: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID',
+    description: 'Resolved review scorecard id configured for this challenge',
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
   reviewScorecardId: string;

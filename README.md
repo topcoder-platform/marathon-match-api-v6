@@ -226,6 +226,7 @@ Config identity semantics:
 
 - `id` is an internal nano-id for the marathon match config record.
 - `challengeId` stores the challenge identifier and is used for `/challenge/:challengeId` CRUD endpoints.
+- `reviewScorecardId` can be either the review-api scorecard id (nanoid) or legacy id; scoring callback processing resolves it to the canonical scorecard id before posting review summations.
 
 Important runtime behavior:
 
