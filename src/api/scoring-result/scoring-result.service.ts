@@ -1,10 +1,13 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
+import { ScoreDirection } from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
+import { PrismaService } from 'src/shared/modules/global/prisma.service';
 
 export interface ScoringResultCallbackPayload {
+  challengeId: string;
   submissionId: string;
   score: number;
   testPhase: string;
@@ -36,6 +39,27 @@ interface SummationBuildInput {
   testPhase: string;
 }
 
+interface RelativeScoringSettings {
+  challengeId?: string;
+  submissionApiUrl?: string;
+  enabled: boolean;
+  scoreDirection: ScoreDirection;
+}
+
+interface RelativeTestScoreEntry {
+  testcase: string;
+  score: number;
+}
+
+interface RelativeReviewRecord {
+  submissionId: string;
+  memberId?: string;
+  createdAt?: string;
+  reviewObject: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  rawTestScores: RelativeTestScoreEntry[];
+}
+
 /**
  * Applies marathon-match review summation updates based on scorer callback data.
  * Relative-score propagation is handled here to keep ECS runner logic lightweight.
@@ -48,6 +72,7 @@ export class ScoringResultService {
   constructor(
     private readonly httpService: HttpService,
     private readonly m2mService: M2MService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -72,6 +97,24 @@ export class ScoringResultService {
       token,
       payload.scorecardId,
     );
+
+    const relativeScoringSettings = await this.resolveRelativeScoringSettings(
+      payload,
+      fallbackMetadata,
+    );
+    if (relativeScoringSettings.enabled) {
+      const handled = await this.processRelativeScoring(
+        token,
+        payload,
+        normalizedPhase,
+        fallbackMetadata,
+        fallbackScorecardId,
+        relativeScoringSettings,
+      );
+      if (handled) {
+        return;
+      }
+    }
 
     if (
       payload.currentReview &&
@@ -111,6 +154,662 @@ export class ScoringResultService {
     await this.createReviewSummation(token, reviewPayload);
   }
 
+  /**
+   * Recomputes relative scores for the latest submission from each member.
+   * Returns false when relative scoring cannot be applied and the caller should
+   * fall back to direct review upserts.
+   */
+  private async processRelativeScoring(
+    token: string,
+    payload: ScoringResultCallbackPayload,
+    testPhase: string,
+    fallbackMetadata: Record<string, unknown>,
+    fallbackScorecardId: string | undefined,
+    settings: RelativeScoringSettings,
+  ): Promise<boolean> {
+    if (!settings.challengeId || !settings.submissionApiUrl) {
+      this.logger.warn({
+        message:
+          'Relative scoring is enabled but challenge context is incomplete. Falling back to direct review upsert.',
+        challengeId: settings.challengeId ?? null,
+        submissionApiUrl: settings.submissionApiUrl ?? null,
+        submissionId: payload.submissionId,
+        testPhase,
+      });
+      return false;
+    }
+
+    const submissions = await this.fetchChallengeSubmissions(
+      token,
+      settings.submissionApiUrl,
+      settings.challengeId,
+    );
+    const currentSubmission = submissions.find(
+      (submission) =>
+        this.asString(submission.id) === payload.submissionId.trim(),
+    );
+    const currentMemberId = this.asString(currentSubmission?.memberId);
+
+    const currentReview = this.buildCurrentRelativeReviewRecord({
+      payload,
+      fallbackMetadata,
+      fallbackScorecardId,
+      existingReviewObject: this.findPhaseReviewSummation(
+        currentSubmission,
+        testPhase,
+      ),
+      memberId: currentMemberId,
+      createdAt: this.asString(currentSubmission?.created),
+      testPhase,
+    });
+
+    if (!currentReview || currentReview.rawTestScores.length === 0) {
+      this.logger.warn({
+        message:
+          'Relative scoring is enabled but current review metadata does not contain usable testScores. Falling back to direct review upsert.',
+        submissionId: payload.submissionId,
+        challengeId: settings.challengeId,
+        testPhase,
+      });
+      return false;
+    }
+
+    const impactedReviews = this.selectLatestRelativeReviewRecords(
+      submissions,
+      testPhase,
+      payload.reviewTypeId,
+      payload.submissionId,
+      currentMemberId,
+    );
+
+    const reviewsToRecompute = [...impactedReviews, currentReview];
+    const bestScores = this.computeBestScores(
+      reviewsToRecompute,
+      settings.scoreDirection,
+    );
+
+    const relativeReviewPayloads = reviewsToRecompute.map((reviewRecord) =>
+      this.buildRelativeReviewPayload(
+        reviewRecord,
+        bestScores,
+        settings.scoreDirection,
+        fallbackScorecardId,
+        testPhase,
+      ),
+    );
+
+    for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
+      const reviewPayload = relativeReviewPayloads[index];
+      const reviewId = this.asString(reviewPayload.reviewObject.id);
+
+      if (index === relativeReviewPayloads.length - 1 && !reviewId) {
+        await this.createReviewSummation(token, reviewPayload.payload);
+        continue;
+      }
+
+      if (!reviewId) {
+        this.logger.warn({
+          message:
+            'Skipping impacted relative review update because reviewSummation id is missing.',
+          submissionId: reviewPayload.payload.submissionId,
+          testPhase,
+        });
+        continue;
+      }
+
+      await this.updateReviewSummation(token, reviewId, reviewPayload.payload);
+    }
+
+    return true;
+  }
+
+  /**
+   * Loads relative-scoring settings from config and callback metadata.
+   */
+  private async resolveRelativeScoringSettings(
+    payload: ScoringResultCallbackPayload,
+    fallbackMetadata: Record<string, unknown>,
+  ): Promise<RelativeScoringSettings> {
+    const currentReview = this.asRecord(payload.currentReview);
+    const currentMetadata = this.asRecord(currentReview.metadata);
+    const challengeId = this.coalesceString(
+      this.asString(payload.challengeId),
+      this.asString(fallbackMetadata.challengeId),
+      this.asString(currentMetadata.challengeId),
+    );
+
+    const config = challengeId
+      ? await this.prisma.marathonMatchConfig.findUnique({
+          where: { challengeId },
+          select: {
+            challengeId: true,
+            submissionApiUrl: true,
+            relativeScoringEnabled: true,
+            scoreDirection: true,
+          },
+        })
+      : null;
+
+    const relativeScoringEnabled =
+      this.parseBooleanFlag(fallbackMetadata.relativeScoringEnabled) ??
+      this.parseBooleanFlag(currentMetadata.relativeScoringEnabled) ??
+      config?.relativeScoringEnabled ??
+      true;
+
+    const scoreDirection =
+      this.normalizeScoreDirection(
+        this.asString(fallbackMetadata.scoreDirection),
+      ) ??
+      this.normalizeScoreDirection(
+        this.asString(currentMetadata.scoreDirection),
+      ) ??
+      this.normalizeScoreDirectionFromBoolean(
+        this.parseBooleanFlag(fallbackMetadata.isMaximize),
+      ) ??
+      this.normalizeScoreDirectionFromBoolean(
+        this.parseBooleanFlag(currentMetadata.isMaximize),
+      ) ??
+      config?.scoreDirection ??
+      ScoreDirection.MAXIMIZE;
+
+    return {
+      challengeId: config?.challengeId ?? challengeId,
+      submissionApiUrl: config?.submissionApiUrl?.trim() || undefined,
+      enabled: relativeScoringEnabled === true,
+      scoreDirection,
+    };
+  }
+
+  /**
+   * Fetches all submissions for one challenge through the submission API.
+   */
+  private async fetchChallengeSubmissions(
+    token: string,
+    submissionApiUrl: string,
+    challengeId: string,
+  ): Promise<Record<string, unknown>[]> {
+    const submissions: Record<string, unknown>[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const url = `${this.buildSubmissionApiBaseUrl(
+        submissionApiUrl,
+      )}/submissions`;
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: {
+            challengeId,
+            perPage: 100,
+            page,
+          },
+        }),
+      );
+
+      submissions.push(...this.extractSubmissionArray(response.data));
+      totalPages = this.parseTotalPages(response.headers);
+      page += 1;
+    } while (page <= totalPages);
+
+    return submissions;
+  }
+
+  /**
+   * Selects the latest scored submission per member for the requested phase.
+   */
+  private selectLatestRelativeReviewRecords(
+    submissions: Record<string, unknown>[],
+    testPhase: string,
+    reviewTypeId: string,
+    excludedSubmissionId: string,
+    excludedMemberId?: string,
+  ): RelativeReviewRecord[] {
+    const latestByMember = new Map<
+      string,
+      {
+        submissionId: string;
+        memberId?: string;
+        createdAt?: string;
+        reviewObject: Record<string, unknown>;
+      }
+    >();
+
+    for (const submission of submissions) {
+      const submissionId = this.asString(submission.id);
+      if (!submissionId || submissionId === excludedSubmissionId) {
+        continue;
+      }
+
+      const memberId = this.asString(submission.memberId);
+      if (excludedMemberId && memberId === excludedMemberId) {
+        continue;
+      }
+
+      const reviewObject = this.findPhaseReviewSummation(submission, testPhase);
+      if (!reviewObject) {
+        continue;
+      }
+
+      const key = memberId ?? `submission:${submissionId}`;
+      const createdAt = this.asString(submission.created);
+      const existing = latestByMember.get(key);
+
+      if (
+        !existing ||
+        this.compareIsoDateStrings(createdAt, existing.createdAt) >= 0
+      ) {
+        latestByMember.set(key, {
+          submissionId,
+          memberId,
+          createdAt,
+          reviewObject,
+        });
+      }
+    }
+
+    return Array.from(latestByMember.values())
+      .map((entry) =>
+        this.buildRelativeReviewRecord({
+          createdAt: entry.createdAt,
+          memberId: entry.memberId,
+          reviewObject: entry.reviewObject,
+          reviewTypeId,
+          submissionId: entry.submissionId,
+          testPhase,
+        }),
+      )
+      .filter((entry): entry is RelativeReviewRecord => entry !== null);
+  }
+
+  /**
+   * Builds the current submission review object used for relative scoring.
+   */
+  private buildCurrentRelativeReviewRecord(args: {
+    payload: ScoringResultCallbackPayload;
+    fallbackMetadata: Record<string, unknown>;
+    fallbackScorecardId?: string;
+    existingReviewObject: Record<string, unknown> | null;
+    memberId?: string;
+    createdAt?: string;
+    testPhase: string;
+  }): RelativeReviewRecord | null {
+    const currentReviewObject = this.asRecord(args.payload.currentReview);
+    const existingReviewObject = this.asRecord(args.existingReviewObject);
+    const metadata = this.normalizeMetadata(
+      this.asRecord(currentReviewObject.metadata),
+      args.testPhase,
+      args.payload.reviewTypeId,
+      args.fallbackMetadata,
+    );
+
+    const mergedReviewObject: Record<string, unknown> = {
+      ...existingReviewObject,
+      ...currentReviewObject,
+      submissionId: args.payload.submissionId,
+      metadata,
+    };
+
+    if (
+      args.fallbackScorecardId &&
+      !this.asString(mergedReviewObject.scorecardId) &&
+      !this.asString(mergedReviewObject.scoreCardId)
+    ) {
+      mergedReviewObject.scorecardId = args.fallbackScorecardId;
+    }
+
+    if (this.toNumber(mergedReviewObject.score) === null) {
+      mergedReviewObject.score = args.payload.score;
+    }
+    if (this.toNumber(mergedReviewObject.aggregateScore) === null) {
+      mergedReviewObject.aggregateScore = args.payload.score;
+    }
+
+    return this.buildRelativeReviewRecord({
+      createdAt: args.createdAt,
+      memberId: args.memberId,
+      reviewObject: mergedReviewObject,
+      reviewTypeId: args.payload.reviewTypeId,
+      submissionId: args.payload.submissionId,
+      testPhase: args.testPhase,
+    });
+  }
+
+  /**
+   * Normalizes one review object into a recomputable relative-score record.
+   */
+  private buildRelativeReviewRecord(args: {
+    createdAt?: string;
+    memberId?: string;
+    reviewObject: Record<string, unknown>;
+    reviewTypeId: string;
+    submissionId: string;
+    testPhase: string;
+  }): RelativeReviewRecord | null {
+    const reviewObject = this.asRecord(args.reviewObject);
+    const metadata = this.normalizeMetadata(
+      this.asRecord(reviewObject.metadata),
+      args.testPhase,
+      args.reviewTypeId,
+    );
+    const rawTestScores = this.extractRawTestScores(metadata);
+
+    if (rawTestScores.length === 0) {
+      return null;
+    }
+
+    return {
+      submissionId: args.submissionId,
+      memberId: args.memberId,
+      createdAt: args.createdAt,
+      reviewObject: {
+        ...reviewObject,
+        submissionId: args.submissionId,
+        metadata,
+      },
+      metadata,
+      rawTestScores,
+    };
+  }
+
+  /**
+   * Calculates the best raw testcase score currently achieved for each seed.
+   */
+  private computeBestScores(
+    reviewRecords: RelativeReviewRecord[],
+    scoreDirection: ScoreDirection,
+  ): Map<string, number> {
+    const bestScores = new Map<string, number>();
+
+    for (const reviewRecord of reviewRecords) {
+      for (const testScore of reviewRecord.rawTestScores) {
+        if (testScore.score < 0) {
+          continue;
+        }
+
+        const existing = bestScores.get(testScore.testcase);
+        if (existing === undefined) {
+          bestScores.set(testScore.testcase, testScore.score);
+          continue;
+        }
+
+        if (
+          (scoreDirection === ScoreDirection.MAXIMIZE &&
+            testScore.score > existing) ||
+          (scoreDirection === ScoreDirection.MINIMIZE &&
+            testScore.score < existing)
+        ) {
+          bestScores.set(testScore.testcase, testScore.score);
+        }
+      }
+    }
+
+    return bestScores;
+  }
+
+  /**
+   * Builds one updated review summation payload with normalized relative scores.
+   */
+  private buildRelativeReviewPayload(
+    reviewRecord: RelativeReviewRecord,
+    bestScores: Map<string, number>,
+    scoreDirection: ScoreDirection,
+    fallbackScorecardId: string | undefined,
+    testPhase: string,
+  ): {
+    reviewObject: Record<string, unknown>;
+    payload: ReviewSummationPayload;
+  } {
+    let totalTests = 0;
+    let failedTests = 0;
+    let aggregateScore = 0;
+    const relativeScores: Array<Record<string, unknown>> = [];
+
+    for (const rawTestScore of reviewRecord.rawTestScores) {
+      totalTests += 1;
+
+      const bestScore = bestScores.get(rawTestScore.testcase);
+      const relativeScore = this.calculateRelativeScore(
+        rawTestScore.score,
+        bestScore,
+      );
+
+      if (rawTestScore.score < 0) {
+        failedTests += 1;
+      }
+
+      aggregateScore += relativeScore;
+      relativeScores.push({
+        testcase: rawTestScore.testcase,
+        score: relativeScore,
+      });
+    }
+
+    if (totalTests > 0) {
+      aggregateScore /= totalTests;
+    } else {
+      aggregateScore = -1;
+    }
+
+    if (failedTests === totalTests) {
+      aggregateScore = -1;
+    }
+
+    const metadata: Record<string, unknown> = {
+      ...reviewRecord.metadata,
+      relativeScoringEnabled: true,
+      scoreDirection,
+      relativeScores,
+      tests: {
+        total: totalTests,
+        passed: totalTests - failedTests,
+        failed: failedTests,
+      },
+    };
+
+    const reviewObject: Record<string, unknown> = {
+      ...reviewRecord.reviewObject,
+      metadata,
+      submissionId: reviewRecord.submissionId,
+      score: aggregateScore,
+      aggregateScore,
+    };
+
+    const scorecardId = this.coalesceString(
+      this.asString(reviewObject.scorecardId),
+      this.asString(reviewObject.scoreCardId),
+      fallbackScorecardId,
+    );
+
+    return {
+      reviewObject,
+      payload: this.buildSummationPayload({
+        submissionId: reviewRecord.submissionId,
+        score: aggregateScore,
+        scorecardId,
+        metadata,
+        reviewObject,
+        testPhase,
+      }),
+    };
+  }
+
+  /**
+   * Converts one raw testcase score into its 0..100 relative score.
+   */
+  private calculateRelativeScore(
+    rawScore: number,
+    bestScore: number | undefined,
+  ): number {
+    if (rawScore < 0 || bestScore === undefined) {
+      return 0;
+    }
+
+    if (Math.abs(bestScore - rawScore) < 1e-9) {
+      return 100;
+    }
+
+    if (bestScore === 0 || rawScore === 0) {
+      return 0;
+    }
+
+    const normalized =
+      bestScore < rawScore ? bestScore / rawScore : rawScore / bestScore;
+    return normalized * 100;
+  }
+
+  /**
+   * Extracts raw tester testScores metadata into normalized seed/score pairs.
+   */
+  private extractRawTestScores(
+    metadata: Record<string, unknown>,
+  ): RelativeTestScoreEntry[] {
+    const rawEntries = metadata.testScores;
+    if (!Array.isArray(rawEntries)) {
+      return [];
+    }
+
+    const result: RelativeTestScoreEntry[] = [];
+    for (const rawEntry of rawEntries) {
+      const entry = this.asRecord(rawEntry);
+      const testcase = this.asString(entry.testcase);
+      const score = this.toNumber(entry.score);
+
+      if (!testcase || score === null) {
+        continue;
+      }
+
+      result.push({
+        testcase,
+        score,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Finds the review summation that belongs to the requested scoring phase.
+   */
+  private findPhaseReviewSummation(
+    submission: Record<string, unknown> | undefined,
+    testPhase: string,
+  ): Record<string, unknown> | null {
+    if (!submission) {
+      return null;
+    }
+
+    for (const review of this.extractReviewSummations(submission)) {
+      if (this.matchesPhaseReview(review, testPhase)) {
+        return review;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts reviewSummation arrays from submission payloads with legacy key support.
+   */
+  private extractReviewSummations(
+    submission: Record<string, unknown>,
+  ): Record<string, unknown>[] {
+    const reviewSummation = submission.reviewSummation;
+    if (Array.isArray(reviewSummation)) {
+      return reviewSummation.map((entry) => this.asRecord(entry));
+    }
+
+    const reviewSummations = submission.reviewSummations;
+    if (Array.isArray(reviewSummations)) {
+      return reviewSummations.map((entry) => this.asRecord(entry));
+    }
+
+    return [];
+  }
+
+  /**
+   * Matches one review summation to example, provisional, or system scoring.
+   */
+  private matchesPhaseReview(
+    reviewObject: Record<string, unknown>,
+    testPhase: string,
+  ): boolean {
+    const metadata = this.asRecord(reviewObject.metadata);
+    const metadataTestType = this.normalizeTestPhase(
+      this.asString(metadata.testType),
+    );
+    const metadataStage = this.asString(metadata.stage)?.toLowerCase();
+
+    if (testPhase === 'example') {
+      return (
+        this.parseBooleanFlag(reviewObject.isExample) === true ||
+        metadataTestType === 'example'
+      );
+    }
+
+    if (testPhase === 'system') {
+      return (
+        this.parseBooleanFlag(reviewObject.isFinal) === true ||
+        metadataTestType === 'system' ||
+        metadataStage === 'final'
+      );
+    }
+
+    return (
+      this.parseBooleanFlag(reviewObject.isProvisional) === true ||
+      metadataTestType === 'provisional'
+    );
+  }
+
+  /**
+   * Builds the payload sent to review-api reviewSummations endpoints.
+   */
+  private buildSummationPayload(
+    input: SummationBuildInput,
+  ): ReviewSummationPayload {
+    const metadata = this.asRecord(input.metadata);
+
+    const normalizedTestType = this.normalizeTestPhase(
+      this.coalesceString(this.asString(metadata.testType), input.testPhase),
+    );
+    const normalizedStage = this.asString(metadata.stage)?.toLowerCase();
+
+    const metaIsFinal = this.parseBooleanFlag(metadata.isFinal);
+    const reviewIsFinal = this.parseBooleanFlag(input.reviewObject?.isFinal);
+    const metaIsProvisional = this.parseBooleanFlag(metadata.isProvisional);
+    const metaIsExample = this.parseBooleanFlag(metadata.isExample);
+
+    const shouldSetFinal =
+      metaIsFinal === true ||
+      reviewIsFinal === true ||
+      normalizedTestType === 'system' ||
+      normalizedStage === 'final';
+
+    const shouldSetProvisional =
+      !shouldSetFinal &&
+      (normalizedTestType === 'provisional' || metaIsProvisional === true);
+
+    const shouldSetExample =
+      normalizedTestType === 'example' || metaIsExample === true;
+
+    return {
+      submissionId: input.submissionId,
+      aggregateScore: input.score,
+      isPassing: input.score >= 0,
+      reviewedDate: new Date().toISOString(),
+      ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
+      ...(shouldSetFinal ? { isFinal: true } : {}),
+      ...(shouldSetProvisional ? { isProvisional: true } : {}),
+      ...(shouldSetExample ? { isExample: true } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+    };
+  }
+
+  /**
+   * Applies one legacy-style review object as either a create or update request.
+   */
   private async upsertFromLegacyReviewPayload(
     token: string,
     args: {
@@ -171,49 +870,9 @@ export class ScoringResultService {
     await this.createReviewSummation(token, reviewPayload);
   }
 
-  private buildSummationPayload(
-    input: SummationBuildInput,
-  ): ReviewSummationPayload {
-    const metadata = this.asRecord(input.metadata);
-
-    const normalizedTestType = this.normalizeTestPhase(
-      this.coalesceString(this.asString(metadata.testType), input.testPhase),
-    );
-    const normalizedStage = this.asString(metadata.stage)?.toLowerCase();
-
-    const metaIsFinal = this.parseBooleanFlag(metadata.isFinal);
-    const reviewIsFinal = this.parseBooleanFlag(input.reviewObject?.isFinal);
-    const metaIsProvisional = this.parseBooleanFlag(metadata.isProvisional);
-    const metaIsExample = this.parseBooleanFlag(metadata.isExample);
-
-    const shouldSetFinal =
-      metaIsFinal === true ||
-      reviewIsFinal === true ||
-      normalizedTestType === 'system' ||
-      normalizedStage === 'final';
-
-    const shouldSetProvisional =
-      !shouldSetFinal &&
-      (normalizedTestType === 'provisional' || metaIsProvisional === true);
-
-    const shouldSetExample =
-      normalizedTestType === 'example' || metaIsExample === true;
-
-    const payload: ReviewSummationPayload = {
-      submissionId: input.submissionId,
-      aggregateScore: input.score,
-      isPassing: input.score >= 0,
-      reviewedDate: new Date().toISOString(),
-      ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
-      ...(shouldSetFinal ? { isFinal: true } : {}),
-      ...(shouldSetProvisional ? { isProvisional: true } : {}),
-      ...(shouldSetExample ? { isExample: true } : {}),
-      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-    };
-
-    return payload;
-  }
-
+  /**
+   * Resolves the numeric score stored in a legacy review payload.
+   */
   private resolveReviewScore(
     reviewObject: Record<string, unknown>,
     testPhase: string,
@@ -238,6 +897,9 @@ export class ScoringResultService {
     return fallbackScore;
   }
 
+  /**
+   * Ensures metadata carries the active test type and optional review type.
+   */
   private normalizeMetadata(
     metadata: Record<string, unknown> | undefined,
     testPhase: string,
@@ -257,6 +919,9 @@ export class ScoringResultService {
     return normalized;
   }
 
+  /**
+   * Sends a create request to review-api.
+   */
   private async createReviewSummation(
     token: string,
     payload: ReviewSummationPayload,
@@ -287,6 +952,9 @@ export class ScoringResultService {
     }
   }
 
+  /**
+   * Sends an update request to review-api.
+   */
   private async updateReviewSummation(
     token: string,
     reviewSummationId: string,
@@ -378,6 +1046,9 @@ export class ScoringResultService {
     }
   }
 
+  /**
+   * Builds the review-api reviewSummations endpoint URL.
+   */
   private buildReviewSummationUrl(): string {
     const baseUrl = (
       process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
@@ -394,6 +1065,16 @@ export class ScoringResultService {
     return `${baseUrl}/v6/reviewSummations`;
   }
 
+  /**
+   * Builds a submission-api base URL without trailing slashes.
+   */
+  private buildSubmissionApiBaseUrl(submissionApiUrl: string): string {
+    return submissionApiUrl.replace(/\/+$/, '');
+  }
+
+  /**
+   * Builds the review-api scorecard lookup URL.
+   */
   private buildScorecardLookupUrl(scorecardId: string): string {
     const reviewApiBaseUrl = this.buildReviewSummationUrl().replace(
       /\/reviewSummations$/,
@@ -403,6 +1084,9 @@ export class ScoringResultService {
     return `${reviewApiBaseUrl}/scorecards/${encodeURIComponent(scorecardId)}`;
   }
 
+  /**
+   * Normalizes example/provisional/system phase names.
+   */
   private normalizeTestPhase(testPhase: string | undefined): string {
     const normalized = (testPhase || '').trim().toLowerCase();
 
@@ -416,6 +1100,37 @@ export class ScoringResultService {
     return 'provisional';
   }
 
+  /**
+   * Normalizes string score direction values into Prisma enum values.
+   */
+  private normalizeScoreDirection(
+    value: string | undefined,
+  ): ScoreDirection | undefined {
+    const normalized = value?.trim().toUpperCase();
+    if (normalized === ScoreDirection.MAXIMIZE) {
+      return ScoreDirection.MAXIMIZE;
+    }
+    if (normalized === ScoreDirection.MINIMIZE) {
+      return ScoreDirection.MINIMIZE;
+    }
+    return undefined;
+  }
+
+  /**
+   * Converts a boolean maximize flag into a score direction.
+   */
+  private normalizeScoreDirectionFromBoolean(
+    isMaximize: boolean | null,
+  ): ScoreDirection | undefined {
+    if (isMaximize === null) {
+      return undefined;
+    }
+    return isMaximize ? ScoreDirection.MAXIMIZE : ScoreDirection.MINIMIZE;
+  }
+
+  /**
+   * Parses boolean values from booleans and string booleans.
+   */
   private parseBooleanFlag(value: unknown): boolean | null {
     if (typeof value === 'boolean') {
       return value;
@@ -434,6 +1149,9 @@ export class ScoringResultService {
     return null;
   }
 
+  /**
+   * Safely clones record-like values and rejects arrays.
+   */
   private asRecord(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
@@ -442,6 +1160,9 @@ export class ScoringResultService {
     return { ...(value as Record<string, unknown>) };
   }
 
+  /**
+   * Converts strings and numbers into trimmed strings.
+   */
   private asString(value: unknown): string | undefined {
     if (value === null || value === undefined) {
       return undefined;
@@ -451,10 +1172,13 @@ export class ScoringResultService {
       return undefined;
     }
 
-    const asString = `${value}`.trim();
-    return asString.length > 0 ? asString : undefined;
+    const stringValue = `${value}`.trim();
+    return stringValue.length > 0 ? stringValue : undefined;
   }
 
+  /**
+   * Converts strings and numbers into finite numbers.
+   */
   private toNumber(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
@@ -468,6 +1192,9 @@ export class ScoringResultService {
     return null;
   }
 
+  /**
+   * Returns the first non-empty string from the provided values.
+   */
   private coalesceString(
     ...values: Array<string | undefined>
   ): string | undefined {
@@ -480,6 +1207,75 @@ export class ScoringResultService {
     return undefined;
   }
 
+  /**
+   * Extracts submission arrays from direct-list and wrapped API responses.
+   */
+  private extractSubmissionArray(data: unknown): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const wrapper = this.asRecord(data);
+    const resultValue = wrapper.result;
+    if (Array.isArray(resultValue)) {
+      return resultValue.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(resultValue);
+    if (Array.isArray(resultRecord.content)) {
+      return resultRecord.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(wrapper.data)) {
+      return wrapper.data.map((entry) => this.asRecord(entry));
+    }
+
+    return [];
+  }
+
+  /**
+   * Parses the total page count from submission-api response headers.
+   */
+  private parseTotalPages(
+    headers: Record<string, unknown> | undefined,
+  ): number {
+    if (!headers) {
+      return 1;
+    }
+
+    const totalPagesValue =
+      headers['x-total-pages'] ??
+      headers['X-Total-Pages'] ??
+      headers['x-total-page'];
+    const totalPages = Number.parseInt(
+      this.asString(totalPagesValue) ?? '1',
+      10,
+    );
+    return Number.isFinite(totalPages) && totalPages > 0 ? totalPages : 1;
+  }
+
+  /**
+   * Compares ISO timestamps lexicographically while tolerating missing values.
+   */
+  private compareIsoDateStrings(
+    left: string | undefined,
+    right: string | undefined,
+  ): number {
+    if (left && right) {
+      return left.localeCompare(right);
+    }
+    if (left) {
+      return 1;
+    }
+    if (right) {
+      return -1;
+    }
+    return 0;
+  }
+
+  /**
+   * Extracts message/status/body details from Axios-style HTTP errors.
+   */
   private extractHttpError(error: unknown): {
     message: string;
     statusCode?: number;

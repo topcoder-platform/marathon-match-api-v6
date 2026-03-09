@@ -24,6 +24,13 @@ enum CompilationStatus {
   @@schema("marathon_match")
 }
 
+enum ScoreDirection {
+  MAXIMIZE
+  MINIMIZE
+
+  @@schema("marathon_match")
+}
+
 model tester {
   id                String                 @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
   name              String
@@ -50,6 +57,8 @@ model marathonMatchConfig {
   challengeId           String        @unique @db.VarChar(36)
   name                  String
   active                Boolean       @default(true)
+  relativeScoringEnabled Boolean      @default(true)
+  scoreDirection        ScoreDirection @default(MAXIMIZE)
   submissionApiUrl      String        @default("https://api.topcoder-dev.com/v6")
   reviewScorecardId     String
   testerId              String        @db.VarChar(14)

@@ -25,6 +25,9 @@ import {
 
 class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
   @IsString()
+  challengeId: string;
+
+  @IsString()
   submissionId: string;
 
   @Type(() => Number)

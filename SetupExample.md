@@ -179,6 +179,8 @@ jq -n \
   '{
     name: "BridgeRunners Dev Config",
     active: false,
+    relativeScoringEnabled: true,
+    scoreDirection: "MAXIMIZE",
     submissionApiUrl: "https://api.topcoder-dev.com/v6",
     reviewScorecardId: $reviewScorecardId,
     testerId: $testerId,

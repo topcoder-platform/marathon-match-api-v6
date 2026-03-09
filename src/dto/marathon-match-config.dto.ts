@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PhaseConfigType } from '@prisma/client';
+import { PhaseConfigType, ScoreDirection } from '@prisma/client';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -76,6 +76,29 @@ export class CreateMarathonMatchConfigDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiProperty({
+    description:
+      'Whether review scores should be recomputed relative to the latest submission from each competitor.',
+    required: false,
+    default: true,
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  relativeScoringEnabled?: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    required: false,
+    enum: ScoreDirection,
+    default: ScoreDirection.MAXIMIZE,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  @IsOptional()
+  @IsEnum(ScoreDirection)
+  scoreDirection?: ScoreDirection;
 
   @ApiProperty({
     description: 'Submission API base URL',
@@ -190,6 +213,27 @@ export class UpdateMarathonMatchConfigDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiProperty({
+    description:
+      'Whether review scores should be recomputed relative to the latest submission from each competitor.',
+    required: false,
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  relativeScoringEnabled?: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    required: false,
+    enum: ScoreDirection,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  @IsOptional()
+  @IsEnum(ScoreDirection)
+  scoreDirection?: ScoreDirection;
 
   @ApiProperty({
     description: 'Submission API base URL',
@@ -344,6 +388,21 @@ export class MarathonMatchConfigResponseDto {
     example: true,
   })
   active: boolean;
+
+  @ApiProperty({
+    description:
+      'Whether review scores are recomputed relative to the latest submission from each competitor.',
+    example: true,
+  })
+  relativeScoringEnabled: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    enum: ScoreDirection,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  scoreDirection: ScoreDirection;
 
   @ApiProperty({
     description: 'Submission API base URL',

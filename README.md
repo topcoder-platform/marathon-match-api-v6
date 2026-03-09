@@ -213,6 +213,8 @@ Create config on the challenge id (`POST /challenge/:challengeId`) and include a
 
 - `testerId` (from step 1)
 - `reviewScorecardId`
+- `relativeScoringEnabled` (`true` to normalize scores against the latest submission per member; defaults to `true`)
+- `scoreDirection` (`MAXIMIZE` when higher raw testcase scores are better, `MINIMIZE` when lower scores are better)
 - `submissionApiUrl`
 - `taskDefinitionName`
 - `taskDefinitionVersion`
@@ -227,6 +229,7 @@ Config identity semantics:
 - `id` is an internal nano-id for the marathon match config record.
 - `challengeId` stores the challenge identifier and is used for `/challenge/:challengeId` CRUD endpoints.
 - `reviewScorecardId` can be either the review-api scorecard id (nanoid) or legacy id; scoring callback processing resolves it to the canonical scorecard id before posting review summations.
+- When `relativeScoringEnabled = true`, review scores are recomputed from per-test raw scores against the best score currently held by the latest submission from each member, so final review summation scores stay within `0..100` and can change as new submissions arrive.
 
 Important runtime behavior:
 

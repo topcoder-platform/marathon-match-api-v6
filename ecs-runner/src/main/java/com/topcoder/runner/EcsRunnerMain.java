@@ -254,6 +254,7 @@ public class EcsRunnerMain {
                 logMap("callback.metadata", callbackMetadata);
 
                 ScoringCallbackRequest callbackRequest = new ScoringCallbackRequest(
+                    challengeId,
                     submissionId,
                     testerExecution.getScore(),
                     testPhase,
@@ -1662,6 +1663,9 @@ public class EcsRunnerMain {
      * Callback payload posted to marathon-match API after scorer execution.
      */
     private static class ScoringCallbackRequest {
+        @JsonProperty("challengeId")
+        private final String challengeId;
+
         @JsonProperty("submissionId")
         private final String submissionId;
 
@@ -1687,6 +1691,7 @@ public class EcsRunnerMain {
         private final List<Map<String, Object>> impactedReviews;
 
         ScoringCallbackRequest(
+            String challengeId,
             String submissionId,
             double score,
             String testPhase,
@@ -1696,6 +1701,7 @@ public class EcsRunnerMain {
             Map<String, Object> currentReview,
             List<Map<String, Object>> impactedReviews
         ) {
+            this.challengeId = challengeId;
             this.submissionId = submissionId;
             this.score = score;
             this.testPhase = testPhase;
