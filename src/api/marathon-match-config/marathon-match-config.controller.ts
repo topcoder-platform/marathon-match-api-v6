@@ -26,6 +26,8 @@ import {
   CreateMarathonMatchConfigDto,
   MarathonMatchConfigPaginatedResponseDto,
   MarathonMatchConfigResponseDto,
+  MarathonMatchDefaultsResponseDto,
+  RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
@@ -89,6 +91,47 @@ export class MarathonMatchConfigController {
     return await this.marathonMatchConfigService.createConfig(
       challengeId,
       body,
+      user,
+    );
+  }
+
+  /**
+   * Reruns the latest submissions for a marathon match configuration.
+   * @param challengeId Challenge ID.
+   * @param user Authenticated user for audit context.
+   * @returns Accepted rerun dispatch summary.
+   */
+  @Post('/:challengeId/rerun')
+  @Roles(UserRole.Admin)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @ApiOperation({
+    summary: 'Rerun latest submissions for a Marathon Match challenge',
+    description: 'Roles: Admin | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the marathon match config rerun request',
+    example: '30000123',
+  })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiResponse({
+    status: 202,
+    description: 'Latest submissions queued for asynchronous rerun dispatch.',
+    type: RerunResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or PROVISIONAL phase config is missing.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
+  async rerunLatestSubmissions(
+    @Param('challengeId') challengeId: string,
+    @User() user: JwtUser,
+  ): Promise<RerunResponseDto> {
+    return await this.marathonMatchConfigService.rerunLatestSubmissions(
+      challengeId,
       user,
     );
   }
@@ -178,6 +221,28 @@ export class MarathonMatchConfigController {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="tester.jar"');
     res.send(jar);
+  }
+
+  /**
+   * Retrieves default marathon match configuration values used to pre-populate the UI.
+   * @returns Default review scorecard ID, test timeout, and compile timeout.
+   */
+  @Get('/defaults')
+  @Roles(UserRole.Admin)
+  @Scopes(Scope.ReadMarathonMatch)
+  @ApiOperation({
+    summary: 'Get marathon match config defaults',
+    description: 'Roles: Admin | Scopes: read:marathon-match',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Marathon match config defaults retrieved successfully.',
+    type: MarathonMatchDefaultsResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 500, description: 'Internal Server Error.' })
+  getDefaults(): MarathonMatchDefaultsResponseDto {
+    return this.marathonMatchConfigService.getDefaults();
   }
 
   /**

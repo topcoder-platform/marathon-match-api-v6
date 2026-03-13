@@ -3,12 +3,14 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
+  ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
@@ -42,6 +44,10 @@ class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
 
   @IsOptional()
   @IsString()
+  reviewId?: string;
+
+  @IsOptional()
+  @IsString()
   scorecardId?: string;
 
   @IsOptional()
@@ -56,6 +62,32 @@ class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
   @IsArray()
   @IsObject({ each: true })
   impactedReviews?: Record<string, unknown>[];
+}
+
+class TriggerSystemScoreDto {
+  @ApiProperty({
+    description: 'Review ID created in review-api for the system reviewer',
+    example: '7af90e06-d65a-4c0f-acaf-61d4f0c71234',
+  })
+  @IsString()
+  @IsNotEmpty()
+  reviewId: string;
+
+  @ApiProperty({
+    description: 'Submission ID to score',
+    example: '3f1f8b69-4ea0-4453-a293-60f52e69f25d',
+  })
+  @IsString()
+  @IsNotEmpty()
+  submissionId: string;
+
+  @ApiProperty({
+    description: 'Challenge ID that owns the submission',
+    example: '30000123',
+  })
+  @IsString()
+  @IsNotEmpty()
+  challengeId: string;
 }
 
 /**
@@ -90,6 +122,36 @@ export class ScoringResultController {
     @Body() payload: ScoringResultCallbackDto,
   ): Promise<{ status: string }> {
     await this.scoringResultService.processScoringResult(payload);
+    return { status: 'accepted' };
+  }
+
+  /**
+   * Dispatches the SYSTEM scorer task for a Marathon Match review.
+   */
+  @Post('/system-score')
+  @Roles(UserRole.Admin)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Dispatch Marathon Match SYSTEM scoring for a pending review',
+    description:
+      'Roles: Admin | Scopes: update:marathon-match. Intended for autopilot review orchestration.',
+  })
+  @ApiBody({ type: TriggerSystemScoreDto })
+  @ApiResponse({
+    status: 202,
+    description: 'SYSTEM scoring dispatch accepted.',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid system scoring payload.' })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  async triggerSystemScore(
+    @Body() payload: TriggerSystemScoreDto,
+  ): Promise<{ status: string }> {
+    await this.scoringResultService.triggerSystemScore(
+      payload.reviewId,
+      payload.submissionId,
+      payload.challengeId,
+    );
     return { status: 'accepted' };
   }
 }

@@ -64,6 +64,7 @@ public class EcsRunnerMain {
         String challengeId = "<missing>";
         String submissionId = "<missing>";
         String testPhase = "provisional";
+        String reviewId = null;
 
         try {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
@@ -75,6 +76,10 @@ public class EcsRunnerMain {
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
             String reviewTypeId = getRequiredEnv("REVIEW_TYPE_ID");
+            reviewId = getOptionalEnv("REVIEW_ID", "");
+            if (reviewId != null && reviewId.isEmpty()) {
+                reviewId = null;
+            }
             testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
             int phaseStartSeed = getOptionalIntEnv("PHASE_START_SEED", 0);
             int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
@@ -259,6 +264,7 @@ public class EcsRunnerMain {
                     testerExecution.getScore(),
                     testPhase,
                     reviewTypeId,
+                    reviewId,
                     scorerConfig.getScoreCardId(),
                     callbackMetadata,
                     currentReview,
@@ -1678,6 +1684,9 @@ public class EcsRunnerMain {
         @JsonProperty("reviewTypeId")
         private final String reviewTypeId;
 
+        @JsonProperty("reviewId")
+        private final String reviewId;
+
         @JsonProperty("scorecardId")
         private final String scorecardId;
 
@@ -1696,6 +1705,7 @@ public class EcsRunnerMain {
             double score,
             String testPhase,
             String reviewTypeId,
+            String reviewId,
             String scorecardId,
             Map<String, Object> metadata,
             Map<String, Object> currentReview,
@@ -1706,6 +1716,7 @@ public class EcsRunnerMain {
             this.score = score;
             this.testPhase = testPhase;
             this.reviewTypeId = reviewTypeId;
+            this.reviewId = reviewId;
             this.scorecardId = scorecardId;
             this.metadata = metadata;
             this.currentReview = currentReview;

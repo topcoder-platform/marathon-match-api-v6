@@ -1,7 +1,16 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable } from '@nestjs/common';
-import { ScoreDirection } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  CompilationStatus,
+  PhaseConfigType,
+  ScoreDirection,
+} from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
+import { EcsService } from 'src/shared/modules/global/ecs.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
@@ -12,6 +21,7 @@ export interface ScoringResultCallbackPayload {
   score: number;
   testPhase: string;
   reviewTypeId: string;
+  reviewId?: string;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
   currentReview?: Record<string, unknown>;
@@ -73,6 +83,7 @@ export class ScoringResultService {
     private readonly httpService: HttpService,
     private readonly m2mService: M2MService,
     private readonly prisma: PrismaService,
+    private readonly ecsService: EcsService,
   ) {}
 
   /**
@@ -103,7 +114,7 @@ export class ScoringResultService {
       fallbackMetadata,
     );
     if (relativeScoringSettings.enabled) {
-      const handled = await this.processRelativeScoring(
+      const currentRelativeScore = await this.processRelativeScoring(
         token,
         payload,
         normalizedPhase,
@@ -111,7 +122,13 @@ export class ScoringResultService {
         fallbackScorecardId,
         relativeScoringSettings,
       );
-      if (handled) {
+      if (currentRelativeScore !== undefined) {
+        await this.completeSystemReviewIfNeeded(
+          token,
+          payload.reviewId,
+          currentRelativeScore,
+          normalizedPhase,
+        );
         return;
       }
     }
@@ -120,14 +137,17 @@ export class ScoringResultService {
       payload.currentReview &&
       Object.keys(payload.currentReview).length > 0
     ) {
-      await this.upsertFromLegacyReviewPayload(token, {
-        legacyReview: payload.currentReview,
-        fallbackSubmissionId: payload.submissionId,
-        fallbackScore: payload.score,
-        fallbackScorecardId,
-        fallbackMetadata,
-        testPhase: normalizedPhase,
-      });
+      const currentReviewScore = await this.upsertFromLegacyReviewPayload(
+        token,
+        {
+          legacyReview: payload.currentReview,
+          fallbackSubmissionId: payload.submissionId,
+          fallbackScore: payload.score,
+          fallbackScorecardId,
+          fallbackMetadata,
+          testPhase: normalizedPhase,
+        },
+      );
 
       for (const impactedReview of payload.impactedReviews ?? []) {
         await this.upsertFromLegacyReviewPayload(token, {
@@ -140,6 +160,12 @@ export class ScoringResultService {
         });
       }
 
+      await this.completeSystemReviewIfNeeded(
+        token,
+        payload.reviewId,
+        currentReviewScore,
+        normalizedPhase,
+      );
       return;
     }
 
@@ -152,6 +178,90 @@ export class ScoringResultService {
     });
 
     await this.createReviewSummation(token, reviewPayload);
+    await this.completeSystemReviewIfNeeded(
+      token,
+      payload.reviewId,
+      reviewPayload.aggregateScore,
+      normalizedPhase,
+    );
+  }
+
+  /**
+   * Dispatches the SYSTEM scorer task for a pending Marathon Match review.
+   * @param reviewId Review identifier created in review-api.
+   * @param submissionId Submission identifier to score.
+   * @param challengeId Challenge identifier used to resolve Marathon Match config.
+   */
+  async triggerSystemScore(
+    reviewId: string,
+    submissionId: string,
+    challengeId: string,
+  ): Promise<void> {
+    const config = await this.prisma.marathonMatchConfig.findUnique({
+      where: { challengeId },
+      include: {
+        phaseConfigs: true,
+        tester: {
+          select: {
+            id: true,
+            compilationStatus: true,
+            compilationError: true,
+          },
+        },
+      },
+    });
+
+    if (!config) {
+      throw new NotFoundException(
+        `Marathon match config with challenge ID ${challengeId} not found.`,
+      );
+    }
+
+    if (config.active === false) {
+      throw new BadRequestException(
+        `Marathon match config ${challengeId} is inactive. SYSTEM scoring dispatch requires an active configuration.`,
+      );
+    }
+
+    if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
+      const compilationError = config.tester.compilationError?.trim();
+      throw new BadRequestException(
+        `Tester ${config.tester.id} for challenge ${challengeId} is not ready for SYSTEM scoring. Current compilation status: ${config.tester.compilationStatus}.${compilationError ? ` compilationError: ${compilationError}` : ''}`,
+      );
+    }
+
+    const systemPhaseConfig = config.phaseConfigs.find(
+      (phaseConfig) => phaseConfig.configType === PhaseConfigType.SYSTEM,
+    );
+    if (!systemPhaseConfig) {
+      throw new BadRequestException(
+        `Marathon match config ${challengeId} requires a SYSTEM phase config for system scoring dispatch.`,
+      );
+    }
+
+    const launchResult = await this.ecsService.launchScorerTask(
+      challengeId,
+      submissionId,
+      {
+        taskDefinitionName: config.taskDefinitionName,
+        taskDefinitionVersion: config.taskDefinitionVersion,
+      },
+      {
+        configType: systemPhaseConfig.configType,
+        startSeed: systemPhaseConfig.startSeed,
+        numberOfTests: systemPhaseConfig.numberOfTests,
+      },
+      reviewId,
+    );
+
+    this.logger.log({
+      message: 'Triggered Marathon Match SYSTEM score dispatch.',
+      challengeId,
+      submissionId,
+      reviewId,
+      taskArn: launchResult.taskArn,
+      taskId: launchResult.taskId,
+    });
   }
 
   /**
@@ -166,7 +276,7 @@ export class ScoringResultService {
     fallbackMetadata: Record<string, unknown>,
     fallbackScorecardId: string | undefined,
     settings: RelativeScoringSettings,
-  ): Promise<boolean> {
+  ): Promise<number | undefined> {
     if (!settings.challengeId || !settings.submissionApiUrl) {
       this.logger.warn({
         message:
@@ -176,7 +286,7 @@ export class ScoringResultService {
         submissionId: payload.submissionId,
         testPhase,
       });
-      return false;
+      return undefined;
     }
 
     const submissions = await this.fetchChallengeSubmissions(
@@ -211,7 +321,7 @@ export class ScoringResultService {
         challengeId: settings.challengeId,
         testPhase,
       });
-      return false;
+      return undefined;
     }
 
     const impactedReviews = this.selectLatestRelativeReviewRecords(
@@ -238,6 +348,9 @@ export class ScoringResultService {
       ),
     );
 
+    const currentReviewPayload =
+      relativeReviewPayloads[relativeReviewPayloads.length - 1];
+
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
       const reviewId = this.asString(reviewPayload.reviewObject.id);
@@ -260,7 +373,7 @@ export class ScoringResultService {
       await this.updateReviewSummation(token, reviewId, reviewPayload.payload);
     }
 
-    return true;
+    return currentReviewPayload?.payload.aggregateScore;
   }
 
   /**
@@ -820,7 +933,7 @@ export class ScoringResultService {
       fallbackMetadata: Record<string, unknown>;
       testPhase: string;
     },
-  ): Promise<void> {
+  ): Promise<number> {
     const reviewObject = this.asRecord(args.legacyReview);
 
     const submissionId = this.coalesceString(
@@ -864,10 +977,11 @@ export class ScoringResultService {
     const reviewId = this.asString(reviewObject.id);
     if (reviewId) {
       await this.updateReviewSummation(token, reviewId, reviewPayload);
-      return;
+      return reviewPayload.aggregateScore;
     }
 
     await this.createReviewSummation(token, reviewPayload);
+    return reviewPayload.aggregateScore;
   }
 
   /**
@@ -987,6 +1101,56 @@ export class ScoringResultService {
   }
 
   /**
+   * Completes the originating review record after SYSTEM scoring has been persisted.
+   */
+  private async completeSystemReviewIfNeeded(
+    token: string,
+    reviewId: string | undefined,
+    finalScore: number,
+    testPhase: string,
+  ): Promise<void> {
+    if (this.normalizeTestPhase(testPhase) !== 'system') {
+      return;
+    }
+
+    const normalizedReviewId = reviewId?.trim();
+    if (!normalizedReviewId) {
+      return;
+    }
+
+    const url = this.buildReviewUrl(normalizedReviewId);
+    const payload = {
+      status: 'COMPLETED',
+      reviewDate: new Date().toISOString(),
+      finalScore,
+    };
+
+    try {
+      await firstValueFrom(
+        this.httpService.patch(url, payload, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+    } catch (error) {
+      const errorDetails = this.extractHttpError(error);
+      this.logger.error({
+        message: 'Failed to mark system review as completed',
+        url,
+        payload,
+        reviewId: normalizedReviewId,
+        statusCode: errorDetails.statusCode ?? null,
+        responseBody: errorDetails.responseBody ?? null,
+        error: errorDetails.message,
+      });
+      throw new Error(
+        `Failed to mark review ${normalizedReviewId} as COMPLETED: ${errorDetails.message}`,
+      );
+    }
+  }
+
+  /**
    * Resolves scorecard references to canonical review-api ids.
    * The input can be either the internal id or legacy id.
    */
@@ -1050,19 +1214,7 @@ export class ScoringResultService {
    * Builds the review-api reviewSummations endpoint URL.
    */
   private buildReviewSummationUrl(): string {
-    const baseUrl = (
-      process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
-    ).replace(/\/+$/, '');
-
-    if (baseUrl.endsWith('/reviewSummations')) {
-      return baseUrl;
-    }
-
-    if (baseUrl.endsWith('/v6')) {
-      return `${baseUrl}/reviewSummations`;
-    }
-
-    return `${baseUrl}/v6/reviewSummations`;
+    return `${this.buildReviewApiBaseUrl()}/reviewSummations`;
   }
 
   /**
@@ -1076,12 +1228,33 @@ export class ScoringResultService {
    * Builds the review-api scorecard lookup URL.
    */
   private buildScorecardLookupUrl(scorecardId: string): string {
-    const reviewApiBaseUrl = this.buildReviewSummationUrl().replace(
-      /\/reviewSummations$/,
+    return `${this.buildReviewApiBaseUrl()}/scorecards/${encodeURIComponent(scorecardId)}`;
+  }
+
+  /**
+   * Builds the review-api review endpoint URL for one review record.
+   */
+  private buildReviewUrl(reviewId: string): string {
+    return `${this.buildReviewApiBaseUrl()}/reviews/${encodeURIComponent(reviewId)}`;
+  }
+
+  /**
+   * Builds the canonical review-api v6 base URL.
+   */
+  private buildReviewApiBaseUrl(): string {
+    const baseUrl = (
+      process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
+    ).replace(/\/+$/, '');
+    const normalizedBase = baseUrl.replace(
+      /\/(reviewSummations|reviews|scorecards)$/,
       '',
     );
 
-    return `${reviewApiBaseUrl}/scorecards/${encodeURIComponent(scorecardId)}`;
+    if (normalizedBase.endsWith('/v6')) {
+      return normalizedBase;
+    }
+
+    return `${normalizedBase}/v6`;
   }
 
   /**

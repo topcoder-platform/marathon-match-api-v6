@@ -66,6 +66,7 @@ export class EcsService {
    * @param submissionId Submission ID passed to the ECS container.
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
+   * @param reviewId Optional review-api review id that should be marked completed after callback processing.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID.
@@ -76,6 +77,7 @@ export class EcsService {
     submissionId: string,
     mmConfig: MarathonMatchTaskConfig,
     scoringPhase: MarathonMatchScoringPhase,
+    reviewId?: string,
   ): Promise<MarathonMatchScorerTaskLaunchResult> {
     const cluster = this.getRequiredEnv('ECS_CLUSTER');
     const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
@@ -125,6 +127,10 @@ export class EcsService {
         value: String(scoringPhase.numberOfTests),
       },
     ];
+
+    if (reviewId?.trim()) {
+      runnerEnvironment.push({ name: 'REVIEW_ID', value: reviewId.trim() });
+    }
 
     this.appendOptionalEnvOverride(runnerEnvironment, 'DEBUG_LOG_ACCESS_TOKEN');
     this.appendOptionalEnvOverride(

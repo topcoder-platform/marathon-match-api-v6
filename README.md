@@ -12,6 +12,12 @@ Swagger UI:
 
 `/v6/marathon-match/api-docs`
 
+## Documentation
+
+- [Marathon Match Setup](docs/marathon-match-setup.md) - for challenge administrators
+- [Submission Phase Scoring](docs/submission-phase-scoring.md) - for DevOps
+- [Review Phase Scoring](docs/review-phase-scoring.md) - for DevOps
+
 ## Configuration values
 
 The service is configured via environment variables.
@@ -110,6 +116,7 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 - `PHASE_CONFIG_TYPE`
 - `PHASE_START_SEED`
 - `PHASE_NUMBER_OF_TESTS`
+- `REVIEW_ID` (optional; used for SYSTEM review completion callbacks)
 
 Optional debug vars (set on API service env to be forwarded to runner):
 
@@ -184,8 +191,11 @@ Auth model in code:
 | Method | Path | Required role/scope |
 | --- | --- | --- |
 | `POST` | `/v6/marathon-match/internal/scoring-results` | `administrator` OR `update:marathon-match` |
+| `POST` | `/v6/marathon-match/internal/system-score` | `administrator` OR `update:marathon-match` |
 
 ## How to set up a challenge for marathon match scoring
+
+For the full operator guide, see [Marathon Match Setup](docs/marathon-match-setup.md). The steps below remain as a quick reference.
 
 ### 1. Create a tester
 
@@ -281,6 +291,7 @@ sequenceDiagram
   participant F as AWS ECS Fargate Task
   participant MM as marathon-match-api-v6
   participant SA as Submission API
+  participant SRS as ScoringResultService
   participant RA as review-api-v6
 
   K->>C: Submission event envelope ({topic, payload{submissionId, challengeId, ...}})
@@ -288,12 +299,12 @@ sequenceDiagram
   H->>DB: Load marathonMatchConfig + tester + phaseConfigs
 
   alt Config missing or inactive
-    H-->>C: Skip or throw
+    H-->>C: Skip message
   else Config active
     H->>CA: GET /v6/challenges/:challengeId (M2M token)
     CA-->>H: current/open phases
 
-    alt No open phases or no mapped phaseId
+    alt No open phase or no mapped phase config
       H-->>C: Skip message
     else Phase is mapped
       alt Tester compilationStatus != SUCCESS
@@ -306,8 +317,10 @@ sequenceDiagram
         F->>MM: GET /testers/:testerId
         F->>SA: Download submission artifacts
         F->>F: Load tester JAR + invoke runTester(...)
-        F->>MM: POST /internal/scoring-results (score + legacy review payload)
-        MM->>RA: POST/PUT /v6/reviewSummations
+        F->>MM: POST /internal/scoring-results
+        MM->>SRS: processScoringResult(payload)
+        SRS->>RA: POST/PUT review summations
+        Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
         F-->>ECS: Task exits
         H-->>C: Success
       end
@@ -317,3 +330,13 @@ sequenceDiagram
   C->>C: Commit offset on success/skip
   Note over C: On failures retries with exponential backoff. If DLQ is enabled and retries are exhausted, publish to topic.dlq and commit.
 ```
+
+SYSTEM review scoring uses the same scorer pipeline after autopilot dispatches:
+
+- `POST /v6/marathon-match/internal/system-score`
+- ECS scorer task execution
+- `POST /v6/marathon-match/internal/scoring-results`
+
+## Review phase scoring flow
+
+See [Review Phase Scoring](docs/review-phase-scoring.md) for the end-to-end review-phase sequence from review creation through challenge completion.

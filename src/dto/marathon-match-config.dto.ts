@@ -337,6 +337,30 @@ export class UpdateMarathonMatchConfigDto {
 }
 
 /**
+ * Response representation of configurable default values for new marathon match configs.
+ * Returned by GET /challenge/defaults for UI pre-population.
+ */
+export class MarathonMatchDefaultsResponseDto {
+  @ApiProperty({
+    description: 'Default review scorecard ID',
+    example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
+  })
+  reviewScorecardId: string;
+
+  @ApiProperty({
+    description: 'Default test timeout in ms',
+    example: 90000,
+  })
+  testTimeout: number;
+
+  @ApiProperty({
+    description: 'Default compile timeout in ms',
+    example: 120000,
+  })
+  compileTimeout: number;
+}
+
+/**
  * Response representation for persisted phase configuration records.
  * Returned as nested properties in marathon match config responses.
  */
@@ -495,6 +519,68 @@ export class MarathonMatchConfigResponseDto {
     example: '40166514',
   })
   updatedBy: string | null;
+}
+
+/**
+ * Response payload for a rerun request across the latest challenge submissions.
+ * Returned by POST /challenge/:challengeId/rerun after ECS tasks are dispatched.
+ */
+export class RerunResponseDto {
+  @ApiProperty({
+    description: 'Challenge ID for the rerun request',
+    example: '30000123',
+  })
+  challengeId: string;
+
+  @ApiProperty({
+    description: 'Number of latest submissions selected for rerun dispatch',
+    example: 12,
+  })
+  submissionsQueued: number;
+
+  @ApiProperty({
+    description:
+      'Per-submission launch results for the rerun request, including any dispatch errors.',
+    type: 'array',
+    items: {
+      type: 'object',
+      required: ['submissionId'],
+      properties: {
+        submissionId: {
+          type: 'string',
+          description: 'Submission identifier that was selected for rerun',
+          example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
+        },
+        taskArn: {
+          type: 'string',
+          description: 'AWS ECS task ARN when the scorer task launch succeeded',
+          example:
+            'arn:aws:ecs:us-east-1:123456789012:task/cluster/0123456789abcdef',
+          nullable: true,
+        },
+        taskId: {
+          type: 'string',
+          description:
+            'Short ECS task identifier when the scorer task launch succeeded',
+          example: '0123456789abcdef',
+          nullable: true,
+        },
+        error: {
+          type: 'string',
+          description:
+            'Launch error message when dispatch failed for that submission',
+          example: 'Failed to get M2M token for ECS task launch.',
+          nullable: true,
+        },
+      },
+    },
+  })
+  results: Array<{
+    submissionId: string;
+    taskArn?: string;
+    taskId?: string;
+    error?: string;
+  }>;
 }
 
 /**
