@@ -225,7 +225,7 @@ export class MarathonMatchConfigController {
 
   /**
    * Retrieves default marathon match configuration values used to pre-populate the UI.
-   * @returns Default review scorecard ID, test timeout, and compile timeout.
+   * @returns Default review scorecard ID, test timeout, compile timeout, and task definition values.
    */
   @Get('/defaults')
   @Roles(UserRole.Admin)

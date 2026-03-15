@@ -79,6 +79,11 @@ The service is configured via environment variables.
 | --- | --- | --- | --- |
 | `CHALLENGE_API_URL` | No | `https://api.topcoder-dev.com` | Challenge API lookup for current active phase |
 | `DISABLE_PG_BOSS` | No | `false` | Disable pg-boss queue/worker and run tester compilation inline |
+| `DEFAULT_REVIEW_SCORECARD_ID` | Yes (for UI defaults) | None | Default review scorecard returned by `GET /challenge/defaults` |
+| `DEFAULT_TEST_TIMEOUT_MS` | No | `90000` | Default test timeout returned by `GET /challenge/defaults` |
+| `DEFAULT_COMPILE_TIMEOUT_MS` | No | `120000` | Default compile timeout returned by `GET /challenge/defaults` |
+| `DEFAULT_TASK_DEFINITION_NAME` | No | empty string | Default ECS task definition family returned by `GET /challenge/defaults` |
+| `DEFAULT_TASK_DEFINITION_VERSION` | No | empty string | Default ECS task definition revision returned by `GET /challenge/defaults` |
 | `COMPILE_TIMEOUT_MS` | No | `120000` | Maven tester compilation timeout |
 | `COMPILE_JAVA_MAX_HEAP_MB` | No | `384` | Max JVM heap (MB) enforced for tester compilation Maven process when `-Xmx` is not already provided |
 | `COMPILE_MAVEN_OPTS` | No | (auto-derived) | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap |

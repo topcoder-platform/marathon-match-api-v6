@@ -59,6 +59,8 @@ Use the response to pre-populate:
 - `reviewScorecardId`
 - `testTimeout`
 - `compileTimeout`
+- `taskDefinitionName`
+- `taskDefinitionVersion`
 
 ## Step 3 - Resolve challenge phase IDs
 

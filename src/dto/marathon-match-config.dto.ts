@@ -358,6 +358,20 @@ export class MarathonMatchDefaultsResponseDto {
     example: 120000,
   })
   compileTimeout: number;
+
+  @ApiProperty({
+    description:
+      'Default ECS task definition name used to pre-fill new configs. Empty string when not configured.',
+    example: 'mm-submission-runner',
+  })
+  taskDefinitionName: string;
+
+  @ApiProperty({
+    description:
+      'Default ECS task definition version used to pre-fill new configs. Empty string when not configured.',
+    example: '42',
+  })
+  taskDefinitionVersion: string;
 }
 
 /**

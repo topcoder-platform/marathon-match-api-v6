@@ -84,7 +84,7 @@ export class MarathonMatchConfigService {
 
   /**
    * Retrieves configurable default values for new marathon match configs from environment variables.
-   * @returns Default review scorecard ID, test timeout, and compile timeout mapped to `MarathonMatchDefaultsResponseDto`.
+   * @returns Default review scorecard ID, test timeout, compile timeout, and optional task definition defaults mapped to `MarathonMatchDefaultsResponseDto`.
    * @throws InternalServerErrorException When `DEFAULT_REVIEW_SCORECARD_ID` is not configured.
    */
   getDefaults(): MarathonMatchDefaultsResponseDto {
@@ -113,11 +113,17 @@ export class MarathonMatchConfigService {
       Number.isFinite(parsedCompileTimeout) && parsedCompileTimeout > 0
         ? parsedCompileTimeout
         : 120000;
+    const taskDefinitionName =
+      process.env.DEFAULT_TASK_DEFINITION_NAME?.trim() || '';
+    const taskDefinitionVersion =
+      process.env.DEFAULT_TASK_DEFINITION_VERSION?.trim() || '';
 
     return {
       reviewScorecardId,
       testTimeout,
       compileTimeout,
+      taskDefinitionName,
+      taskDefinitionVersion,
     };
   }
 
