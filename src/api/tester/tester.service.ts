@@ -11,6 +11,7 @@ import {
   SearchTesterQueryDto,
   TesterPaginatedResponseDto,
   TesterResponseDto,
+  TesterSummaryResponseDto,
   UpdateTesterDto,
 } from 'src/dto/tester.dto';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
@@ -23,6 +24,23 @@ export interface UpdateTesterResult {
   tester: TesterResponseDto;
   compilationTriggered: boolean;
 }
+
+const testerListSelect = {
+  id: true,
+  name: true,
+  version: true,
+  className: true,
+  compilationStatus: true,
+  compilationError: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+  updatedBy: true,
+} satisfies Prisma.testerSelect;
+
+type TesterListRecord = Prisma.testerGetPayload<{
+  select: typeof testerListSelect;
+}>;
 
 /**
  * Handles tester CRUD operations and maps persistence records
@@ -245,18 +263,20 @@ export class TesterService {
         }),
       };
 
-      const testers = await this.prisma.tester.findMany({
-        where,
-        skip,
-        take: perPage,
-        orderBy: {
-          name: 'asc',
-        },
-      });
-
-      const total = await this.prisma.tester.count({
-        where,
-      });
+      const [testers, total] = await Promise.all([
+        this.prisma.tester.findMany({
+          where,
+          skip,
+          take: perPage,
+          orderBy: {
+            name: 'asc',
+          },
+          select: testerListSelect,
+        }),
+        this.prisma.tester.count({
+          where,
+        }),
+      ]);
 
       return {
         metadata: {
@@ -266,7 +286,7 @@ export class TesterService {
           totalPages: Math.ceil(total / perPage),
         },
         testers: testers.map((testerData) =>
-          this.mapTesterResponse(testerData),
+          this.mapTesterSummaryResponse(testerData),
         ),
       };
     } catch (error) {
@@ -297,6 +317,17 @@ export class TesterService {
       ...testerData,
       jarFile,
     };
+  }
+
+  /**
+   * Maps Prisma tester list records to lightweight API response DTOs.
+   * @param testerData Prisma tester list record without source or jar bytes.
+   * @returns Tester summary response DTO.
+   */
+  private mapTesterSummaryResponse(
+    testerData: TesterListRecord,
+  ): TesterSummaryResponseDto {
+    return testerData;
   }
 
   /**

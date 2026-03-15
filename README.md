@@ -169,6 +169,8 @@ Auth model in code:
 | `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `update:marathon-match-tester` |
 | `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
 
+`GET /v6/marathon-match/testers` returns tester summary rows only. Use `GET /v6/marathon-match/testers/:id` when you need `sourceCode` or `jarFile`.
+
 ### Marathon match config endpoints
 
 | Method | Path | Required role/scope |

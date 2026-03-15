@@ -30,6 +30,10 @@ To publish a new version of an existing tester, call:
 
 `PUT /v6/marathon-match/testers/:id`
 
+To browse available testers without transferring the stored source or compiled jar, call:
+
+`GET /v6/marathon-match/testers`
+
 Tester compilation is asynchronous. After creating or updating a tester, poll:
 
 `GET /v6/marathon-match/testers/:id`

@@ -223,7 +223,8 @@ export class TesterController {
   })
   @ApiResponse({
     status: 200,
-    description: 'List of matching testers.',
+    description:
+      'List of matching testers without sourceCode or jarFile payloads.',
     type: TesterPaginatedResponseDto,
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })

@@ -85,10 +85,10 @@ export class UpdateTesterDto {
 }
 
 /**
- * Response representation of a tester record.
- * Returned by create, update, get and list tester endpoints.
+ * Lightweight tester representation used by list responses.
+ * Returned by GET /testers without source or binary payload fields.
  */
-export class TesterResponseDto {
+export class TesterSummaryResponseDto {
   @ApiProperty({ description: 'Unique tester ID', example: 'V1StGXR8_Z5jdH' })
   id: string;
 
@@ -97,12 +97,6 @@ export class TesterResponseDto {
 
   @ApiProperty({ description: 'Version of the tester', example: '1.0.0' })
   version: string;
-
-  @ApiProperty({
-    description: 'Source code used to compile the tester',
-    example: 'public class Tester { }',
-  })
-  sourceCode: string;
 
   @ApiProperty({
     description: 'Main class name for the tester',
@@ -123,13 +117,6 @@ export class TesterResponseDto {
     example: null,
   })
   compilationError: string | null;
-
-  @ApiProperty({
-    description: 'Compiled jar content as a base64-encoded string',
-    nullable: true,
-    example: null,
-  })
-  jarFile: string | null;
 
   @ApiProperty({
     description: 'Creation timestamp',
@@ -156,6 +143,25 @@ export class TesterResponseDto {
     example: '40166514',
   })
   updatedBy: string | null;
+}
+
+/**
+ * Full tester representation used by create, update, and single-tester reads.
+ * Returned by POST /testers, PUT /testers/:id, and GET /testers/:id.
+ */
+export class TesterResponseDto extends TesterSummaryResponseDto {
+  @ApiProperty({
+    description: 'Source code used to compile the tester',
+    example: 'public class Tester { }',
+  })
+  sourceCode: string;
+
+  @ApiProperty({
+    description: 'Compiled jar content as a base64-encoded string',
+    nullable: true,
+    example: null,
+  })
+  jarFile: string | null;
 }
 
 /**
@@ -186,9 +192,9 @@ export class TesterPaginatedResponseDto {
 
   @ApiProperty({
     description: 'List of testers matching the query',
-    type: [TesterResponseDto],
+    type: [TesterSummaryResponseDto],
   })
-  testers: TesterResponseDto[];
+  testers: TesterSummaryResponseDto[];
 }
 
 /**
