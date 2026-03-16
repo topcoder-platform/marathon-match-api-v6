@@ -38,6 +38,11 @@ interface ChallengeResponse {
   };
 }
 
+interface OpenPhaseResolution {
+  phaseIds: string[];
+  phaseIdentifiers: string[];
+}
+
 /**
  * Consumes `marathonmatch.submission.received` events and prepares scorer task
  * orchestration by resolving configured challenge phase and tester readiness.
@@ -129,8 +134,9 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const openPhaseIds = await this.getOpenPhaseIds(challengeId);
-      if (openPhaseIds.length === 0) {
+      const openPhaseResolution =
+        await this.getOpenPhaseResolution(challengeId);
+      if (openPhaseResolution.phaseIdentifiers.length === 0) {
         this.logger.log(
           `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
         );
@@ -139,7 +145,7 @@ export class MarathonMatchSubmissionHandler
 
       const matchingPhaseConfig = this.findMatchingPhaseConfig(
         config.phaseConfigs,
-        openPhaseIds,
+        openPhaseResolution.phaseIdentifiers,
       );
       if (!matchingPhaseConfig) {
         this.logger.log({
@@ -147,7 +153,8 @@ export class MarathonMatchSubmissionHandler
             'No configured marathon match phase for open challenge phases',
           challengeId,
           submissionId,
-          openPhaseIds,
+          openPhaseIds: openPhaseResolution.phaseIds,
+          openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
         });
         return;
       }
@@ -177,7 +184,8 @@ export class MarathonMatchSubmissionHandler
         message: 'Marathon match submission event processed successfully',
         challengeId,
         submissionId,
-        openPhaseIds,
+        openPhaseIds: openPhaseResolution.phaseIds,
+        openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
         matchedPhaseId: matchingPhaseConfig.phaseId,
         matchedPhaseConfigId: matchingPhaseConfig.id,
         taskArn: launchResult.taskArn,
@@ -203,12 +211,14 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Calls challenge-api-v6 and returns currently open phase IDs.
+   * Calls challenge-api-v6 and returns currently open phase identifiers.
    * @param challengeId Challenge identifier to fetch.
-   * @returns Ordered open phase IDs. Falls back to currentPhase when needed.
+   * @returns Canonical open phase IDs plus backward-compatible identifiers.
    * @throws Error When token retrieval or HTTP request fails.
    */
-  private async getOpenPhaseIds(challengeId: string): Promise<string[]> {
+  private async getOpenPhaseResolution(
+    challengeId: string,
+  ): Promise<OpenPhaseResolution> {
     const token = await this.m2mService.getM2MToken();
     if (!token) {
       throw new Error('Unable to get M2M token for challenge API call.');
@@ -223,31 +233,47 @@ export class MarathonMatchSubmissionHandler
       }),
     );
 
-    return this.extractOpenPhaseIds(response.data);
+    return this.extractOpenPhaseResolution(response.data);
   }
 
   /**
-   * Extracts ordered open phase IDs from challenge-api response payload.
+   * Extracts ordered open phase identifiers from challenge-api response payload.
    * @param responseBody HTTP response body from challenge-api.
-   * @returns Ordered open phase IDs, or a currentPhase fallback ID.
+   * @returns Canonical open phase IDs and backward-compatible identifiers.
    */
-  private extractOpenPhaseIds(responseBody: ChallengeResponse): string[] {
+  private extractOpenPhaseResolution(
+    responseBody: ChallengeResponse,
+  ): OpenPhaseResolution {
     const challengeData = this.resolveChallengePayload(responseBody);
-    const openPhaseIds = this.resolveOpenPhaseIds(challengeData.phases);
-    if (openPhaseIds.length > 0) {
-      return openPhaseIds;
+    const openPhases = this.resolveOpenPhases(challengeData.phases);
+    const openPhaseIds = this.resolveOpenPhaseIds(openPhases);
+    const openPhaseIdentifiers = this.resolveOpenPhaseIdentifiers(openPhases);
+    if (openPhaseIdentifiers.length > 0) {
+      return {
+        phaseIds: openPhaseIds,
+        phaseIdentifiers: openPhaseIdentifiers,
+      };
     }
 
-    const currentPhaseId = this.extractPhaseId(challengeData.currentPhase);
-    return currentPhaseId ? [currentPhaseId] : [];
+    const currentPhaseId = this.extractCanonicalPhaseId(
+      challengeData.currentPhase,
+    );
+    return {
+      phaseIds: currentPhaseId ? [currentPhaseId] : [],
+      phaseIdentifiers: this.extractPhaseIdentifiers(
+        challengeData.currentPhase,
+      ),
+    };
   }
 
   /**
-   * Resolves open phase IDs ordered by latest start, then timeline order.
+   * Resolves open phases ordered by latest start, then timeline order.
    * @param phases Challenge phases.
-   * @returns Ordered open phase IDs.
+   * @returns Ordered open phase payloads.
    */
-  private resolveOpenPhaseIds(phases?: ChallengePhaseResponse[]): string[] {
+  private resolveOpenPhases(
+    phases?: ChallengePhaseResponse[],
+  ): ChallengePhaseResponse[] {
     if (!Array.isArray(phases) || phases.length === 0) {
       return [];
     }
@@ -259,7 +285,7 @@ export class MarathonMatchSubmissionHandler
       return [];
     }
 
-    const orderedPhaseIds = openPhases
+    const orderedOpenPhases = openPhases
       .sort((left, right) => {
         const leftStartTimestamp = this.toTimestamp(
           left.phase.actualStartDate ?? left.phase.scheduledStartDate,
@@ -274,10 +300,38 @@ export class MarathonMatchSubmissionHandler
 
         return right.index - left.index;
       })
-      .map(({ phase }) => this.extractPhaseId(phase))
+      .map(({ phase }) => phase);
+
+    return orderedOpenPhases;
+  }
+
+  /**
+   * Resolves canonical open challenge phase IDs ordered by priority.
+   * @param phases Ordered open challenge phases.
+   * @returns Ordered canonical phase IDs.
+   */
+  private resolveOpenPhaseIds(phases: ChallengePhaseResponse[]): string[] {
+    const orderedPhaseIds = phases
+      .map((phase) => this.extractCanonicalPhaseId(phase))
       .filter((phaseId): phaseId is string => Boolean(phaseId));
 
     return [...new Set(orderedPhaseIds)];
+  }
+
+  /**
+   * Resolves open challenge phase identifiers ordered by priority.
+   * Includes both canonical `phaseId` and legacy challenge-phase `id`.
+   * @param phases Ordered open challenge phases.
+   * @returns Ordered identifiers accepted for matching phase config rows.
+   */
+  private resolveOpenPhaseIdentifiers(
+    phases: ChallengePhaseResponse[],
+  ): string[] {
+    return [
+      ...new Set(
+        phases.flatMap((phase) => this.extractPhaseIdentifiers(phase)),
+      ),
+    ];
   }
 
   /**
@@ -310,16 +364,16 @@ export class MarathonMatchSubmissionHandler
   /**
    * Finds a configured phase mapping for the highest-priority open challenge phase.
    * @param phaseConfigs Stored phase configuration rows for a challenge.
-   * @param openPhaseIds Open challenge phase IDs ordered by priority.
+   * @param openPhaseIdentifiers Open challenge phase identifiers ordered by priority.
    * @returns Matching phase config or null when no mapping exists.
    */
   private findMatchingPhaseConfig<TPhaseConfig extends { phaseId: string }>(
     phaseConfigs: TPhaseConfig[],
-    openPhaseIds: string[],
+    openPhaseIdentifiers: string[],
   ): TPhaseConfig | null {
-    for (const openPhaseId of openPhaseIds) {
+    for (const openPhaseIdentifier of openPhaseIdentifiers) {
       const matchingPhaseConfig = phaseConfigs.find(
-        (phaseConfig) => phaseConfig.phaseId === openPhaseId,
+        (phaseConfig) => phaseConfig.phaseId === openPhaseIdentifier,
       );
       if (matchingPhaseConfig) {
         return matchingPhaseConfig;
@@ -350,13 +404,31 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Extracts normalized phase identifier from phase payload.
+   * Extracts normalized canonical phase identifier from phase payload.
    * @param phase Phase payload.
-   * @returns Trimmed phase ID when available, otherwise null.
+   * @returns Trimmed canonical phase ID when available, otherwise null.
    */
-  private extractPhaseId(phase?: ChallengePhaseResponse | null): string | null {
+  private extractCanonicalPhaseId(
+    phase?: ChallengePhaseResponse | null,
+  ): string | null {
     const phaseId = (phase?.phaseId ?? phase?.id ?? '').trim();
     return phaseId.length > 0 ? phaseId : null;
+  }
+
+  /**
+   * Extracts accepted identifiers from phase payload for backwards-compatible matching.
+   * @param phase Phase payload.
+   * @returns Unique identifiers including canonical `phaseId` and legacy `id`.
+   */
+  private extractPhaseIdentifiers(
+    phase?: ChallengePhaseResponse | null,
+  ): string[] {
+    const phaseIds = [
+      (phase?.phaseId ?? '').trim(),
+      (phase?.id ?? '').trim(),
+    ].filter((phaseId): phaseId is string => phaseId.length > 0);
+
+    return [...new Set(phaseIds)];
   }
 
   /**

@@ -46,7 +46,8 @@ export class PhaseConfigDto {
   numberOfTests: number;
 
   @ApiProperty({
-    description: 'Challenge API phase ID used for this configuration',
+    description:
+      'Canonical challenge-api phase definition ID from `phases[].phaseId` (not the challenge-phase row `id`).',
     example: '12345678-abcd-1234-abcd-1234567890ab',
   })
   @IsString()

@@ -38,6 +38,11 @@ type MarathonMatchConfigWithPhaseConfigs =
     };
   }>;
 
+type MarathonMatchPhaseConfigInput = {
+  phase: PhaseConfigDto | undefined;
+  configType: PhaseConfigType;
+};
+
 interface ChallengePhaseResponse {
   id?: string;
   phaseId?: string;
@@ -134,7 +139,7 @@ export class MarathonMatchConfigService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the referenced tester does not exist.
-   * @throws BadRequestException When phase `startSeed` is not a safe integer.
+   * @throws BadRequestException When phase `startSeed` is not a safe integer or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createConfig(
@@ -153,15 +158,16 @@ export class MarathonMatchConfigService {
         );
       }
 
-      const phaseConfigs: Array<{
-        phase: PhaseConfigDto | undefined;
-        configType: PhaseConfigType;
-      }> = [
+      const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: body.example, configType: PhaseConfigType.EXAMPLE },
         { phase: body.provisional, configType: PhaseConfigType.PROVISIONAL },
         { phase: body.system, configType: PhaseConfigType.SYSTEM },
       ];
       this.validateSafeStartSeeds(challengeId, phaseConfigs);
+      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+        challengeId,
+        phaseConfigs,
+      );
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const configId = nanoid(14);
@@ -186,7 +192,7 @@ export class MarathonMatchConfigService {
           },
         });
 
-        for (const { phase, configType } of phaseConfigs) {
+        for (const { phase, configType } of normalizedPhaseConfigs) {
           if (!phase) {
             continue;
           }
@@ -239,7 +245,7 @@ export class MarathonMatchConfigService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Updated marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the config or updated tester does not exist.
-   * @throws BadRequestException When phase `startSeed` is not a safe integer.
+   * @throws BadRequestException When phase `startSeed` is not a safe integer or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async updateConfig(
@@ -272,15 +278,16 @@ export class MarathonMatchConfigService {
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const { example, provisional, system, ...scalarFields } = body;
-      const phaseConfigs: Array<{
-        phase: PhaseConfigDto | undefined;
-        configType: PhaseConfigType;
-      }> = [
+      const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: example, configType: PhaseConfigType.EXAMPLE },
         { phase: provisional, configType: PhaseConfigType.PROVISIONAL },
         { phase: system, configType: PhaseConfigType.SYSTEM },
       ];
       this.validateSafeStartSeeds(challengeId, phaseConfigs);
+      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+        challengeId,
+        phaseConfigs,
+      );
 
       await this.prisma.$transaction(async (prisma) => {
         await prisma.marathonMatchConfig.update({
@@ -291,7 +298,7 @@ export class MarathonMatchConfigService {
           },
         });
 
-        for (const { phase, configType } of phaseConfigs) {
+        for (const { phase, configType } of normalizedPhaseConfigs) {
           if (!phase) {
             continue;
           }
@@ -1090,6 +1097,165 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Resolves submitted challenge phase identifiers to canonical challenge-api `phaseId` values.
+   * Accepts either `phases[].phaseId` or the challenge-phase instance `phases[].id` for backwards compatibility.
+   * @param challengeId Challenge ID whose phases define the allowed identifiers.
+   * @param phaseConfigs Candidate phase configs from create/update input.
+   * @returns Phase configs with canonical `phaseId` values ready for persistence.
+   * @throws BadRequestException When any submitted phase identifier does not exist on the challenge.
+   */
+  private async normalizeConfiguredPhaseIds(
+    challengeId: string,
+    phaseConfigs: MarathonMatchPhaseConfigInput[],
+  ): Promise<MarathonMatchPhaseConfigInput[]> {
+    const configuredPhaseIds = phaseConfigs
+      .map(({ phase }) => phase?.phaseId?.trim() ?? '')
+      .filter((phaseId): phaseId is string => phaseId.length > 0);
+    if (configuredPhaseIds.length === 0) {
+      return phaseConfigs;
+    }
+
+    const canonicalPhaseIdByIdentifier =
+      await this.fetchCanonicalPhaseIdByIdentifier(challengeId);
+
+    return phaseConfigs.map(({ phase, configType }) => {
+      if (!phase) {
+        return { phase, configType };
+      }
+
+      const normalizedInputPhaseId = phase.phaseId.trim();
+      const canonicalPhaseId = canonicalPhaseIdByIdentifier.get(
+        normalizedInputPhaseId,
+      );
+      if (!canonicalPhaseId) {
+        throw new BadRequestException(
+          `Phase ID ${normalizedInputPhaseId} is not configured on challenge ${challengeId}. Use challenge-api phases[].phaseId values.`,
+        );
+      }
+
+      return {
+        configType,
+        phase: {
+          ...phase,
+          phaseId: canonicalPhaseId,
+        },
+      };
+    });
+  }
+
+  /**
+   * Builds a lookup from accepted challenge phase identifiers to canonical persisted phase IDs.
+   * @param challengeId Challenge ID to fetch from challenge-api.
+   * @returns Map keyed by challenge `phaseId` and legacy challenge-phase `id`, both pointing to canonical `phaseId`.
+   * @throws InternalServerErrorException When M2M token retrieval fails.
+   */
+  private async fetchCanonicalPhaseIdByIdentifier(
+    challengeId: string,
+  ): Promise<Map<string, string>> {
+    const token = await this.m2mService.getM2MToken();
+    if (!token) {
+      throw new InternalServerErrorException(
+        'Unable to get M2M token for challenge API call.',
+      );
+    }
+
+    const challengeResponse = await firstValueFrom(
+      this.httpService.get<ChallengeResponse>(
+        `${this.challengeApiBaseUrl}/v6/challenges/${challengeId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      ),
+    );
+    const challengePayload = this.resolveChallengePayload(
+      challengeResponse.data,
+    );
+    const challengePhases = this.resolveChallengePhases(challengePayload);
+    const canonicalPhaseIdByIdentifier = new Map<string, string>();
+
+    for (const phase of challengePhases) {
+      const canonicalPhaseId = this.extractCanonicalChallengePhaseId(phase);
+      if (!canonicalPhaseId) {
+        continue;
+      }
+
+      for (const identifier of this.extractChallengePhaseIdentifiers(phase)) {
+        canonicalPhaseIdByIdentifier.set(identifier, canonicalPhaseId);
+      }
+    }
+
+    return canonicalPhaseIdByIdentifier;
+  }
+
+  /**
+   * Normalizes challenge-api response variants to a challenge payload.
+   * @param responseBody Raw challenge-api response body.
+   * @returns Challenge payload that contains phases/currentPhase fields.
+   */
+  private resolveChallengePayload(
+    responseBody: ChallengeResponse,
+  ): ChallengeResponse {
+    if (responseBody.result?.content) {
+      return responseBody.result.content;
+    }
+
+    if (responseBody.result?.phases || responseBody.result?.currentPhase) {
+      return responseBody.result;
+    }
+
+    return responseBody;
+  }
+
+  /**
+   * Returns challenge phases from the resolved payload, including currentPhase as a fallback.
+   * @param challengePayload Normalized challenge payload from challenge-api.
+   * @returns Challenge phases available for scorer configuration.
+   */
+  private resolveChallengePhases(
+    challengePayload: ChallengeResponse,
+  ): ChallengePhaseResponse[] {
+    if (
+      Array.isArray(challengePayload.phases) &&
+      challengePayload.phases.length > 0
+    ) {
+      return challengePayload.phases;
+    }
+
+    return challengePayload.currentPhase ? [challengePayload.currentPhase] : [];
+  }
+
+  /**
+   * Extracts the canonical challenge phase definition identifier for persistence.
+   * @param phase Challenge phase payload from challenge-api.
+   * @returns Canonical phase identifier, preferring `phaseId` and falling back to `id`.
+   */
+  private extractCanonicalChallengePhaseId(
+    phase?: ChallengePhaseResponse | null,
+  ): string | null {
+    const phaseId = (phase?.phaseId ?? phase?.id ?? '').trim();
+    return phaseId.length > 0 ? phaseId : null;
+  }
+
+  /**
+   * Extracts all accepted identifiers for a challenge phase.
+   * @param phase Challenge phase payload from challenge-api.
+   * @returns Unique identifiers including canonical `phaseId` and legacy instance `id`.
+   */
+  private extractChallengePhaseIdentifiers(
+    phase?: ChallengePhaseResponse | null,
+  ): string[] {
+    const canonicalPhaseId = (phase?.phaseId ?? '').trim();
+    const challengePhaseId = (phase?.id ?? '').trim();
+    const identifiers = [canonicalPhaseId, challengePhaseId].filter(
+      (identifier): identifier is string => identifier.length > 0,
+    );
+
+    return [...new Set(identifiers)];
+  }
+
+  /**
    * Maps Prisma config records and flat phase relation arrays into API DTO shape.
    * @param config Prisma config record with related phase configs.
    * @returns Marathon match config response DTO with typed phase keys.
@@ -1159,10 +1325,7 @@ export class MarathonMatchConfigService {
    */
   private validateSafeStartSeeds(
     challengeId: string,
-    phaseConfigs: Array<{
-      phase: PhaseConfigDto | undefined;
-      configType: PhaseConfigType;
-    }>,
+    phaseConfigs: MarathonMatchPhaseConfigInput[],
   ): void {
     for (const { phase, configType } of phaseConfigs) {
       if (!phase) {

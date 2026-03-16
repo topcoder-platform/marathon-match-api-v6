@@ -108,7 +108,7 @@ Each of `example`, `provisional`, and `system` must contain:
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `phaseId` | string | Challenge phase ID from Challenge API |
+| `phaseId` | string | Canonical challenge phase definition ID from challenge-api `phases[].phaseId` (not the challenge-phase row `id`) |
 | `startSeed` | number | Non-negative integer in the runtime-validated DB range: `0..2147483647` |
 | `numberOfTests` | number | Number of test cases to run |
 

@@ -237,7 +237,7 @@ Create config on the challenge id (`POST /challenge/:challengeId`) and include a
 - `taskDefinitionVersion`
 - `active` (`true` to enable scoring)
 - phase mappings (`example`, `provisional`, `system`) with:
-  - `phaseId` (from challenge-api phase ids)
+  - `phaseId` (from challenge-api `phases[].phaseId`, not the challenge-phase row `id`)
   - `startSeed`
   - `numberOfTests`
 
@@ -245,13 +245,14 @@ Config identity semantics:
 
 - `id` is an internal nano-id for the marathon match config record.
 - `challengeId` stores the challenge identifier and is used for `/challenge/:challengeId` CRUD endpoints.
+- `phaseConfig.phaseId` stores the canonical challenge phase definition id from challenge-api `phases[].phaseId`. Create/update requests also accept the challenge-phase row `id` and normalize it before persistence for backwards compatibility.
 - `reviewScorecardId` can be either the review-api scorecard id (nanoid) or legacy id; scoring callback processing resolves it to the canonical scorecard id before posting review summations.
 - When `relativeScoringEnabled = true`, review scores are recomputed from per-test raw scores against the best score currently held by the latest submission from each member, so final review summation scores stay within `0..100` and can change as new submissions arrive.
 
 Important runtime behavior:
 
 - Incoming submission events are only processed when config is `active = true`.
-- The handler resolves currently open challenge phases from challenge-api (`phases[].isOpen = true`) and requires a matching `phaseConfig.phaseId`.
+- The handler resolves currently open challenge phases from challenge-api (`phases[].isOpen = true`) and matches stored phase config rows by the canonical challenge `phaseId`. Legacy stored challenge-phase row ids are also recognized for backwards compatibility.
 - If no matching phase config exists, the submission is skipped.
 
 ### 4. Ensure scorer infrastructure is configured
