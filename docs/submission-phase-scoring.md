@@ -52,7 +52,7 @@ sequenceDiagram
         F->>MM: GET /challenge/:id/tester-jar
         F->>MM: GET /testers/:testerId
         F->>SA: Download submission artifacts
-        F->>F: runTester(submissionPath, ScorerConfig)
+        F->>F: Launch isolated tester child<br/>(scrubbed env, no outbound INET/INET6 sockets)
         F->>MM: POST /internal/scoring-results
         MM->>SRS: processScoringResult(payload)
         SRS->>RA: Create or update review summations
@@ -70,6 +70,14 @@ sequenceDiagram
 ## Retry and DLQ behavior
 
 Kafka consumption retries with exponential backoff. When `KAFKA_DLQ_ENABLED=true`, messages that still fail after `KAFKA_DLQ_MAX_RETRIES` are published to the configured DLQ topic suffix and the original offset is committed.
+
+## Submission network isolation
+
+The ECS task keeps trusted network access only on the parent runner process so it can fetch config, download the submission, upload artifacts, and post the callback. The tester and submission run inside a separate child JVM as the `runner` user with:
+
+- a scrubbed environment that does not include `ACCESS_TOKEN`
+- socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
+- callback review payloads trusted only when returned from the tester result map, not from writable files under the submission workspace
 
 ## Observability
 

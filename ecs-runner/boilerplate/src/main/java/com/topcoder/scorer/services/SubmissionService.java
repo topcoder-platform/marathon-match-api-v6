@@ -141,12 +141,19 @@ public class SubmissionService {
      */
     private void unzip(InputStream zipStream, String targetDir, String submissionId)
         throws Exception {
-        java.nio.file.Files.createDirectories(Paths.get(targetDir));
+        Path targetRoot = Paths.get(targetDir).toAbsolutePath().normalize();
+        java.nio.file.Files.createDirectories(targetRoot);
         int extractedEntries = 0;
         try (ZipInputStream zis = new ZipInputStream(zipStream)) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                Path filePath = Paths.get(targetDir, entry.getName());
+                Path filePath = targetRoot.resolve(entry.getName()).normalize();
+                if (!filePath.startsWith(targetRoot)) {
+                    throw new RuntimeException(
+                        "Refusing to extract zip entry outside target directory: "
+                            + entry.getName()
+                    );
+                }
                 logInfo(
                     submissionId,
                     "Extracting zip entry: " + entry.getName() + " (directory=" + entry.isDirectory() + ")"
@@ -154,7 +161,10 @@ public class SubmissionService {
                 if (entry.isDirectory()) {
                     java.nio.file.Files.createDirectories(filePath);
                 } else {
-                    java.nio.file.Files.createDirectories(filePath.getParent());
+                    Path parent = filePath.getParent();
+                    if (parent != null) {
+                        java.nio.file.Files.createDirectories(parent);
+                    }
                     try (FileOutputStream fos = new FileOutputStream(filePath.toFile())) {
                         byte[] buffer = new byte[4096];
                         int len;
@@ -168,7 +178,7 @@ public class SubmissionService {
         }
         logInfo(
             submissionId,
-            "Extracted " + extractedEntries + " zip entries into " + targetDir
+            "Extracted " + extractedEntries + " zip entries into " + targetRoot
         );
     }
 

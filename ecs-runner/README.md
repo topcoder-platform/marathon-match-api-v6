@@ -11,7 +11,15 @@ This image is the runtime container for marathon match scoring tasks launched by
 - Python runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
 - C# (.NET 7) SDK support for tester-side submission compilation (`dotnet publish`)
-- non-root runtime user (`runner`)
+- native `mm-net-isolate` helper that drops untrusted execution to the `runner` user and blocks non-`AF_UNIX` sockets
+
+## Isolation model
+
+- The container entrypoint starts as `root`. Do not override the ECS task-definition `user` for this container.
+- The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback.
+- The tester and submission execute in a separate child JVM as the `runner` user with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
+- The child JVM and all descendant submission processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
+- Trusted callback review payloads such as `currentReview` and `impactedReviews` must be returned from the tester `runTester(...)` result map. Files under `artifacts/private/` are no longer used as trusted callback input.
 
 ## Recommended ECR naming and tags
 
@@ -86,6 +94,8 @@ Set these in the API service environment:
 - `REVIEW_TYPE_ID`
 - `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
 - `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
+
+Keep `ECS_SECURITY_GROUPS` least-privilege. The isolated child blocks untrusted submission egress, but the parent runner still needs trusted access to Marathon Match API and Submission API endpoints.
 
 When submissions are launched, API logs now emit a `Submission to ECS runner log mapping` record that includes:
 

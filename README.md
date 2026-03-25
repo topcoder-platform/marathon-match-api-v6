@@ -108,6 +108,8 @@ The service is configured via environment variables.
 | `DEBUG_LOG_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
 | `DEBUG_LOG_FULL_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true` |
 
+`launchScorerTask(...)` already disables public IP assignment for scorer tasks. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
+
 ### ECS runner task environment (injected at launch)
 
 These are required by `ecs-runner` and are passed in container overrides when a task is launched:
@@ -127,6 +129,16 @@ Optional debug vars (set on API service env to be forwarded to runner):
 
 - `DEBUG_LOG_ACCESS_TOKEN`
 - `DEBUG_LOG_FULL_ACCESS_TOKEN` (prints full bearer token; use only for short-lived debugging)
+
+### Submission isolation inside the ECS runner
+
+The ECS task still needs trusted outbound access to fetch challenge config, download submission artifacts, upload artifacts, and post the scoring callback. Untrusted tester/submission execution is therefore split from that bootstrap logic inside the container:
+
+- The container starts as `root` and must not have its ECS task-definition `user` overridden.
+- The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
+- The parent launches a separate child JVM as the `runner` user with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
+- A native wrapper blocks creation of non-`AF_UNIX` sockets for that child JVM and all descendant submission processes, so submissions cannot open live outbound network connections.
+- Callback review payloads such as `currentReview` and `impactedReviews` are now trusted only when returned directly from the tester `runTester(...)` result map. Workspace files under `artifacts/private/` are no longer used for callback review updates.
 
 ## Exit code 137 (OOM) mitigation
 

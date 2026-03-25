@@ -38,7 +38,7 @@ sequenceDiagram
     MMSS->>ECS: launchScorerTask(SYSTEM phase config, reviewId)
     ECS->>MMAPI: GET /challenge/:id + tester-jar
     ECS->>SA: Download submission artifacts
-    ECS->>ECS: runTester(submissionPath, ScorerConfig[SYSTEM])
+    ECS->>ECS: Launch isolated tester child<br/>(scrubbed env, no outbound INET/INET6 sockets)
     ECS->>SRS: POST /internal/scoring-results {score, reviewId, ...}
     SRS->>RA: upsert reviewSummation(s)
     Note over SRS,RA: If relative scoring is enabled, normalized aggregate scores are\ncomputed here and persisted before finalization.
@@ -72,6 +72,10 @@ After the review and downstream phases are closed, `SchedulerService` calls `att
 ## Failure handling
 
 `MarathonMatchReviewService.handleReviewPhaseOpened` catches and logs per-submission failures so one bad submission does not block the rest of the field. These actions are persisted through `AutopilotDbLoggerService`.
+
+## Submission isolation
+
+SYSTEM review scoring uses the same ECS runner isolation model as submission-phase scoring. The trusted parent runner keeps the network access required for bootstrap and callback traffic, while the tester/submission executes in a separate `runner` child process with a scrubbed environment and no outbound INET/INET6 socket access.
 
 ## Observability
 

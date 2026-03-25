@@ -6,17 +6,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.topcoder.scorer.models.ScorerConfig;
 import com.topcoder.scorer.models.ScoringResult;
 import com.topcoder.scorer.services.SubmissionService;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.lang.reflect.Method;
+import java.lang.management.ManagementFactory;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -48,6 +56,12 @@ public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
+    private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
+    private static final String ISOLATED_TESTER_RESULT_MARKER =
+        "__MM_ISOLATED_TESTER_RESULT__:";
+    private static final String ISOLATION_WRAPPER_PATH = "/usr/local/bin/mm-net-isolate";
+    private static final String ISOLATED_EXECUTION_USER = "runner";
+    private static final String ISOLATED_EXECUTION_GROUP = "runner";
 
     private static String logChallengeId = "<unset>";
     private static String logSubmissionId = "<unset>";
@@ -58,6 +72,10 @@ public class EcsRunnerMain {
      * @param args Unused CLI arguments. Runtime configuration is provided through env vars.
      */
     public static void main(String[] args) {
+        if (isIsolatedTesterChildMode(args)) {
+            System.exit(runIsolatedTesterChild(args));
+        }
+
         int exitCode = 2;
         Path submissionDir = null;
         Path testerJarPath = null;
@@ -203,24 +221,37 @@ public class EcsRunnerMain {
                 logScorerConfig(scorerConfig);
 
                 logInfo(
-                    "tester.invoke",
-                    "Invoking tester class "
+                    "tester.isolated",
+                    "Preparing isolated execution for tester class "
                         + tester.getClassName()
                         + " with submissionDir="
                         + submissionDir
                 );
-                TesterExecutionResult testerExecution = runTester(
-                    tester.getClassName(),
-                    submissionDir.toString(),
-                    scorerConfig,
-                    testerJarPath
-                );
+                prepareIsolatedExecutionInputs(submissionDir, testerJarPath);
+                TesterExecutionResult testerExecution;
+                try {
+                    testerExecution = runTesterInIsolation(
+                        challengeId,
+                        submissionId,
+                        testPhase,
+                        tester.getClassName(),
+                        submissionDir,
+                        scorerConfig,
+                        testerJarPath
+                    );
+                } finally {
+                    killLingeringIsolatedProcesses();
+                }
                 logInfo(
                     "tester.invoke",
                     "Tester completed with aggregate score=" + testerExecution.getScore()
                 );
                 logMap("tester.metadata", testerExecution.getMetadata());
                 logIndividualScores(testerExecution.getMetadata());
+                logCurrentAndImpactedReviews(
+                    testerExecution.getCurrentReview(),
+                    testerExecution.getImpactedReviews()
+                );
                 logArtifactFilePreview(
                     submissionDir,
                     "execution-" + submissionId + ".log",
@@ -243,14 +274,6 @@ public class EcsRunnerMain {
                 );
                 logInfo("artifacts.upload", "Artifact upload completed");
 
-                Map<String, Object> currentReview = readOptionalJsonMap(
-                    findArtifactFile(submissionDir, "private/current.json")
-                );
-                List<Map<String, Object>> impactedReviews = readOptionalJsonList(
-                    findArtifactFile(submissionDir, "private/reviews.json")
-                );
-                logCurrentAndImpactedReviews(currentReview, impactedReviews);
-
                 Map<String, Object> callbackMetadata = buildCallbackMetadata(
                     testerExecution.getMetadata(),
                     testPhase,
@@ -267,8 +290,8 @@ public class EcsRunnerMain {
                     reviewId,
                     scorerConfig.getScoreCardId(),
                     callbackMetadata,
-                    currentReview,
-                    impactedReviews
+                    testerExecution.getCurrentReview(),
+                    testerExecution.getImpactedReviews()
                 );
                 logInfo(
                     "api.callback",
@@ -319,6 +342,393 @@ public class EcsRunnerMain {
             deletePathRecursively(testerJarPath);
             logInfo("exit", "Exiting runner with code " + exitCode);
             System.exit(exitCode);
+        }
+    }
+
+    /**
+     * Detects the internal child mode used for isolated tester execution.
+     */
+    private static boolean isIsolatedTesterChildMode(String[] args) {
+        return args != null
+            && args.length > 0
+            && ISOLATED_TESTER_CHILD_MODE.equals(args[0]);
+    }
+
+    /**
+     * Executes the tester inside a sandboxed child JVM and emits the structured
+     * result back to the trusted parent process over stdout.
+     */
+    private static int runIsolatedTesterChild(String[] args) {
+        try {
+            if (args.length != 8) {
+                throw new IllegalArgumentException(
+                    "Isolated tester child mode expects 7 arguments."
+                );
+            }
+
+            String challengeId = args[1];
+            String submissionId = args[2];
+            String testPhase = normalizeTestPhase(args[3]);
+            String testerClassName = args[4];
+            String submissionDir = args[5];
+            Path testerJarPath = Paths.get(args[6]);
+            Path scorerConfigPath = Paths.get(args[7]);
+
+            setLogContext(challengeId, submissionId, testPhase);
+            logInfo(
+                "tester.isolated",
+                "Running isolated tester child for testerClass=" + testerClassName
+            );
+
+            ScorerConfig scorerConfig = OBJECT_MAPPER.readValue(
+                scorerConfigPath.toFile(),
+                ScorerConfig.class
+            );
+            logScorerConfig(scorerConfig);
+
+            TesterExecutionResult testerExecution = runTester(
+                testerClassName,
+                submissionDir,
+                scorerConfig,
+                testerJarPath
+            );
+            String serializedResult = OBJECT_MAPPER.writeValueAsString(
+                testerExecution.toSerializableMap()
+            );
+            String encodedResult = Base64
+                .getEncoder()
+                .encodeToString(serializedResult.getBytes(StandardCharsets.UTF_8));
+            System.out.println(ISOLATED_TESTER_RESULT_MARKER + encodedResult);
+            return 0;
+        } catch (Exception error) {
+            logError(
+                "tester.isolated",
+                "Isolated tester child failed: " + error.getMessage(),
+                error
+            );
+            return 1;
+        }
+    }
+
+    /**
+     * Prepares extracted submission/tester inputs so the isolated runner user can
+     * compile, execute, and write artifacts without inheriting trusted env state.
+     */
+    private static void prepareIsolatedExecutionInputs(
+        Path submissionDir,
+        Path testerJarPath
+    ) throws Exception {
+        requireRootParentProcess();
+        setPathOwnerRecursively(
+            submissionDir,
+            ISOLATED_EXECUTION_USER,
+            ISOLATED_EXECUTION_GROUP
+        );
+        setPathOwnerRecursively(
+            testerJarPath,
+            ISOLATED_EXECUTION_USER,
+            ISOLATED_EXECUTION_GROUP
+        );
+    }
+
+    /**
+     * Runs tester execution in a dedicated child JVM that has a scrubbed
+     * environment and socket restrictions enforced by the native isolation wrapper.
+     */
+    @SuppressWarnings("unchecked")
+    private static TesterExecutionResult runTesterInIsolation(
+        String challengeId,
+        String submissionId,
+        String testPhase,
+        String testerClassName,
+        Path submissionDir,
+        ScorerConfig scorerConfig,
+        Path testerJarPath
+    ) throws Exception {
+        Path scorerConfigPath = null;
+        try {
+            scorerConfigPath = Files.createTempFile("mm-isolated-scorer-", ".json");
+            OBJECT_MAPPER.writeValue(scorerConfigPath.toFile(), scorerConfig);
+            setPathOwnerRecursively(
+                scorerConfigPath,
+                ISOLATED_EXECUTION_USER,
+                ISOLATED_EXECUTION_GROUP
+            );
+
+            List<String> command = buildIsolatedTesterCommand(
+                challengeId,
+                submissionId,
+                testPhase,
+                testerClassName,
+                submissionDir,
+                testerJarPath,
+                scorerConfigPath
+            );
+            logInfo(
+                "tester.isolated",
+                "Launching isolated tester JVM: " + renderCommandForLog(command)
+            );
+
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
+            Process process = processBuilder.start();
+
+            String encodedResult = null;
+            try (
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(
+                        process.getInputStream(),
+                        StandardCharsets.UTF_8
+                    )
+                )
+            ) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith(ISOLATED_TESTER_RESULT_MARKER)) {
+                        encodedResult = line.substring(
+                            ISOLATED_TESTER_RESULT_MARKER.length()
+                        );
+                    } else {
+                        System.out.println(line);
+                    }
+                }
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new RuntimeException(
+                    "Isolated tester JVM exited with code " + exitCode + "."
+                );
+            }
+
+            if (encodedResult == null || encodedResult.trim().isEmpty()) {
+                throw new RuntimeException(
+                    "Isolated tester JVM did not return a structured result."
+                );
+            }
+
+            String serializedResult = new String(
+                Base64.getDecoder().decode(encodedResult),
+                StandardCharsets.UTF_8
+            );
+            Map<String, Object> resultPayload = OBJECT_MAPPER.readValue(
+                serializedResult,
+                Map.class
+            );
+            logInfo(
+                "tester.isolated",
+                "Received structured tester result with keys="
+                    + resultPayload.keySet()
+            );
+            return parseTesterExecutionResult(resultPayload, testerClassName);
+        } finally {
+            deletePathRecursively(scorerConfigPath);
+        }
+    }
+
+    /**
+     * Builds the isolated child command using the current Java runtime and shaded
+     * runner JAR so parent and child stay on the same build artifact.
+     */
+    private static List<String> buildIsolatedTesterCommand(
+        String challengeId,
+        String submissionId,
+        String testPhase,
+        String testerClassName,
+        Path submissionDir,
+        Path testerJarPath,
+        Path scorerConfigPath
+    ) throws Exception {
+        List<String> command = new ArrayList<String>();
+        command.add(ISOLATION_WRAPPER_PATH);
+        command.add(getCurrentJavaBinaryPath());
+        command.addAll(getIsolatedChildJvmArguments());
+        command.add("-cp");
+        command.add(getCurrentRunnerArtifactPath().toString());
+        command.add(EcsRunnerMain.class.getName());
+        command.add(ISOLATED_TESTER_CHILD_MODE);
+        command.add(challengeId);
+        command.add(submissionId);
+        command.add(normalizeTestPhase(testPhase));
+        command.add(testerClassName);
+        command.add(submissionDir.toString());
+        command.add(testerJarPath.toString());
+        command.add(scorerConfigPath.toString());
+        return command;
+    }
+
+    /**
+     * Resolves the Java binary that launched the parent runner.
+     */
+    private static String getCurrentJavaBinaryPath() {
+        return Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+    }
+
+    /**
+     * Filters the current JVM arguments down to the flags that the isolated child
+     * should inherit. Debugging or agent flags are intentionally excluded because
+     * they often require sockets, which are blocked for the child process.
+     */
+    private static List<String> getIsolatedChildJvmArguments() {
+        List<String> childArguments = new ArrayList<String>();
+        for (String argument : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
+            if (
+                argument.startsWith("-Xms")
+                    || argument.startsWith("-Xmx")
+                    || argument.startsWith("-XX:")
+                    || argument.startsWith("-D")
+            ) {
+                childArguments.add(argument);
+            }
+        }
+        return childArguments;
+    }
+
+    /**
+     * Resolves the shaded runner artifact path used to start this JVM.
+     */
+    private static Path getCurrentRunnerArtifactPath() throws Exception {
+        return Paths.get(
+            EcsRunnerMain.class
+                .getProtectionDomain()
+                .getCodeSource()
+                .getLocation()
+                .toURI()
+        );
+    }
+
+    /**
+     * Renders command arguments for logs.
+     */
+    private static String renderCommandForLog(List<String> command) {
+        return String.join(" ", command);
+    }
+
+    /**
+     * Fails fast when the trusted parent process is not running as root. The
+     * isolation wrapper relies on a root parent so the child can be demoted to
+     * the untrusted runner user and blocked from inspecting parent secrets.
+     */
+    private static void requireRootParentProcess() {
+        String currentUser = System.getProperty("user.name", "");
+        if (!"root".equals(currentUser)) {
+            throw new IllegalStateException(
+                "Runner must start as root so isolated execution can drop to "
+                    + ISOLATED_EXECUTION_USER
+                    + ". Current user: "
+                    + currentUser
+            );
+        }
+    }
+
+    /**
+     * Changes ownership recursively so the untrusted runner user can write only
+     * to the isolated execution workspace.
+     */
+    private static void setPathOwnerRecursively(
+        Path path,
+        String ownerName,
+        String groupName
+    ) throws Exception {
+        if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+
+        UserPrincipalLookupService lookupService = path
+            .getFileSystem()
+            .getUserPrincipalLookupService();
+        UserPrincipal owner = lookupService.lookupPrincipalByName(ownerName);
+        GroupPrincipal group = lookupService.lookupPrincipalByGroupName(groupName);
+
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            try (java.util.stream.Stream<Path> stream = Files.walk(path)) {
+                stream.forEach(entry -> applyPathOwnership(entry, owner, group));
+            }
+            return;
+        }
+
+        applyPathOwnership(path, owner, group);
+    }
+
+    /**
+     * Applies owner/group changes to one filesystem entry.
+     */
+    private static void applyPathOwnership(
+        Path path,
+        UserPrincipal owner,
+        GroupPrincipal group
+    ) {
+        try {
+            Files.setOwner(path, owner);
+            PosixFileAttributeView attributes = Files.getFileAttributeView(
+                path,
+                PosixFileAttributeView.class,
+                LinkOption.NOFOLLOW_LINKS
+            );
+            if (attributes != null) {
+                attributes.setGroup(group);
+            }
+        } catch (Exception error) {
+            throw new RuntimeException(
+                "Failed to change owner for " + path + ": " + error.getMessage(),
+                error
+            );
+        }
+    }
+
+    /**
+     * Kills any remaining runner-owned processes after isolated execution so
+     * detached child processes cannot mutate artifacts or linger until task exit.
+     */
+    private static void killLingeringIsolatedProcesses() {
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                "pkill",
+                "-KILL",
+                "-u",
+                ISOLATED_EXECUTION_USER
+            );
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            String output;
+            try (InputStream inputStream = process.getInputStream()) {
+                output = new String(readAllBytes(inputStream), StandardCharsets.UTF_8)
+                    .trim();
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                logWarn(
+                    "tester.isolated",
+                    "Killed lingering processes for user "
+                        + ISOLATED_EXECUTION_USER
+                        + "."
+                );
+                return;
+            }
+
+            if (exitCode == 1) {
+                logInfo(
+                    "tester.isolated",
+                    "No lingering processes found for user "
+                        + ISOLATED_EXECUTION_USER
+                        + "."
+                );
+                return;
+            }
+
+            logWarn(
+                "tester.isolated",
+                "pkill exited with code "
+                    + exitCode
+                    + (output.isEmpty() ? "" : ", output=" + output)
+            );
+        } catch (Exception error) {
+            logWarn(
+                "tester.isolated",
+                "Failed to clean lingering isolated processes: "
+                    + error.getMessage()
+            );
         }
     }
 
@@ -484,9 +894,9 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Logs callback review payload context loaded from private artifacts.
-     * @param currentReview Current review map parsed from current.json.
-     * @param impactedReviews Impacted reviews parsed from reviews.json.
+     * Logs callback review payload context returned by trusted tester code.
+     * @param currentReview Current review payload returned by the tester.
+     * @param impactedReviews Impacted review payloads returned by the tester.
      */
     private static void logCurrentAndImpactedReviews(
         Map<String, Object> currentReview,
@@ -1376,54 +1786,6 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Reads JSON map when file exists.
-     */
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> readOptionalJsonMap(Path path) throws Exception {
-        if (path == null || !Files.isRegularFile(path)) {
-            logInfo("artifacts.read-json-map", "No JSON map file found.");
-            return null;
-        }
-
-        Map<String, Object> parsed = (Map<String, Object>) OBJECT_MAPPER.readValue(
-            path.toFile(),
-            Map.class
-        );
-        logInfo(
-            "artifacts.read-json-map",
-            "Loaded JSON map from " + path + " with keys=" + parsed.keySet()
-        );
-        return parsed;
-    }
-
-    /**
-     * Reads JSON list when file exists.
-     */
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> readOptionalJsonList(Path path)
-        throws Exception {
-        if (path == null || !Files.isRegularFile(path)) {
-            logInfo("artifacts.read-json-list", "No JSON list file found.");
-            return null;
-        }
-
-        List<Object> rawList = OBJECT_MAPPER.readValue(path.toFile(), List.class);
-        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-
-        for (Object entry : rawList) {
-            if (entry instanceof Map) {
-                result.add((Map<String, Object>) entry);
-            }
-        }
-
-        logInfo(
-            "artifacts.read-json-list",
-            "Loaded JSON list from " + path + " with entries=" + result.size()
-        );
-        return result;
-    }
-
-    /**
      * Writes tester JAR bytes to deterministic tmp path.
      */
     private static Path writeTesterJar(String testerConfigId, byte[] jarBytes)
@@ -1565,12 +1927,20 @@ public class EcsRunnerMain {
 
             logInfo(
                 "tester.result",
-                "runTester returned map score=" + mapScore + ", metadataKeys="
+                "runTester returned map score="
+                    + mapScore
+                    + ", metadataKeys="
                     + asMap(resultMap.get("metadata")).keySet()
+                    + ", hasCurrentReview="
+                    + !asMap(resultMap.get("currentReview")).isEmpty()
+                    + ", impactedReviews="
+                    + asMapList(resultMap.get("impactedReviews")).size()
             );
             return new TesterExecutionResult(
                 mapScore.doubleValue(),
-                asMap(resultMap.get("metadata"))
+                asMap(resultMap.get("metadata")),
+                asMap(resultMap.get("currentReview")),
+                asMapList(resultMap.get("impactedReviews"))
             );
         }
 
@@ -1592,6 +1962,25 @@ public class EcsRunnerMain {
         }
 
         return new LinkedHashMap<String, Object>();
+    }
+
+    /**
+     * Safely casts to list-of-map payloads.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> asMapList(Object value) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        if (!(value instanceof List)) {
+            return result;
+        }
+
+        for (Object entry : (List<Object>) value) {
+            if (entry instanceof Map) {
+                result.add(new LinkedHashMap<String, Object>((Map<String, Object>) entry));
+            }
+        }
+
+        return result;
     }
 
     /**
@@ -1730,12 +2119,29 @@ public class EcsRunnerMain {
     private static class TesterExecutionResult {
         private final double score;
         private final Map<String, Object> metadata;
+        private final Map<String, Object> currentReview;
+        private final List<Map<String, Object>> impactedReviews;
 
         TesterExecutionResult(double score, Map<String, Object> metadata) {
+            this(score, metadata, null, null);
+        }
+
+        TesterExecutionResult(
+            double score,
+            Map<String, Object> metadata,
+            Map<String, Object> currentReview,
+            List<Map<String, Object>> impactedReviews
+        ) {
             this.score = score;
             this.metadata = metadata == null
                 ? new LinkedHashMap<String, Object>()
                 : metadata;
+            this.currentReview = currentReview == null
+                ? new LinkedHashMap<String, Object>()
+                : currentReview;
+            this.impactedReviews = impactedReviews == null
+                ? new ArrayList<Map<String, Object>>()
+                : impactedReviews;
         }
 
         double getScore() {
@@ -1744,6 +2150,23 @@ public class EcsRunnerMain {
 
         Map<String, Object> getMetadata() {
             return metadata;
+        }
+
+        Map<String, Object> getCurrentReview() {
+            return currentReview;
+        }
+
+        List<Map<String, Object>> getImpactedReviews() {
+            return impactedReviews;
+        }
+
+        Map<String, Object> toSerializableMap() {
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("score", score);
+            payload.put("metadata", metadata);
+            payload.put("currentReview", currentReview);
+            payload.put("impactedReviews", impactedReviews);
+            return payload;
         }
     }
 

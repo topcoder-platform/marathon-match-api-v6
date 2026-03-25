@@ -21,6 +21,7 @@ RUN apt-get update \
         gzip \
         libicu70 \
         mono-devel \
+        procps \
         python3 \
         unzip \
         wget \
@@ -37,11 +38,10 @@ WORKDIR /app
 
 COPY --from=builder /workspace/target/mm-ecs-runner-1.0.0.jar /app/mm-ecs-runner.jar
 COPY scripts/ /app/scripts/
-RUN chmod +x /app/scripts/*.sh && chown -R runner:runner /app
+RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/mm-net-isolate /app/scripts/mm-net-isolate.c \
+    && chmod +x /app/scripts/*.sh /usr/local/bin/mm-net-isolate
 
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.awt.headless=true -Dfile.encoding=UTF-8"
-
-USER runner
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

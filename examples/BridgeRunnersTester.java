@@ -840,7 +840,8 @@ public class BridgeRunnersTester extends MarathonAnimatedVis {
    *
    * @param submissionPath root directory where submission files were extracted.
    * @param config scorer config provided by the runner (seed range, limits, scorecard metadata).
-   * @return map containing numeric {@code score} and {@code metadata}.
+   * @return map containing numeric {@code score}, execution {@code metadata}, and the
+   *         trusted {@code currentReview} payload consumed by the ECS runner callback.
    * @throws Exception when submission source cannot be found, compilation fails, execution fails,
    *                   or artifact writing fails.
    */
@@ -936,15 +937,15 @@ public class BridgeRunnersTester extends MarathonAnimatedVis {
       metadata.put("aggregateMode", "average");
       metadata.put("testScores", testScores);
 
+      Map<String, Object> result = new LinkedHashMap<String, Object>();
       Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
       currentReview.put("score", averageScore);
       currentReview.put("aggregateScore", averageScore);
       currentReview.put("metadata", metadata);
-      OBJECT_MAPPER.writeValue(artifactsPrivateDir.resolve("current.json").toFile(), currentReview);
 
-      Map<String, Object> result = new LinkedHashMap<String, Object>();
       result.put("score", averageScore);
       result.put("metadata", metadata);
+      result.put("currentReview", currentReview);
       return result;
     } finally {
       deleteRecursively(compileWorkDir);
