@@ -76,6 +76,8 @@ Map the challenge phase names to the IDs you will store in the Marathon Match co
 
 Use the phase IDs from the current challenge timeline. If the challenge timeline is recalculated later, the phase IDs can change and the Marathon Match config must be updated to match.
 
+If you want both `EXAMPLE` and `PROVISIONAL` scoring to run on each new submission, map both configs to the same Submission phase ID. The submission handler launches one scorer task per matching phase config.
+
 ## Step 4 - Create the challenge config
 
 Create the challenge config with:

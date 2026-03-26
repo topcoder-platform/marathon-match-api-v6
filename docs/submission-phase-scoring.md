@@ -42,22 +42,24 @@ sequenceDiagram
 
     alt No open phase or no mapped phase config
       H-->>C: Skip message
-    else Phase is mapped
+    else One or more phase configs are mapped
       alt Tester compilationStatus != SUCCESS
         H-->>C: Throw error
       else Tester ready
-        H->>ECS: launchScorerTask(configId, submissionId)
-        ECS->>F: RunTask with env overrides
-        F->>MM: GET /challenge/:id
-        F->>MM: GET /challenge/:id/tester-jar
-        F->>MM: GET /testers/:testerId
-        F->>SA: Download submission artifacts
-        F->>F: Launch isolated tester child<br/>(scrubbed env, no outbound INET/INET6 sockets)
-        F->>MM: POST /internal/scoring-results
-        MM->>SRS: processScoringResult(payload)
-        SRS->>RA: Create or update review summations
-        Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
-        F-->>ECS: Task exits
+        loop Once per matching phase config
+          H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
+          ECS->>F: RunTask with env overrides
+          F->>MM: GET /challenge/:id
+          F->>MM: GET /challenge/:id/tester-jar
+          F->>MM: GET /testers/:testerId
+          F->>SA: Download submission artifacts
+          F->>F: Launch isolated tester child<br/>(scrubbed env, no outbound INET/INET6 sockets)
+          F->>MM: POST /internal/scoring-results
+          MM->>SRS: processScoringResult(payload)
+          SRS->>RA: Create or update review summations
+          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
+          F-->>ECS: Task exits
+        end
         H-->>C: Success
       end
     end
@@ -84,6 +86,8 @@ The ECS task keeps trusted network access only on the parent runner process so i
 Runner task logs are written to CloudWatch using the submission runner log stream. Operators can also inspect runner output through:
 
 `GET /v6/marathon-match/submissions/:submissionId/runner-logs`
+
+When more than one phase config matches the currently open challenge phases, the handler launches one scorer task per match. This is the supported way to run both `EXAMPLE` and `PROVISIONAL` scoring from the same Submission phase.
 
 ## Relative scoring
 

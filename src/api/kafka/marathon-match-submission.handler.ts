@@ -143,11 +143,11 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const matchingPhaseConfig = this.findMatchingPhaseConfig(
+      const matchingPhaseConfigs = this.findMatchingPhaseConfigs(
         config.phaseConfigs,
         openPhaseResolution.phaseIdentifiers,
       );
-      if (!matchingPhaseConfig) {
+      if (matchingPhaseConfigs.length === 0) {
         this.logger.log({
           message:
             'No configured marathon match phase for open challenge phases',
@@ -165,20 +165,40 @@ export class MarathonMatchSubmissionHandler
         );
       }
 
-      const launchResult = await this.ecsService.launchScorerTask(
-        config.challengeId,
-        submissionId,
-        {
-          taskDefinitionName: config.taskDefinitionName,
-          taskDefinitionVersion: config.taskDefinitionVersion,
-        },
-        {
+      const launchedPhaseTasks: Array<Record<string, unknown>> = [];
+      for (const matchingPhaseConfig of matchingPhaseConfigs) {
+        const launchResult = await this.ecsService.launchScorerTask(
+          config.challengeId,
+          submissionId,
+          {
+            taskDefinitionName: config.taskDefinitionName,
+            taskDefinitionVersion: config.taskDefinitionVersion,
+          },
+          {
+            configType: matchingPhaseConfig.configType,
+            startSeed: matchingPhaseConfig.startSeed,
+            numberOfTests: matchingPhaseConfig.numberOfTests,
+          },
+        );
+        this.logSubmissionRunnerMapping(
+          challengeId,
+          submissionId,
+          matchingPhaseConfig.configType,
+          launchResult,
+        );
+        launchedPhaseTasks.push({
           configType: matchingPhaseConfig.configType,
-          startSeed: matchingPhaseConfig.startSeed,
-          numberOfTests: matchingPhaseConfig.numberOfTests,
-        },
-      );
-      this.logSubmissionRunnerMapping(challengeId, submissionId, launchResult);
+          phaseId: matchingPhaseConfig.phaseId,
+          phaseConfigId: matchingPhaseConfig.id,
+          taskArn: launchResult.taskArn,
+          taskId: launchResult.taskId,
+          logGroup: launchResult.logGroup ?? null,
+          logStreamPrefix: launchResult.logStreamPrefix ?? null,
+          logStreamName: launchResult.logStreamName ?? null,
+          cloudWatchLogsConsoleUrl:
+            launchResult.cloudWatchLogsConsoleUrl ?? null,
+        });
+      }
 
       this.logger.log({
         message: 'Marathon match submission event processed successfully',
@@ -186,14 +206,16 @@ export class MarathonMatchSubmissionHandler
         submissionId,
         openPhaseIds: openPhaseResolution.phaseIds,
         openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
-        matchedPhaseId: matchingPhaseConfig.phaseId,
-        matchedPhaseConfigId: matchingPhaseConfig.id,
-        taskArn: launchResult.taskArn,
-        taskId: launchResult.taskId,
-        logGroup: launchResult.logGroup ?? null,
-        logStreamPrefix: launchResult.logStreamPrefix ?? null,
-        logStreamName: launchResult.logStreamName ?? null,
-        cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl ?? null,
+        matchedPhaseIds: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.phaseId,
+        ),
+        matchedPhaseConfigIds: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.id,
+        ),
+        matchedPhaseConfigTypes: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.configType,
+        ),
+        launchedPhaseTasks,
       });
     } catch (error) {
       const resolvedError =
@@ -343,12 +365,14 @@ export class MarathonMatchSubmissionHandler
   private logSubmissionRunnerMapping(
     challengeId: string,
     submissionId: string,
+    phaseConfigType: string,
     launchResult: MarathonMatchScorerTaskLaunchResult,
   ): void {
     this.logger.log({
       message: 'Submission runner log mapping ready',
       challengeId,
       submissionId,
+      phaseConfigType,
       taskArn: launchResult.taskArn,
       taskId: launchResult.taskId,
       cluster: launchResult.cluster,
@@ -362,25 +386,87 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Finds a configured phase mapping for the highest-priority open challenge phase.
+   * Finds all configured phase mappings for the ordered open challenge phases.
    * @param phaseConfigs Stored phase configuration rows for a challenge.
    * @param openPhaseIdentifiers Open challenge phase identifiers ordered by priority.
-   * @returns Matching phase config or null when no mapping exists.
+   * @returns Matching phase configs in launch order.
    */
-  private findMatchingPhaseConfig<TPhaseConfig extends { phaseId: string }>(
+  private findMatchingPhaseConfigs<
+    TPhaseConfig extends { phaseId: string; configType: string },
+  >(
     phaseConfigs: TPhaseConfig[],
     openPhaseIdentifiers: string[],
-  ): TPhaseConfig | null {
+  ): TPhaseConfig[] {
+    const matchingPhaseConfigs: TPhaseConfig[] = [];
+    const seenPhaseConfigs = new Set<string>();
+
     for (const openPhaseIdentifier of openPhaseIdentifiers) {
-      const matchingPhaseConfig = phaseConfigs.find(
-        (phaseConfig) => phaseConfig.phaseId === openPhaseIdentifier,
-      );
-      if (matchingPhaseConfig) {
-        return matchingPhaseConfig;
+      const phaseConfigsForIdentifier = phaseConfigs
+        .filter((phaseConfig) => phaseConfig.phaseId === openPhaseIdentifier)
+        .sort((left, right) =>
+          this.comparePhaseConfigLaunchPriority(
+            left.configType,
+            right.configType,
+          ),
+        );
+
+      for (const matchingPhaseConfig of phaseConfigsForIdentifier) {
+        const phaseConfigKey = [
+          matchingPhaseConfig.phaseId,
+          matchingPhaseConfig.configType.trim().toUpperCase(),
+        ].join('::');
+        if (seenPhaseConfigs.has(phaseConfigKey)) {
+          continue;
+        }
+
+        seenPhaseConfigs.add(phaseConfigKey);
+        matchingPhaseConfigs.push(matchingPhaseConfig);
       }
     }
 
-    return null;
+    return matchingPhaseConfigs;
+  }
+
+  /**
+   * Orders phase config launches deterministically when multiple configs share one open phase.
+   * @param leftConfigType Left config type.
+   * @param rightConfigType Right config type.
+   * @returns Sort value for launch order.
+   */
+  private comparePhaseConfigLaunchPriority(
+    leftConfigType: string,
+    rightConfigType: string,
+  ): number {
+    const leftPriority = this.resolvePhaseConfigLaunchPriority(leftConfigType);
+    const rightPriority =
+      this.resolvePhaseConfigLaunchPriority(rightConfigType);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return leftConfigType
+      .trim()
+      .localeCompare(rightConfigType.trim(), 'en', { sensitivity: 'base' });
+  }
+
+  /**
+   * Assigns a stable launch priority to known scorer phase config types.
+   * @param configType Phase config type.
+   * @returns Numeric priority where lower values launch first.
+   */
+  private resolvePhaseConfigLaunchPriority(configType: string): number {
+    const normalizedConfigType = configType.trim().toUpperCase();
+    if (normalizedConfigType === 'EXAMPLE') {
+      return 0;
+    }
+    if (normalizedConfigType === 'PROVISIONAL') {
+      return 1;
+    }
+    if (normalizedConfigType === 'SYSTEM') {
+      return 2;
+    }
+
+    return 99;
   }
 
   /**

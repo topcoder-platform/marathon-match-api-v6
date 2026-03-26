@@ -266,6 +266,7 @@ Important runtime behavior:
 - Incoming submission events are only processed when config is `active = true`.
 - The handler resolves currently open challenge phases from challenge-api (`phases[].isOpen = true`) and matches stored phase config rows by the canonical challenge `phaseId`. Legacy stored challenge-phase row ids are also recognized for backwards compatibility.
 - If no matching phase config exists, the submission is skipped.
+- If multiple phase configs match the currently open challenge phases, the handler launches one scorer task per match. This allows `EXAMPLE` and `PROVISIONAL` scoring to run from the same Submission phase when both configs point at that phase.
 
 ### 4. Ensure scorer infrastructure is configured
 
@@ -326,22 +327,24 @@ sequenceDiagram
 
     alt No open phase or no mapped phase config
       H-->>C: Skip message
-    else Phase is mapped
+    else One or more phase configs are mapped
       alt Tester compilationStatus != SUCCESS
         H-->>C: Throw (retry/DLQ path)
       else Tester ready
-        H->>ECS: launchScorerTask(configId, submissionId)
-        ECS->>F: RunTask with env overrides
-        F->>MM: GET /challenge/:id
-        F->>MM: GET /challenge/:id/tester-jar
-        F->>MM: GET /testers/:testerId
-        F->>SA: Download submission artifacts
-        F->>F: Load tester JAR + invoke runTester(...)
-        F->>MM: POST /internal/scoring-results
-        MM->>SRS: processScoringResult(payload)
-        SRS->>RA: POST/PUT review summations
-        Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
-        F-->>ECS: Task exits
+        loop Once per matching phase config
+          H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
+          ECS->>F: RunTask with env overrides
+          F->>MM: GET /challenge/:id
+          F->>MM: GET /challenge/:id/tester-jar
+          F->>MM: GET /testers/:testerId
+          F->>SA: Download submission artifacts
+          F->>F: Load tester JAR + invoke runTester(...)
+          F->>MM: POST /internal/scoring-results
+          MM->>SRS: processScoringResult(payload)
+          SRS->>RA: POST/PUT review summations
+          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
+          F-->>ECS: Task exits
+        end
         H-->>C: Success
       end
     end
