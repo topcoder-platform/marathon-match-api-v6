@@ -78,6 +78,7 @@ export class MarathonMatchConfigService {
   private readonly challengeApiBaseUrl =
     process.env.CHALLENGE_API_URL?.replace(/\/+$/, '') ||
     'https://api.topcoder-dev.com';
+  private readonly scorecardIdLookupCache = new Map<string, string | null>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -374,7 +375,7 @@ export class MarathonMatchConfigService {
           `Marathon match config with challenge ID ${challengeId} not found.`,
         );
       }
-      return this.mapConfigResponse(config);
+      return await this.mapResolvedConfigResponse(config);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -1097,6 +1098,26 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Maps a config record and resolves scorecard identifiers that may still use legacy ids.
+   * @param config Prisma config record with related phase configs.
+   * @returns API DTO with a canonical review-api scorecard id when lookup succeeds.
+   */
+  private async mapResolvedConfigResponse(
+    config: MarathonMatchConfigWithPhaseConfigs,
+  ): Promise<MarathonMatchConfigResponseDto> {
+    const response = this.mapConfigResponse(config);
+    const resolvedScorecardId = await this.resolveReviewScorecardId(
+      response.reviewScorecardId,
+    );
+
+    if (resolvedScorecardId) {
+      response.reviewScorecardId = resolvedScorecardId;
+    }
+
+    return response;
+  }
+
+  /**
    * Resolves submitted challenge phase identifiers to canonical challenge-api `phaseId` values.
    * Accepts either `phases[].phaseId` or the challenge-phase instance `phases[].id` for backwards compatibility.
    * @param challengeId Challenge ID whose phases define the allowed identifiers.
@@ -1297,6 +1318,102 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Resolves review scorecard identifiers to canonical review-api ids.
+   * Stored configs may still contain legacy ids, while downstream review creation
+   * requires the current scorecard primary key.
+   * @param scorecardId Stored scorecard identifier from Marathon Match config.
+   * @returns Canonical review-api scorecard id, or `undefined` when lookup fails.
+   */
+  private async resolveReviewScorecardId(
+    scorecardId: string | undefined,
+  ): Promise<string | undefined> {
+    const rawScorecardId = scorecardId?.trim();
+    if (!rawScorecardId) {
+      return undefined;
+    }
+
+    const cached = this.scorecardIdLookupCache.get(rawScorecardId);
+    if (cached !== undefined) {
+      return cached ?? undefined;
+    }
+
+    let token: string;
+    try {
+      token = await this.m2mService.getM2MToken();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn({
+        message:
+          'Unable to resolve Marathon Match review scorecard id because M2M token retrieval failed.',
+        requestedScorecardId: rawScorecardId,
+        error: message,
+      });
+      return undefined;
+    }
+
+    if (!token) {
+      this.logger.warn({
+        message:
+          'Unable to resolve Marathon Match review scorecard id because M2M token retrieval returned an empty token.',
+        requestedScorecardId: rawScorecardId,
+      });
+      return undefined;
+    }
+
+    const url = `${this.buildReviewApiBaseUrl()}/scorecards/${encodeURIComponent(rawScorecardId)}`;
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get<{ id?: string }>(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      const resolvedScorecardId = response.data?.id?.trim() || '';
+
+      if (!resolvedScorecardId) {
+        this.logger.warn({
+          message:
+            'Scorecard lookup succeeded but did not return a canonical scorecard id.',
+          requestedScorecardId: rawScorecardId,
+          url,
+        });
+        return undefined;
+      }
+
+      this.scorecardIdLookupCache.set(rawScorecardId, resolvedScorecardId);
+      return resolvedScorecardId;
+    } catch (error) {
+      const typedError = error as {
+        message?: string;
+        response?: {
+          status?: number;
+          data?: unknown;
+        };
+      };
+
+      const statusCode = typedError.response?.status;
+      this.logger.warn({
+        message:
+          'Unable to resolve Marathon Match review scorecard id from review-api.',
+        requestedScorecardId: rawScorecardId,
+        url,
+        statusCode: statusCode ?? null,
+        responseBody: typedError.response?.data ?? null,
+        error: typedError.message ?? String(error),
+      });
+
+      if (statusCode === 400 || statusCode === 404) {
+        this.scorecardIdLookupCache.set(rawScorecardId, null);
+      }
+
+      return undefined;
+    }
+  }
+
+  /**
    * Maps a single Prisma phase config record to its response DTO.
    * @param phaseConfigData Prisma phase config record.
    * @returns Phase config response DTO.
@@ -1347,5 +1464,25 @@ export class MarathonMatchConfigService {
    */
   private getActor(user: JwtUser): string {
     return user.isMachine ? 'System' : (user.userId ?? 'Unknown');
+  }
+
+  /**
+   * Builds the canonical review-api v6 base URL.
+   * @returns Base URL used for scorecard resolution lookups.
+   */
+  private buildReviewApiBaseUrl(): string {
+    const baseUrl = (
+      process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
+    ).replace(/\/+$/, '');
+    const normalizedBase = baseUrl.replace(
+      /\/(reviewSummations|reviews|scorecards)$/,
+      '',
+    );
+
+    if (normalizedBase.endsWith('/v6')) {
+      return normalizedBase;
+    }
+
+    return `${normalizedBase}/v6`;
   }
 }
