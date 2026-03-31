@@ -100,7 +100,7 @@ export class ScoringResultController {
   constructor(private readonly scoringResultService: ScoringResultService) {}
 
   /**
-   * Ingests scorer output and performs review summation upserts.
+   * Ingests scorer output for a configured challenge and performs review summation upserts.
    */
   @Post('/scoring-results')
   @Roles(UserRole.Admin)
@@ -117,6 +117,11 @@ export class ScoringResultController {
     description: 'Scoring callback accepted and processed.',
   })
   @ApiResponse({ status: 400, description: 'Invalid callback payload.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Marathon Match config not found for the provided challengeId.',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   async ingestScoringResult(
     @Body() payload: ScoringResultCallbackDto,

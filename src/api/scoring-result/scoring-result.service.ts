@@ -56,6 +56,13 @@ interface RelativeScoringSettings {
   scoreDirection: ScoreDirection;
 }
 
+interface ScoringResultConfigSummary {
+  challengeId: string;
+  submissionApiUrl: string;
+  relativeScoringEnabled: boolean;
+  scoreDirection: ScoreDirection;
+}
+
 interface RelativeTestScoreEntry {
   testcase: string;
   score: number;
@@ -87,12 +94,14 @@ export class ScoringResultService {
   ) {}
 
   /**
-   * Processes one scorer callback payload and upserts all required review summations.
+   * Processes one scorer callback payload after verifying the challenge config exists,
+   * then upserts all required review summations.
    */
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
   ): Promise<void> {
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
+    const config = await this.requireScoringResultConfig(payload.challengeId);
     const token = await this.m2mService.getM2MToken();
 
     if (!token) {
@@ -109,9 +118,10 @@ export class ScoringResultService {
       payload.scorecardId,
     );
 
-    const relativeScoringSettings = await this.resolveRelativeScoringSettings(
+    const relativeScoringSettings = this.resolveRelativeScoringSettings(
       payload,
       fallbackMetadata,
+      config,
     );
     if (relativeScoringSettings.enabled) {
       const currentRelativeScore = await this.processRelativeScoring(
@@ -379,34 +389,18 @@ export class ScoringResultService {
   /**
    * Loads relative-scoring settings from config and callback metadata.
    */
-  private async resolveRelativeScoringSettings(
+  private resolveRelativeScoringSettings(
     payload: ScoringResultCallbackPayload,
     fallbackMetadata: Record<string, unknown>,
-  ): Promise<RelativeScoringSettings> {
+    config: ScoringResultConfigSummary,
+  ): RelativeScoringSettings {
     const currentReview = this.asRecord(payload.currentReview);
     const currentMetadata = this.asRecord(currentReview.metadata);
-    const challengeId = this.coalesceString(
-      this.asString(payload.challengeId),
-      this.asString(fallbackMetadata.challengeId),
-      this.asString(currentMetadata.challengeId),
-    );
-
-    const config = challengeId
-      ? await this.prisma.marathonMatchConfig.findUnique({
-          where: { challengeId },
-          select: {
-            challengeId: true,
-            submissionApiUrl: true,
-            relativeScoringEnabled: true,
-            scoreDirection: true,
-          },
-        })
-      : null;
 
     const relativeScoringEnabled =
       this.parseBooleanFlag(fallbackMetadata.relativeScoringEnabled) ??
       this.parseBooleanFlag(currentMetadata.relativeScoringEnabled) ??
-      config?.relativeScoringEnabled ??
+      config.relativeScoringEnabled ??
       true;
 
     const scoreDirection =
@@ -422,15 +416,42 @@ export class ScoringResultService {
       this.normalizeScoreDirectionFromBoolean(
         this.parseBooleanFlag(currentMetadata.isMaximize),
       ) ??
-      config?.scoreDirection ??
-      ScoreDirection.MAXIMIZE;
+      config.scoreDirection;
 
     return {
-      challengeId: config?.challengeId ?? challengeId,
-      submissionApiUrl: config?.submissionApiUrl?.trim() || undefined,
+      challengeId: config.challengeId,
+      submissionApiUrl: config.submissionApiUrl.trim() || undefined,
       enabled: relativeScoringEnabled === true,
       scoreDirection,
     };
+  }
+
+  /**
+   * Loads the persisted Marathon Match config that owns an incoming scorer callback.
+   */
+  private async requireScoringResultConfig(
+    challengeId: string,
+  ): Promise<ScoringResultConfigSummary> {
+    const normalizedChallengeId = this.asString(challengeId);
+    const config = normalizedChallengeId
+      ? await this.prisma.marathonMatchConfig.findUnique({
+          where: { challengeId: normalizedChallengeId },
+          select: {
+            challengeId: true,
+            submissionApiUrl: true,
+            relativeScoringEnabled: true,
+            scoreDirection: true,
+          },
+        })
+      : null;
+
+    if (!config) {
+      throw new NotFoundException(
+        `Marathon match config with challenge ID ${normalizedChallengeId ?? challengeId} not found.`,
+      );
+    }
+
+    return config;
   }
 
   /**

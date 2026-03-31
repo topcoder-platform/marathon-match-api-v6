@@ -214,6 +214,8 @@ Auth model in code:
 | `POST` | `/v6/marathon-match/internal/scoring-results` | `administrator` OR `update:marathon-match` |
 | `POST` | `/v6/marathon-match/internal/system-score` | `administrator` OR `update:marathon-match` |
 
+`POST /v6/marathon-match/internal/scoring-results` rejects callbacks whose `challengeId` does not map to an existing Marathon Match config.
+
 ## How to set up a challenge for marathon match scoring
 
 For the full operator guide, see [Marathon Match Setup](docs/marathon-match-setup.md). The steps below remain as a quick reference.
