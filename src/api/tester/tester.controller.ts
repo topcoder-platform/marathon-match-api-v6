@@ -26,6 +26,7 @@ import {
   CreateTesterDto,
   SearchTesterQueryDto,
   TesterPaginatedResponseDto,
+  TesterResponseQueryDto,
   TesterResponseDto,
   UpdateTesterDto,
 } from 'src/dto/tester.dto';
@@ -82,6 +83,7 @@ export class TesterController {
    * Updates a tester by ID.
    * @param id Tester ID.
    * @param body Partial tester update payload.
+   * @param query Response shaping query parameters.
    * @param user Authenticated user for audit fields.
    * @returns The updated tester.
    */
@@ -98,15 +100,24 @@ export class TesterController {
     example: 'V1StGXR8_Z5jdH',
   })
   @ApiBody({ description: 'Updated tester data', type: UpdateTesterDto })
+  @ApiQuery({
+    name: 'includeJarFile',
+    description:
+      'Include compiled jar content in the response. Disabled by default to avoid large payloads.',
+    required: false,
+    type: Boolean,
+    example: false,
+  })
   @ApiResponse({
     status: 200,
     description:
-      'Tester updated successfully when sourceCode is unchanged or omitted.',
+      'Tester updated successfully when sourceCode is unchanged or omitted. jarFile is omitted unless includeJarFile=true.',
     type: TesterResponseDto,
   })
   @ApiResponse({
     status: 202,
-    description: 'Compilation triggered asynchronously.',
+    description:
+      'Compilation triggered asynchronously. jarFile is omitted unless includeJarFile=true.',
     type: TesterResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
@@ -115,6 +126,7 @@ export class TesterController {
   async updateTester(
     @Param('id') id: string,
     @Body() body: UpdateTesterDto,
+    @Query() query: TesterResponseQueryDto,
     @Res({ passthrough: true }) res: Response,
     @User() user: JwtUser,
   ): Promise<TesterResponseDto> {
@@ -122,6 +134,7 @@ export class TesterController {
       id,
       body,
       user,
+      query.includeJarFile,
     );
     res.status(
       result.compilationTriggered ? HttpStatus.ACCEPTED : HttpStatus.OK,
@@ -164,6 +177,7 @@ export class TesterController {
   /**
    * Retrieves a tester by ID.
    * @param id Tester ID.
+   * @param query Response shaping query parameters.
    * @returns Tester details.
    */
   @Get('/:id')
@@ -178,15 +192,27 @@ export class TesterController {
     description: 'The ID of the tester',
     example: 'V1StGXR8_Z5jdH',
   })
+  @ApiQuery({
+    name: 'includeJarFile',
+    description:
+      'Include compiled jar content in the response. Disabled by default to avoid large payloads.',
+    required: false,
+    type: Boolean,
+    example: false,
+  })
   @ApiResponse({
     status: 200,
-    description: 'Tester retrieved successfully.',
+    description:
+      'Tester retrieved successfully. jarFile is omitted unless includeJarFile=true.',
     type: TesterResponseDto,
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Tester not found.' })
-  async getTester(@Param('id') id: string): Promise<TesterResponseDto> {
-    return await this.testerService.getTester(id);
+  async getTester(
+    @Param('id') id: string,
+    @Query() query: TesterResponseQueryDto,
+  ): Promise<TesterResponseDto> {
+    return await this.testerService.getTester(id, query.includeJarFile);
   }
 
   /**

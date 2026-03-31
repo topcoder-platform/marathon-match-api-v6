@@ -34,6 +34,12 @@ To browse available testers without transferring the stored source or compiled j
 
 `GET /v6/marathon-match/testers`
 
+To load one tester's source, call:
+
+`GET /v6/marathon-match/testers/:id`
+
+Detail and update responses omit `jarFile` by default. Add `?includeJarFile=true` only when you explicitly need the compiled jar payload in that response.
+
 Tester compilation is asynchronous. After creating or updating a tester, poll:
 
 `GET /v6/marathon-match/testers/:id`

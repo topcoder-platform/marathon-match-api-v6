@@ -187,7 +187,7 @@ Auth model in code:
 | `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
 | `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
 
-`GET /v6/marathon-match/testers` returns tester summary rows only. Use `GET /v6/marathon-match/testers/:id` when you need `sourceCode` or `jarFile`.
+`GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. Detail and update responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
 
 ### Marathon match config endpoints
 
@@ -236,7 +236,8 @@ Compilation is async through pg-boss. The create/update endpoint returns before 
 Poll `GET /testers/:id` until:
 
 - `compilationStatus = SUCCESS`
-- `jarFile` is present
+
+If you need the compiled jar in the response, call `GET /testers/:id?includeJarFile=true` after compilation succeeds.
 
 If `compilationStatus = FAILED`, update source and recompile via `PUT /testers/:id`.
 

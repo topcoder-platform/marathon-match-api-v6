@@ -1,7 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { CompilationStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 /**
  * Request payload for creating a tester record.
@@ -157,11 +164,48 @@ export class TesterResponseDto extends TesterSummaryResponseDto {
   sourceCode: string;
 
   @ApiProperty({
-    description: 'Compiled jar content as a base64-encoded string',
+    description:
+      'Compiled jar content as a base64-encoded string. Returned only when explicitly requested.',
     nullable: true,
     example: null,
   })
   jarFile: string | null;
+}
+
+/**
+ * Query parameters that control tester detail responses.
+ * Used by GET /testers/:id and PUT /testers/:id.
+ */
+export class TesterResponseQueryDto {
+  @ApiProperty({
+    description:
+      'Include the compiled jar payload in the response. Defaults to false to avoid large response bodies.',
+    required: false,
+    type: Boolean,
+    example: false,
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    const rawValue: unknown = value;
+    if (rawValue === undefined) {
+      return undefined;
+    }
+    if (typeof rawValue === 'boolean') {
+      return rawValue;
+    }
+    if (typeof rawValue === 'string') {
+      const normalizedValue = rawValue.trim().toLowerCase();
+      if (normalizedValue === 'true') {
+        return true;
+      }
+      if (normalizedValue === 'false') {
+        return false;
+      }
+    }
+    return rawValue;
+  })
+  @IsBoolean()
+  includeJarFile: boolean = false;
 }
 
 /**

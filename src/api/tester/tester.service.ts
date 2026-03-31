@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { CompilationStatus, Prisma, tester } from '@prisma/client';
+import { CompilationStatus, Prisma } from '@prisma/client';
 import { nanoid } from 'nanoid';
 import {
   CreateTesterDto,
@@ -38,8 +38,26 @@ const testerListSelect = {
   updatedBy: true,
 } satisfies Prisma.testerSelect;
 
+const testerResponseSelect = {
+  ...testerListSelect,
+  sourceCode: true,
+} satisfies Prisma.testerSelect;
+
+const testerResponseWithJarSelect = {
+  ...testerResponseSelect,
+  jarFile: true,
+} satisfies Prisma.testerSelect;
+
 type TesterListRecord = Prisma.testerGetPayload<{
   select: typeof testerListSelect;
+}>;
+
+type TesterResponseRecord = Prisma.testerGetPayload<{
+  select: typeof testerResponseWithJarSelect;
+}>;
+
+type TesterResponseWithoutJarRecord = Prisma.testerGetPayload<{
+  select: typeof testerResponseSelect;
 }>;
 
 /**
@@ -79,6 +97,7 @@ export class TesterService {
           createdBy: actor,
           updatedBy: actor,
         },
+        select: testerResponseSelect,
       });
 
       this.triggerCompilation(created.id, created.sourceCode);
@@ -107,6 +126,7 @@ export class TesterService {
    * @param id Tester identifier.
    * @param body Partial update payload.
    * @param user Authenticated user or machine token payload used for audit fields.
+   * @param includeJarFile When true, includes the compiled jar payload.
    * @returns Updated tester mapped to `TesterResponseDto` plus compile trigger metadata.
    * Recompilation is triggered asynchronously only when `sourceCode` changed.
    * @throws NotFoundException When the tester does not exist.
@@ -116,10 +136,14 @@ export class TesterService {
     id: string,
     body: UpdateTesterDto,
     user: JwtUser,
+    includeJarFile: boolean = false,
   ): Promise<UpdateTesterResult> {
     try {
       const existing = await this.prisma.tester.findUnique({
         where: { id },
+        select: {
+          sourceCode: true,
+        },
       });
 
       if (!existing) {
@@ -141,6 +165,9 @@ export class TesterService {
           }),
           updatedBy: actor,
         },
+        select: includeJarFile
+          ? testerResponseWithJarSelect
+          : testerResponseSelect,
       });
 
       if (sourceCodeChanged) {
@@ -210,14 +237,21 @@ export class TesterService {
   /**
    * Retrieves a single tester by ID.
    * @param id Tester identifier.
+   * @param includeJarFile When true, includes the compiled jar payload.
    * @returns Tester details mapped to `TesterResponseDto`.
    * @throws NotFoundException When the tester does not exist.
    * @throws InternalServerErrorException When the database operation fails.
    */
-  async getTester(id: string): Promise<TesterResponseDto> {
+  async getTester(
+    id: string,
+    includeJarFile: boolean = false,
+  ): Promise<TesterResponseDto> {
     try {
       const testerData = await this.prisma.tester.findUnique({
         where: { id },
+        select: includeJarFile
+          ? testerResponseWithJarSelect
+          : testerResponseSelect,
       });
 
       if (!testerData) {
@@ -308,10 +342,13 @@ export class TesterService {
    * @param testerData Prisma tester record.
    * @returns Tester response DTO.
    */
-  private mapTesterResponse(testerData: tester): TesterResponseDto {
-    const jarFile = testerData.jarFile
-      ? Buffer.from(testerData.jarFile).toString('base64')
-      : null;
+  private mapTesterResponse(
+    testerData: TesterResponseRecord | TesterResponseWithoutJarRecord,
+  ): TesterResponseDto {
+    const jarFile =
+      'jarFile' in testerData && testerData.jarFile
+        ? Buffer.from(testerData.jarFile).toString('base64')
+        : null;
 
     return {
       ...testerData,
