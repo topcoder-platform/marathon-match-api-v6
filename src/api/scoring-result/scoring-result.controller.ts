@@ -4,6 +4,7 @@ import {
   ApiBody,
   ApiOperation,
   ApiProperty,
+  ApiPropertyOptional,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -25,39 +26,104 @@ import {
   ScoringResultService,
 } from './scoring-result.service';
 
+/**
+ * Request payload sent by the ECS scorer callback when a review score is ready.
+ */
 class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
+  @ApiProperty({
+    description: 'Challenge ID that owns the scored submission',
+    example: '30000123',
+  })
   @IsString()
   challengeId: string;
 
+  @ApiProperty({
+    description: 'Submission ID produced by the submission API',
+    example: '3f1f8b69-4ea0-4453-a293-60f52e69f25d',
+  })
   @IsString()
   submissionId: string;
 
+  @ApiProperty({
+    description: 'Score returned by the scorer for this callback',
+    example: 97.25,
+  })
   @Type(() => Number)
   @IsNumber()
   score: number;
 
+  @ApiProperty({
+    description: 'Raw scorer phase value used to derive the review test type',
+    example: 'test',
+  })
   @IsString()
   testPhase: string;
 
+  @ApiProperty({
+    description: 'Review type ID that should be written into review metadata',
+    example: 'cfca92f1-4f76-4c27-8fc4-4db60ff6e778',
+  })
   @IsString()
   reviewTypeId: string;
 
+  @ApiPropertyOptional({
+    description: 'Review ID to complete after summation upsert succeeds',
+    example: '7af90e06-d65a-4c0f-acaf-61d4f0c71234',
+  })
   @IsOptional()
   @IsString()
   reviewId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Scorecard ID to attach to the review summation',
+    example: '31d0ad44-2d47-43d7-b1c7-436f26d4673d',
+  })
   @IsOptional()
   @IsString()
   scorecardId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Additional scorer metadata forwarded to the review summation',
+    type: 'object',
+    additionalProperties: true,
+    example: {
+      reviewTypeId: 'cfca92f1-4f76-4c27-8fc4-4db60ff6e778',
+      testType: 'provisional',
+    },
+  })
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    description:
+      'Legacy current review payload used when the callback includes a fully materialized review object',
+    type: 'object',
+    additionalProperties: true,
+    example: {
+      submissionId: '3f1f8b69-4ea0-4453-a293-60f52e69f25d',
+      score: 97.25,
+    },
+  })
   @IsOptional()
   @IsObject()
   currentReview?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    description:
+      'Legacy impacted review payloads that should also be upserted by the callback handler',
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: true,
+    },
+    example: [
+      {
+        submissionId: '3f1f8b69-4ea0-4453-a293-60f52e69f25d',
+        score: 96.5,
+      },
+    ],
+  })
   @IsOptional()
   @IsArray()
   @IsObject({ each: true })
