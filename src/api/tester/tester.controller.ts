@@ -39,7 +39,8 @@ import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { TesterService, UpdateTesterResult } from './tester.service';
 
 /**
- * Exposes secured tester CRUD endpoints for marathon match admin workflows.
+ * Exposes secured tester CRUD endpoints for marathon match admin and copilot
+ * workflows.
  */
 @ApiTags('Testers')
 @ApiBearerAuth()
@@ -54,11 +55,11 @@ export class TesterController {
    * @returns The created tester.
    */
   @Post()
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.CreateMarathonMatchTester)
   @ApiOperation({
     summary: 'Create a tester',
-    description: 'Roles: Admin | Scopes: create:marathon-match-tester',
+    description: 'Roles: Admin, Copilot | Scopes: create:marathon-match-tester',
   })
   @ApiBody({ description: 'Tester data', type: CreateTesterDto })
   @HttpCode(HttpStatus.ACCEPTED)
@@ -85,11 +86,11 @@ export class TesterController {
    * @returns The updated tester.
    */
   @Put('/:id')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.UpdateMarathonMatchTester)
   @ApiOperation({
     summary: 'Update a tester',
-    description: 'Roles: Admin | Scopes: update:marathon-match-tester',
+    description: 'Roles: Admin, Copilot | Scopes: update:marathon-match-tester',
   })
   @ApiParam({
     name: 'id',
@@ -166,11 +167,11 @@ export class TesterController {
    * @returns Tester details.
    */
   @Get('/:id')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatchTester)
   @ApiOperation({
     summary: 'Get a tester',
-    description: 'Roles: Admin | Scopes: read:marathon-match-tester',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match-tester',
   })
   @ApiParam({
     name: 'id',
@@ -194,12 +195,12 @@ export class TesterController {
    * @returns Paginated tester list.
    */
   @Get()
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatchTester)
   @ApiOperation({
     summary: 'List testers',
     description:
-      'Roles: Admin | Scopes: read:marathon-match-tester | Supports pagination and optional name filtering.',
+      'Roles: Admin, Copilot | Scopes: read:marathon-match-tester | Supports pagination and optional name filtering.',
   })
   @ApiQuery({
     name: 'name',

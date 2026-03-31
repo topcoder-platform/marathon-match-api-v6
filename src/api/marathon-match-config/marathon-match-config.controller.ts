@@ -41,7 +41,8 @@ import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { MarathonMatchConfigService } from './marathon-match-config.service';
 
 /**
- * Exposes secured marathon match configuration CRUD endpoints.
+ * Exposes secured marathon match configuration endpoints for admin and copilot
+ * setup workflows.
  */
 @ApiTags('Marathon Match Config')
 @ApiBearerAuth()
@@ -59,11 +60,11 @@ export class MarathonMatchConfigController {
    * @returns The created marathon match config.
    */
   @Post('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.CreateMarathonMatch)
   @ApiOperation({
     summary: 'Create a marathon match config',
-    description: 'Roles: Admin | Scopes: create:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: create:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',
@@ -228,11 +229,11 @@ export class MarathonMatchConfigController {
    * @returns Default review scorecard ID, test timeout, compile timeout, and task definition values.
    */
   @Get('/defaults')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatch)
   @ApiOperation({
     summary: 'Get marathon match config defaults',
-    description: 'Roles: Admin | Scopes: read:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match',
   })
   @ApiResponse({
     status: 200,
@@ -252,11 +253,11 @@ export class MarathonMatchConfigController {
    * @returns Marathon match config details.
    */
   @Get('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatch)
   @ApiOperation({
     summary: 'Get a marathon match config',
-    description: 'Roles: Admin | Scopes: read:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',
@@ -285,11 +286,11 @@ export class MarathonMatchConfigController {
    * @returns Updated marathon match configuration.
    */
   @Put('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.UpdateMarathonMatch)
   @ApiOperation({
     summary: 'Update a marathon match config',
-    description: 'Roles: Admin | Scopes: update:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: update:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',

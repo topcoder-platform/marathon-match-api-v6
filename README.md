@@ -166,6 +166,7 @@ All secured endpoints require `Authorization: Bearer <token>`.
 Auth model in code:
 
 - User JWT with role `administrator` passes role checks.
+- User JWT with role `copilot` also passes the scorer/tester setup routes used by platform-ui.
 - M2M JWT passes with required scope.
 - `all:marathon-match` and `all:marathon-match-tester` are expanded to their CRUD scopes.
 
@@ -180,10 +181,10 @@ Auth model in code:
 
 | Method | Path | Required role/scope |
 | --- | --- | --- |
-| `POST` | `/v6/marathon-match/testers` | `administrator` OR `create:marathon-match-tester` |
-| `GET` | `/v6/marathon-match/testers` | `administrator` OR `read:marathon-match-tester` |
-| `GET` | `/v6/marathon-match/testers/:id` | `administrator` OR `read:marathon-match-tester` |
-| `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `update:marathon-match-tester` |
+| `POST` | `/v6/marathon-match/testers` | `administrator` OR `copilot` OR `create:marathon-match-tester` |
+| `GET` | `/v6/marathon-match/testers` | `administrator` OR `copilot` OR `read:marathon-match-tester` |
+| `GET` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `read:marathon-match-tester` |
+| `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
 | `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
 
 `GET /v6/marathon-match/testers` returns tester summary rows only. Use `GET /v6/marathon-match/testers/:id` when you need `sourceCode` or `jarFile`.
@@ -192,11 +193,12 @@ Auth model in code:
 
 | Method | Path | Required role/scope |
 | --- | --- | --- |
-| `POST` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `create:marathon-match` |
+| `POST` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `create:marathon-match` |
 | `GET` | `/v6/marathon-match/challenge` | `administrator` OR `read:marathon-match` |
-| `GET` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `read:marathon-match` |
+| `GET` | `/v6/marathon-match/challenge/defaults` | `administrator` OR `copilot` OR `read:marathon-match` |
+| `GET` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `read:marathon-match` |
 | `GET` | `/v6/marathon-match/challenge/:challengeId/tester-jar` | `administrator` OR `read:marathon-match` |
-| `PUT` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `update:marathon-match` |
+| `PUT` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `update:marathon-match` |
 | `DELETE` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `delete:marathon-match` |
 
 ### Submission runner log endpoint

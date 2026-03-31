@@ -8,7 +8,7 @@ The Scorer section in `marathon-match-api-v6` connects a Marathon Match challeng
 
 Before configuring a challenge, make sure you have:
 
-- An administrator JWT or M2M token with `all:marathon-match` and `all:marathon-match-tester`
+- An administrator JWT, a copilot JWT, or an M2M token with `all:marathon-match` and `all:marathon-match-tester`
 - ECS infrastructure ready for the scorer task
 - Access to the challenge ID in Challenge API
 - The tester source code ready in Java
