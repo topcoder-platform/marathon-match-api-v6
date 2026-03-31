@@ -92,6 +92,8 @@ Create the challenge config with:
 
 Recommended starting point: set `active: false` until the tester and ECS wiring are verified.
 
+The POST request validates the challenge ID against challenge-api and validates `reviewScorecardId` against review-api before saving. If a config already exists for the challenge, the API returns `409 Conflict`.
+
 ### Required config fields
 
 | Field | Type | Notes |

@@ -83,7 +83,14 @@ export class MarathonMatchConfigController {
   })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
-  @ApiResponse({ status: 404, description: 'Tester not found.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Challenge or tester not found.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A marathon match config already exists for the challenge.',
+  })
   async createConfig(
     @Param('challengeId') challengeId: string,
     @Body() body: CreateMarathonMatchConfigDto,

@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -139,8 +140,9 @@ export class MarathonMatchConfigService {
    * @param body Input payload from POST /challenge/:challengeId.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created marathon match config mapped to `MarathonMatchConfigResponseDto`.
-   * @throws NotFoundException When the referenced tester does not exist.
-   * @throws BadRequestException When phase `startSeed` is not a safe integer or a phase identifier does not exist on the challenge.
+   * @throws NotFoundException When the referenced challenge or tester does not exist.
+   * @throws ConflictException When a config already exists for the challenge.
+   * @throws BadRequestException When `challengeId` is invalid, `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is not a safe integer, or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createConfig(
@@ -149,6 +151,8 @@ export class MarathonMatchConfigService {
     user: JwtUser,
   ): Promise<MarathonMatchConfigResponseDto> {
     try {
+      await this.fetchChallengePayload(challengeId);
+
       const testerData = await this.prisma.tester.findUnique({
         where: { id: body.testerId },
       });
@@ -158,6 +162,8 @@ export class MarathonMatchConfigService {
           `Tester with ID ${body.testerId} not found.`,
         );
       }
+
+      await this.validateReviewScorecardId(body.reviewScorecardId);
 
       const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: body.example, configType: PhaseConfigType.EXAMPLE },
@@ -230,6 +236,13 @@ export class MarathonMatchConfigService {
         error,
         `creating marathon match config with challenge ID: ${challengeId}`,
       );
+      if (errorResponse.code === 'UNIQUE_CONSTRAINT_FAILED') {
+        throw new ConflictException({
+          message: `Marathon match config with challenge ID ${challengeId} already exists.`,
+          code: errorResponse.code,
+          details: errorResponse.details,
+        });
+      }
       this.logger.error(errorResponse.message);
       throw new InternalServerErrorException({
         message: errorResponse.message,
@@ -1175,31 +1188,14 @@ export class MarathonMatchConfigService {
    * Builds a lookup from accepted challenge phase identifiers to canonical persisted phase IDs.
    * @param challengeId Challenge ID to fetch from challenge-api.
    * @returns Map keyed by challenge `phaseId` and legacy challenge-phase `id`, both pointing to canonical `phaseId`.
-   * @throws InternalServerErrorException When M2M token retrieval fails.
+   * @throws BadRequestException When `challengeId` is invalid.
+   * @throws NotFoundException When the challenge does not exist.
+   * @throws InternalServerErrorException When challenge validation dependencies are unavailable.
    */
   private async fetchCanonicalPhaseIdByIdentifier(
     challengeId: string,
   ): Promise<Map<string, string>> {
-    const token = await this.m2mService.getM2MToken();
-    if (!token) {
-      throw new InternalServerErrorException(
-        'Unable to get M2M token for challenge API call.',
-      );
-    }
-
-    const challengeResponse = await firstValueFrom(
-      this.httpService.get<ChallengeResponse>(
-        `${this.challengeApiBaseUrl}/v6/challenges/${challengeId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      ),
-    );
-    const challengePayload = this.resolveChallengePayload(
-      challengeResponse.data,
-    );
+    const challengePayload = await this.fetchChallengePayload(challengeId);
     const challengePhases = this.resolveChallengePhases(challengePayload);
     const canonicalPhaseIdByIdentifier = new Map<string, string>();
 
@@ -1215,6 +1211,91 @@ export class MarathonMatchConfigService {
     }
 
     return canonicalPhaseIdByIdentifier;
+  }
+
+  /**
+   * Loads and validates a challenge from challenge-api for config create/update flows.
+   * @param challengeId Challenge identifier from the route path.
+   * @returns Normalized challenge payload from challenge-api.
+   * @throws BadRequestException When `challengeId` is invalid.
+   * @throws NotFoundException When the challenge does not exist.
+   * @throws InternalServerErrorException When challenge-api or token retrieval is unavailable.
+   */
+  private async fetchChallengePayload(
+    challengeId: string,
+  ): Promise<ChallengeResponse> {
+    let token: string;
+    try {
+      token = await this.m2mService.getM2MToken();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn({
+        message:
+          'Unable to validate Marathon Match challenge id because M2M token retrieval failed.',
+        challengeId,
+        error: message,
+      });
+      throw new InternalServerErrorException(
+        'Unable to validate challengeId at this time.',
+      );
+    }
+
+    if (!token) {
+      this.logger.warn({
+        message:
+          'Unable to validate Marathon Match challenge id because M2M token retrieval returned an empty token.',
+        challengeId,
+      });
+      throw new InternalServerErrorException(
+        'Unable to validate challengeId at this time.',
+      );
+    }
+
+    const url = `${this.challengeApiBaseUrl}/v6/challenges/${encodeURIComponent(challengeId)}`;
+
+    try {
+      const challengeResponse = await firstValueFrom(
+        this.httpService.get<ChallengeResponse>(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+      return this.resolveChallengePayload(challengeResponse.data);
+    } catch (error) {
+      const typedError = error as {
+        message?: string;
+        response?: {
+          status?: number;
+          data?: unknown;
+        };
+      };
+      const statusCode = typedError.response?.status;
+      this.logger.warn({
+        message: 'Unable to validate Marathon Match challenge id.',
+        challengeId,
+        url,
+        statusCode: statusCode ?? null,
+        responseBody: typedError.response?.data ?? null,
+        error: typedError.message ?? String(error),
+      });
+
+      if (statusCode === 400) {
+        throw new BadRequestException(
+          `Challenge ID ${challengeId} is invalid.`,
+        );
+      }
+
+      if (statusCode === 404) {
+        throw new NotFoundException(
+          `Challenge with ID ${challengeId} not found.`,
+        );
+      }
+
+      throw new InternalServerErrorException(
+        'Unable to validate challengeId at this time.',
+      );
+    }
   }
 
   /**

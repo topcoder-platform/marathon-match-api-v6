@@ -1,4 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PhaseConfigType, ScoreDirection } from '@prisma/client';
 import { of, throwError } from 'rxjs';
 
@@ -27,10 +31,12 @@ describe('MarathonMatchConfigService', () => {
     const prisma = {
       $transaction: jest.fn(),
       marathonMatchConfig: {
+        create: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
       },
       phaseConfig: {
+        create: jest.fn(),
         upsert: jest.fn(),
       },
       tester: {
@@ -66,6 +72,16 @@ describe('MarathonMatchConfigService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  const createConfigPayload = () => ({
+    name: 'MM June 2026 Config',
+    reviewScorecardId: 'scorecard-1',
+    testerId: 'tester-1',
+    testTimeout: 90000,
+    compileTimeout: 120000,
+    taskDefinitionName: 'mm-runner',
+    taskDefinitionVersion: '7',
   });
 
   it('resolves legacy review scorecard ids when loading one config', async () => {
@@ -172,6 +188,150 @@ describe('MarathonMatchConfigService', () => {
           Authorization: 'Bearer m2m-token',
         },
       },
+    );
+  });
+
+  it('rejects create requests when challengeId does not resolve', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      throwError(() => ({
+        message: 'Request failed with status code 404',
+        response: {
+          status: 404,
+          data: {
+            message: 'Challenge not found',
+          },
+        },
+      })),
+    );
+
+    await expect(
+      service.createConfig(
+        '30000999',
+        createConfigPayload() as never,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(prisma.tester.findUnique).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/challenges/30000999',
+      {
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      },
+    );
+  });
+
+  it('rejects create requests when reviewScorecardId cannot be resolved', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    prisma.tester.findUnique.mockResolvedValue({
+      id: 'tester-1',
+    });
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: '30000123',
+            phases: [],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        throwError(() => ({
+          message: 'Request failed with status code 404',
+          response: {
+            status: 404,
+            data: {
+              message: 'Scorecard not found',
+            },
+          },
+        })),
+      );
+
+    await expect(
+      service.createConfig(
+        '30000123',
+        createConfigPayload() as never,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      2,
+      'https://api.topcoder-dev.com/v6/scorecards/scorecard-1',
+      {
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      },
+    );
+  });
+
+  it('returns conflict when a config already exists for the challenge', async () => {
+    const { service, httpService, m2mService, prisma, prismaErrorService } =
+      createService();
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    prisma.tester.findUnique.mockResolvedValue({
+      id: 'tester-1',
+    });
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<void>) => callback(prisma),
+    );
+    prisma.marathonMatchConfig.create.mockRejectedValue(new Error('duplicate'));
+    prismaErrorService.handleError.mockReturnValue({
+      message:
+        'A record with these unique fields already exists. Please check for duplicates.',
+      code: 'UNIQUE_CONSTRAINT_FAILED',
+      details: {
+        duplicateFields: 'challengeId',
+      },
+    });
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: '30000123',
+            phases: [],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: 'resolved-scorecard-id',
+          },
+        }),
+      );
+
+    await expect(
+      service.createConfig(
+        '30000123',
+        createConfigPayload() as never,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(ConflictException);
+
+    expect(prismaErrorService.handleError).toHaveBeenCalledWith(
+      expect.any(Error),
+      'creating marathon match config with challenge ID: 30000123',
     );
   });
 });
