@@ -246,7 +246,7 @@ export class MarathonMatchConfigService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Updated marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the config or updated tester does not exist.
-   * @throws BadRequestException When phase `startSeed` is not a safe integer or a phase identifier does not exist on the challenge.
+   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is not a safe integer, or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async updateConfig(
@@ -277,8 +277,15 @@ export class MarathonMatchConfigService {
         }
       }
 
+      if (body.reviewScorecardId) {
+        await this.validateReviewScorecardId(body.reviewScorecardId);
+      }
+
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const { example, provisional, system, ...scalarFields } = body;
+      if (scalarFields.reviewScorecardId) {
+        scalarFields.reviewScorecardId = scalarFields.reviewScorecardId.trim();
+      }
       const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: example, configType: PhaseConfigType.EXAMPLE },
         { phase: provisional, configType: PhaseConfigType.PROVISIONAL },
@@ -1315,6 +1322,116 @@ export class MarathonMatchConfigService {
       createdBy: config.createdBy,
       updatedBy: config.updatedBy,
     };
+  }
+
+  /**
+   * Verifies that an inbound review scorecard id resolves through review-api.
+   * Accepts either the canonical review-api id or a legacy scorecard id.
+   * @param scorecardId Review scorecard identifier submitted on create/update input.
+   * @throws BadRequestException When review-api reports the scorecard does not exist.
+   * @throws InternalServerErrorException When the scorecard cannot be validated because dependencies are unavailable.
+   */
+  private async validateReviewScorecardId(scorecardId: string): Promise<void> {
+    const rawScorecardId = scorecardId.trim();
+    if (!rawScorecardId) {
+      throw new BadRequestException('Review scorecard ID must not be blank.');
+    }
+
+    const cached = this.scorecardIdLookupCache.get(rawScorecardId);
+    if (cached !== undefined) {
+      if (cached === null) {
+        throw new BadRequestException(
+          `Review scorecard ID ${rawScorecardId} is invalid or not found.`,
+        );
+      }
+      return;
+    }
+
+    let token: string;
+    try {
+      token = await this.m2mService.getM2MToken();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn({
+        message:
+          'Unable to validate Marathon Match review scorecard id because M2M token retrieval failed.',
+        requestedScorecardId: rawScorecardId,
+        error: message,
+      });
+      throw new InternalServerErrorException(
+        'Unable to validate reviewScorecardId at this time.',
+      );
+    }
+
+    if (!token) {
+      this.logger.warn({
+        message:
+          'Unable to validate Marathon Match review scorecard id because M2M token retrieval returned an empty token.',
+        requestedScorecardId: rawScorecardId,
+      });
+      throw new InternalServerErrorException(
+        'Unable to validate reviewScorecardId at this time.',
+      );
+    }
+
+    const url = `${this.buildReviewApiBaseUrl()}/scorecards/${encodeURIComponent(rawScorecardId)}`;
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get<{ id?: string }>(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+
+      const resolvedScorecardId = response.data?.id?.trim() || '';
+      if (!resolvedScorecardId) {
+        this.logger.warn({
+          message:
+            'Scorecard validation lookup succeeded but did not return a canonical scorecard id.',
+          requestedScorecardId: rawScorecardId,
+          url,
+        });
+        throw new InternalServerErrorException(
+          'Unable to validate reviewScorecardId at this time.',
+        );
+      }
+
+      this.scorecardIdLookupCache.set(rawScorecardId, resolvedScorecardId);
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+
+      const typedError = error as {
+        message?: string;
+        response?: {
+          status?: number;
+          data?: unknown;
+        };
+      };
+      const statusCode = typedError.response?.status;
+      this.logger.warn({
+        message: 'Unable to validate Marathon Match review scorecard id.',
+        requestedScorecardId: rawScorecardId,
+        url,
+        statusCode: statusCode ?? null,
+        responseBody: typedError.response?.data ?? null,
+        error: typedError.message ?? String(error),
+      });
+
+      if (statusCode === 400 || statusCode === 404) {
+        this.scorecardIdLookupCache.set(rawScorecardId, null);
+        throw new BadRequestException(
+          `Review scorecard ID ${rawScorecardId} is invalid or not found.`,
+        );
+      }
+
+      throw new InternalServerErrorException(
+        'Unable to validate reviewScorecardId at this time.',
+      );
+    }
   }
 
   /**

@@ -1,5 +1,7 @@
-import { of } from 'rxjs';
+import { BadRequestException } from '@nestjs/common';
 import { PhaseConfigType, ScoreDirection } from '@prisma/client';
+import { of, throwError } from 'rxjs';
+
 jest.mock('nanoid', () => ({
   nanoid: jest.fn(() => 'generated-id'),
 }));
@@ -23,7 +25,15 @@ describe('MarathonMatchConfigService', () => {
       getM2MToken: jest.fn(),
     };
     const prisma = {
+      $transaction: jest.fn(),
       marathonMatchConfig: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      phaseConfig: {
+        upsert: jest.fn(),
+      },
+      tester: {
         findUnique: jest.fn(),
       },
     };
@@ -46,6 +56,7 @@ describe('MarathonMatchConfigService', () => {
       httpService,
       m2mService,
       prisma,
+      prismaErrorService,
     };
   };
 
@@ -111,6 +122,51 @@ describe('MarathonMatchConfigService', () => {
     expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
     expect(httpService.get).toHaveBeenCalledWith(
       'https://api.topcoder-dev.com/v6/scorecards/12345',
+      {
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      },
+    );
+  });
+
+  it('rejects update requests when reviewScorecardId cannot be resolved', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      testerId: 'tester-1',
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      throwError(() => ({
+        message: 'Request failed with status code 404',
+        response: {
+          status: 404,
+          data: {
+            message: 'Scorecard not found',
+          },
+        },
+      })),
+    );
+
+    await expect(
+      service.updateConfig(
+        '30000123',
+        {
+          reviewScorecardId: 'x',
+        },
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/scorecards/x',
       {
         headers: {
           Authorization: 'Bearer m2m-token',

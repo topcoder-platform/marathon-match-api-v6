@@ -94,7 +94,7 @@ Recommended starting point: set `active: false` until the tester and ECS wiring 
 | `active` | boolean | Enables scoring when `true` |
 | `relativeScoringEnabled` | boolean | Enables relative-score normalization |
 | `scoreDirection` | string | `MAXIMIZE` or `MINIMIZE` |
-| `reviewScorecardId` | string | Review API scorecard used for summations |
+| `reviewScorecardId` | string | Review API scorecard used for summations. Must resolve via review-api using either the canonical scorecard id or a legacy scorecard id. |
 | `testTimeout` | number | Test execution timeout |
 | `compileTimeout` | number | Submission compile timeout |
 | `taskDefinitionName` | string | ECS task definition family |
