@@ -1056,6 +1056,7 @@ export class ScoringResultService {
 
   /**
    * Sends a create request to review-api.
+   * @throws BadRequestException When review-api rejects the payload as invalid, including unknown submission references.
    */
   private async createReviewSummation(
     token: string,
@@ -1081,6 +1082,11 @@ export class ScoringResultService {
         responseBody: errorDetails.responseBody ?? null,
         error: errorDetails.message,
       });
+      if (errorDetails.statusCode === 400 || errorDetails.statusCode === 404) {
+        throw new BadRequestException(
+          `Failed to create review summation: ${errorDetails.message}`,
+        );
+      }
       throw new Error(
         `Failed to create review summation: ${errorDetails.message}`,
       );
@@ -1089,6 +1095,7 @@ export class ScoringResultService {
 
   /**
    * Sends an update request to review-api.
+   * @throws BadRequestException When review-api rejects the payload as invalid, including unknown submission references.
    */
   private async updateReviewSummation(
     token: string,
@@ -1115,6 +1122,11 @@ export class ScoringResultService {
         responseBody: errorDetails.responseBody ?? null,
         error: errorDetails.message,
       });
+      if (errorDetails.statusCode === 400 || errorDetails.statusCode === 404) {
+        throw new BadRequestException(
+          `Failed to update review summation: ${errorDetails.message}`,
+        );
+      }
       throw new Error(
         `Failed to update review summation: ${errorDetails.message}`,
       );

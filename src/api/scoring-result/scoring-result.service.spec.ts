@@ -1,5 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ScoreDirection } from '@prisma/client';
+import { throwError } from 'rxjs';
 
 jest.mock('src/shared/modules/global/ecs.service', () => ({
   EcsService: class EcsService {},
@@ -58,6 +59,7 @@ describe('ScoringResultService', () => {
 
     return {
       service,
+      httpService,
       m2mService,
       prisma,
     };
@@ -134,6 +136,40 @@ describe('ScoringResultService', () => {
       undefined,
       basePayload.score,
       'provisional',
+    );
+  });
+
+  it('returns a bad request error when review-api rejects a nonexistent submissionId', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.post.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 404,
+          data: {
+            message: `Submission ${basePayload.submissionId} not found.`,
+          },
+        },
+      })),
+    );
+
+    let thrownError: unknown;
+    try {
+      await service.processScoringResult(basePayload);
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expect(thrownError).toBeInstanceOf(BadRequestException);
+    expect((thrownError as BadRequestException).message).toBe(
+      `Failed to create review summation: HTTP 404: Submission ${basePayload.submissionId} not found.`,
     );
   });
 });

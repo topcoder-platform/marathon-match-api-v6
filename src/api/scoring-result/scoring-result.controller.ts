@@ -116,7 +116,11 @@ export class ScoringResultController {
     status: 202,
     description: 'Scoring callback accepted and processed.',
   })
-  @ApiResponse({ status: 400, description: 'Invalid callback payload.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid callback payload or unknown submissionId rejected by review-api.',
+  })
   @ApiResponse({
     status: 404,
     description:
