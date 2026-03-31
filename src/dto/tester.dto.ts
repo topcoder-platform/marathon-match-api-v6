@@ -7,6 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Min,
 } from 'class-validator';
 
@@ -16,32 +17,51 @@ import {
  */
 export class CreateTesterDto {
   @ApiProperty({
-    description: 'Name of the tester',
+    description:
+      'Name of the tester. Must contain at least one non-whitespace character.',
     example: 'Marathon Match Java Tester',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'name must contain at least one non-whitespace character',
+  })
   name: string;
 
-  @ApiProperty({ description: 'Version of the tester', example: '1.0.0' })
+  @ApiProperty({
+    description:
+      'Version of the tester. Must contain at least one non-whitespace character.',
+    example: '1.0.0',
+  })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'version must contain at least one non-whitespace character',
+  })
   version: string;
 
   @ApiProperty({
-    description: 'Source code used to build the tester',
+    description:
+      'Source code used to build the tester. Must contain at least one non-whitespace character.',
     example: 'public class Tester { }',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'sourceCode must contain at least one non-whitespace character',
+  })
   sourceCode: string;
 
   @ApiProperty({
-    description: 'Main class name for the tester',
+    description:
+      'Main class name for the tester. Must contain at least one non-whitespace character.',
     example: 'com.topcoder.mm.Tester',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'className must contain at least one non-whitespace character',
+  })
   className: string;
 }
 
@@ -51,43 +71,59 @@ export class CreateTesterDto {
  */
 export class UpdateTesterDto {
   @ApiProperty({
-    description: 'Name of the tester',
+    description:
+      'Name of the tester. Must contain at least one non-whitespace character.',
     example: 'Marathon Match Java Tester',
     required: false,
   })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'name must contain at least one non-whitespace character',
+  })
   name?: string;
 
   @ApiProperty({
-    description: 'Version of the tester',
+    description:
+      'Version of the tester. Must contain at least one non-whitespace character.',
     example: '1.0.1',
     required: false,
   })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'version must contain at least one non-whitespace character',
+  })
   version?: string;
 
   @ApiProperty({
-    description: 'Source code used to build the tester',
+    description:
+      'Source code used to build the tester. Must contain at least one non-whitespace character.',
     example: 'public class Tester { }',
     required: false,
   })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'sourceCode must contain at least one non-whitespace character',
+  })
   sourceCode?: string;
 
   @ApiProperty({
-    description: 'Main class name for the tester',
+    description:
+      'Main class name for the tester. Must contain at least one non-whitespace character.',
     example: 'com.topcoder.mm.Tester',
     required: false,
   })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'className must contain at least one non-whitespace character',
+  })
   className?: string;
 }
 
