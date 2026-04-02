@@ -23,12 +23,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import {
+  CreateTesterVersionDto,
   CreateTesterDto,
   SearchTesterQueryDto,
   TesterPaginatedResponseDto,
   TesterResponseQueryDto,
   TesterResponseDto,
-  UpdateTesterDto,
 } from 'src/dto/tester.dto';
 import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
 import { Scopes } from 'src/shared/decorators/scopes.decorator';
@@ -80,65 +80,67 @@ export class TesterController {
   }
 
   /**
-   * Updates a tester by ID.
-   * @param id Tester ID.
-   * @param body Partial tester update payload.
+   * Creates a new version of an existing tester family.
+   * @param id Existing tester ID used to resolve the tester family.
+   * @param body New tester-version payload.
    * @param query Response shaping query parameters.
    * @param user Authenticated user for audit fields.
-   * @returns The updated tester.
+   * @returns The accepted tester version.
    */
   @Put('/:id')
   @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.UpdateMarathonMatchTester)
   @ApiOperation({
-    summary: 'Update a tester',
+    summary: 'Create a tester version',
     description: 'Roles: Admin, Copilot | Scopes: update:marathon-match-tester',
   })
   @ApiParam({
     name: 'id',
-    description: 'The ID of the tester',
+    description:
+      'The ID of an existing tester record whose family name will be reused for the new version',
     example: 'V1StGXR8_Z5jdH',
   })
-  @ApiBody({ description: 'Updated tester data', type: UpdateTesterDto })
+  @ApiBody({
+    description:
+      'New tester-version data. The tester name is inherited from the referenced tester.',
+    type: CreateTesterVersionDto,
+  })
   @ApiQuery({
     name: 'includeJarFile',
     description:
-      'Include compiled jar content in the response. Disabled by default to avoid large payloads.',
+      'Include compiled jar content in the response. Disabled by default to avoid large payloads. New versions return null until compilation succeeds.',
     required: false,
     type: Boolean,
     example: false,
   })
   @ApiResponse({
-    status: 200,
+    status: 202,
     description:
-      'Tester updated successfully when sourceCode is unchanged or omitted. jarFile is omitted unless includeJarFile=true.',
+      'New tester version accepted; compilation triggered asynchronously. Previous versions remain available for lookup.',
     type: TesterResponseDto,
   })
   @ApiResponse({
-    status: 202,
+    status: 400,
     description:
-      'Compilation triggered asynchronously. jarFile is omitted unless includeJarFile=true.',
-    type: TesterResponseDto,
+      'Bad Request. Returned when the submitted version is not higher than the current max version for that tester family.',
   })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Tester not found.' })
-  async updateTester(
+  async createTesterVersion(
     @Param('id') id: string,
-    @Body() body: UpdateTesterDto,
+    @Body() body: CreateTesterVersionDto,
     @Query() query: TesterResponseQueryDto,
     @Res({ passthrough: true }) res: Response,
     @User() user: JwtUser,
   ): Promise<TesterResponseDto> {
-    const result: UpdateTesterResult = await this.testerService.updateTester(
-      id,
-      body,
-      user,
-      query.includeJarFile,
-    );
-    res.status(
-      result.compilationTriggered ? HttpStatus.ACCEPTED : HttpStatus.OK,
-    );
+    const result: UpdateTesterResult =
+      await this.testerService.createTesterVersion(
+        id,
+        body,
+        user,
+        query.includeJarFile,
+      );
+    res.status(HttpStatus.ACCEPTED);
     return result.tester;
   }
 

@@ -1,5 +1,5 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
-import { CreateTesterDto, UpdateTesterDto } from './tester.dto';
+import { CreateTesterDto, CreateTesterVersionDto } from './tester.dto';
 
 describe('Tester DTO validation', () => {
   const validationPipe = new ValidationPipe({
@@ -25,18 +25,17 @@ describe('Tester DTO validation', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('rejects whitespace-only tester fields when updating a tester', async () => {
+  it('rejects whitespace-only tester fields when creating a tester version', async () => {
     await expect(
       validationPipe.transform(
         {
-          name: ' ',
           version: '   ',
           sourceCode: '\n\t',
           className: '    ',
         },
         {
           type: 'body',
-          metatype: UpdateTesterDto,
+          metatype: CreateTesterVersionDto,
           data: '',
         },
       ),

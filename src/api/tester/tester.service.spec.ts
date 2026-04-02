@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 
@@ -43,7 +44,7 @@ describe('TesterService', () => {
       handleError: jest.fn(),
     };
     const testerCompilationService = {
-      enqueueCompilation: jest.fn(),
+      enqueueCompilation: jest.fn().mockResolvedValue(undefined),
     };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
@@ -111,22 +112,37 @@ describe('TesterService', () => {
     });
   });
 
-  it('omits jar data from update responses unless explicitly requested', async () => {
+  it('creates a new tester version and omits jar data by default', async () => {
     const { service, prisma, testerCompilationService } = createService();
 
     prisma.tester.findUnique.mockResolvedValue({
+      id: testerRecord.id,
+      name: testerRecord.name,
+      version: testerRecord.version,
+      className: testerRecord.className,
       sourceCode: testerRecord.sourceCode,
     });
-    prisma.tester.update.mockResolvedValue({
+    prisma.tester.findMany.mockResolvedValue([
+      { version: '1.0.0' },
+      { version: '1.0.1' },
+    ]);
+    prisma.tester.create.mockResolvedValue({
       ...testerRecord,
-      version: '1.0.1',
+      id: 'generated-id',
+      version: '1.0.2',
+      sourceCode: 'public class BridgeRunnersTesterV2 {}',
+      className: 'com.topcoder.BridgeRunnersTesterV2',
+      compilationStatus: CompilationStatus.PENDING,
+      createdBy: '40051399',
+      updatedBy: '40051399',
     });
 
-    const result = await service.updateTester(
+    const result = await service.createTesterVersion(
       'tester-1',
       {
-        sourceCode: testerRecord.sourceCode,
-        version: '1.0.1',
+        sourceCode: 'public class BridgeRunnersTesterV2 {}',
+        version: '1.0.2',
+        className: 'com.topcoder.BridgeRunnersTesterV2',
       },
       {
         isMachine: false,
@@ -135,22 +151,79 @@ describe('TesterService', () => {
     );
 
     expect(result).toEqual({
-      compilationTriggered: false,
+      compilationTriggered: true,
       tester: {
         ...testerRecord,
-        version: '1.0.1',
+        id: 'generated-id',
+        version: '1.0.2',
+        sourceCode: 'public class BridgeRunnersTesterV2 {}',
+        className: 'com.topcoder.BridgeRunnersTesterV2',
+        compilationStatus: CompilationStatus.PENDING,
+        createdBy: '40051399',
+        updatedBy: '40051399',
         jarFile: null,
       },
     });
     expect(prisma.tester.findUnique).toHaveBeenCalledWith({
       where: { id: 'tester-1' },
       select: {
+        id: true,
+        name: true,
+        version: true,
+        className: true,
         sourceCode: true,
       },
     });
-    expect(prisma.tester.update.mock.calls[0][0].select).not.toHaveProperty(
+    expect(prisma.tester.findMany).toHaveBeenCalledWith({
+      where: {
+        name: testerRecord.name,
+      },
+      select: {
+        version: true,
+      },
+    });
+    expect(prisma.tester.create.mock.calls[0][0].select).not.toHaveProperty(
       'jarFile',
     );
+    expect(prisma.tester.update).not.toHaveBeenCalled();
+    expect(testerCompilationService.enqueueCompilation).toHaveBeenCalledWith(
+      'generated-id',
+      'public class BridgeRunnersTesterV2 {}',
+    );
+  });
+
+  it('rejects versions that are not higher than the current max tester version', async () => {
+    const { service, prisma, testerCompilationService } = createService();
+
+    prisma.tester.findUnique.mockResolvedValue({
+      id: testerRecord.id,
+      name: testerRecord.name,
+      version: testerRecord.version,
+      className: testerRecord.className,
+      sourceCode: testerRecord.sourceCode,
+    });
+    prisma.tester.findMany.mockResolvedValue([
+      { version: '1.0.0' },
+      { version: '1.0.10' },
+    ]);
+
+    await expect(
+      service.createTesterVersion(
+        'tester-1',
+        {
+          sourceCode: 'public class BridgeRunnersTesterV2 {}',
+          version: '1.0.2',
+          className: 'com.topcoder.BridgeRunnersTesterV2',
+        },
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.tester.create).not.toHaveBeenCalled();
+    expect(prisma.tester.update).not.toHaveBeenCalled();
     expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
   });
 });

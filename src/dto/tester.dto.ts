@@ -66,65 +66,46 @@ export class CreateTesterDto {
 }
 
 /**
- * Request payload for updating a tester.
- * Used by PUT /testers/:id and supports partial updates.
+ * Request payload for creating a new tester version.
+ * Used by PUT /testers/:id and requires a version greater than the current
+ * maximum version for that tester family.
  */
-export class UpdateTesterDto {
+export class CreateTesterVersionDto {
   @ApiProperty({
     description:
-      'Name of the tester. Must contain at least one non-whitespace character.',
-    example: 'Marathon Match Java Tester',
-    required: false,
-  })
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/\S/, {
-    message: 'name must contain at least one non-whitespace character',
-  })
-  name?: string;
-
-  @ApiProperty({
-    description:
-      'Version of the tester. Must contain at least one non-whitespace character.',
+      'Version of the new tester build. Must contain at least one non-whitespace character and be higher than the current max version for that tester name.',
     example: '1.0.1',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Matches(/\S/, {
     message: 'version must contain at least one non-whitespace character',
   })
-  version?: string;
+  version: string;
 
   @ApiProperty({
     description:
-      'Source code used to build the tester. Must contain at least one non-whitespace character.',
+      'Source code used to build the new tester version. Must contain at least one non-whitespace character.',
     example: 'public class Tester { }',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Matches(/\S/, {
     message: 'sourceCode must contain at least one non-whitespace character',
   })
-  sourceCode?: string;
+  sourceCode: string;
 
   @ApiProperty({
     description:
-      'Main class name for the tester. Must contain at least one non-whitespace character.',
+      'Main class name for the new tester version. Must contain at least one non-whitespace character.',
     example: 'com.topcoder.mm.Tester',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Matches(/\S/, {
     message: 'className must contain at least one non-whitespace character',
   })
-  className?: string;
+  className: string;
 }
 
 /**
@@ -189,7 +170,7 @@ export class TesterSummaryResponseDto {
 }
 
 /**
- * Full tester representation used by create, update, and single-tester reads.
+ * Full tester representation used by create, version-create, and single-tester reads.
  * Returned by POST /testers, PUT /testers/:id, and GET /testers/:id.
  */
 export class TesterResponseDto extends TesterSummaryResponseDto {
