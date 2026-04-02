@@ -91,7 +91,7 @@ describe('copilot scorer setup access source metadata', () => {
     },
   );
 
-  it.each(['createTester', 'updateTester', 'getTester', 'listTesters'])(
+  it.each(['createTester', 'createTesterVersion', 'getTester', 'listTesters'])(
     'allows copilots on tester setup route %s',
     (methodName) => {
       expectRolesToIncludeCopilot(testerControllerPath, methodName);

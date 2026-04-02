@@ -187,7 +187,7 @@ Auth model in code:
 | `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
 | `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
 
-`GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. Detail and update responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
+`GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. `PUT /v6/marathon-match/testers/:id` creates a new tester version while preserving older versions for lookup and selection. Detail and version-create responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
 
 ### Marathon match config endpoints
 
@@ -229,7 +229,7 @@ Create a tester (`POST /testers`) with:
 - `className` (fully-qualified Java class with static `runTester(String, ScorerConfig)`)
 - `sourceCode`
 
-Compilation is async through pg-boss. The create/update endpoint returns before compilation finishes.
+Compilation is async through pg-boss. The create/version-create endpoint returns before compilation finishes and includes the tester record you should poll for compilation status.
 
 ### 2. Wait for compilation success
 
@@ -239,7 +239,7 @@ Poll `GET /testers/:id` until:
 
 If you need the compiled jar in the response, call `GET /testers/:id?includeJarFile=true` after compilation succeeds.
 
-If `compilationStatus = FAILED`, update source and recompile via `PUT /testers/:id`.
+If `compilationStatus = FAILED`, publish a higher tester version via `PUT /testers/:id`.
 
 ### 3. Create challenge config
 

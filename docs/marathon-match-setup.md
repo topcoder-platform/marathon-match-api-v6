@@ -30,6 +30,10 @@ To publish a new version of an existing tester, call:
 
 `PUT /v6/marathon-match/testers/:id`
 
+The PUT route creates a new tester record that inherits the existing tester name,
+preserves older versions for lookup, and requires the submitted `version` to be
+higher than the current max version for that tester family.
+
 To browse available testers without transferring the stored source or compiled jar, call:
 
 `GET /v6/marathon-match/testers`
@@ -38,9 +42,9 @@ To load one tester's source, call:
 
 `GET /v6/marathon-match/testers/:id`
 
-Detail and update responses omit `jarFile` by default. Add `?includeJarFile=true` only when you explicitly need the compiled jar payload in that response.
+Detail and version-create responses omit `jarFile` by default. Add `?includeJarFile=true` only when you explicitly need the compiled jar payload in that response.
 
-Tester compilation is asynchronous. After creating or updating a tester, poll:
+Tester compilation is asynchronous. After creating a tester or publishing a new version, poll the tester ID returned by that response:
 
 `GET /v6/marathon-match/testers/:id`
 
@@ -52,7 +56,7 @@ If the status becomes `FAILED`:
 
 1. Read `compilationError`
 2. Fix the Java source
-3. Send another `PUT /v6/marathon-match/testers/:id`
+3. Send another `PUT /v6/marathon-match/testers/:id` with a higher `version`
 
 ## Step 2 - Load defaults
 
@@ -146,7 +150,7 @@ Verification calls:
 To switch an active challenge to a newer tester:
 
 1. Publish the new tester version with `PUT /v6/marathon-match/testers/:id`
-2. Wait for `GET /v6/marathon-match/testers/:id` to return `compilationStatus = SUCCESS`
+2. Wait for `GET /v6/marathon-match/testers/:newTesterId` to return `compilationStatus = SUCCESS`
 3. Update the challenge config with `PUT /v6/marathon-match/challenge/:challengeId` and the new `testerId`
 4. Trigger a rescore of current competitors with `POST /v6/marathon-match/challenge/:challengeId/rerun`
 
