@@ -13,12 +13,13 @@ import {
 
 /**
  * Request payload for creating a tester record.
- * Used by the tester controller for POST /testers requests.
+ * Used by the tester controller for POST /testers requests that create the
+ * first version of a tester family.
  */
 export class CreateTesterDto {
   @ApiProperty({
     description:
-      'Name of the tester. Must contain at least one non-whitespace character.',
+      'Name of the tester family. Must contain at least one non-whitespace character and must not already exist; later versions must use PUT /testers/:id.',
     example: 'Marathon Match Java Tester',
   })
   @IsString()

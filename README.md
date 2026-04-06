@@ -187,7 +187,7 @@ Auth model in code:
 | `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
 | `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
 
-`GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. `PUT /v6/marathon-match/testers/:id` creates a new tester version while preserving older versions for lookup and selection. Detail and version-create responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
+`POST /v6/marathon-match/testers` creates only the first record in a tester family and rejects names that already exist. `GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. `PUT /v6/marathon-match/testers/:id` creates a new tester version while preserving older versions for lookup and selection. Detail and version-create responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
 
 ### Marathon match config endpoints
 
@@ -228,6 +228,8 @@ Create a tester (`POST /testers`) with:
 - `version`
 - `className` (fully-qualified Java class with static `runTester(String, ScorerConfig)`)
 - `sourceCode`
+
+`POST /testers` is only for a brand-new tester name. If that tester family already exists, use `PUT /testers/:id` and a higher `version` instead.
 
 Compilation is async through pg-boss. The create/version-create endpoint returns before compilation finishes and includes the tester record you should poll for compilation status.
 

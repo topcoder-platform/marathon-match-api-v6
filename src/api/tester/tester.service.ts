@@ -118,6 +118,8 @@ export class TesterService {
    * @param body Input payload from POST /testers.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created tester mapped to `TesterResponseDto` with `PENDING` compile state.
+   * @throws ConflictException When the tester family name already exists and
+   * a new version must be published through PUT /testers/:id instead.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createTester(
@@ -125,6 +127,29 @@ export class TesterService {
     user: JwtUser,
   ): Promise<TesterResponseDto> {
     try {
+      const existingVersions = await this.prisma.tester.findMany({
+        where: {
+          name: body.name,
+        },
+        select: {
+          version: true,
+        },
+      });
+
+      if (existingVersions.length > 0) {
+        const maxExistingVersion = existingVersions.reduce(
+          (currentMaxVersion, testerRecord) =>
+            compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
+              ? testerRecord.version
+              : currentMaxVersion,
+          existingVersions[0].version,
+        );
+
+        throw new ConflictException(
+          `Tester ${body.name} already exists. Use PUT /testers/:id to publish a version higher than ${maxExistingVersion}.`,
+        );
+      }
+
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const created = await this.prisma.tester.create({
         data: {
@@ -147,6 +172,9 @@ export class TesterService {
         jarFile: null,
       });
     } catch (error) {
+      if (error instanceof ConflictException) {
+        throw error;
+      }
       const errorResponse = this.prismaErrorService.handleError(
         error,
         `creating tester with name: ${body.name}`,

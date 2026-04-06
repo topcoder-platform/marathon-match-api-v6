@@ -62,7 +62,11 @@ export class TesterController {
     summary: 'Create a tester',
     description: 'Roles: Admin, Copilot | Scopes: create:marathon-match-tester',
   })
-  @ApiBody({ description: 'Tester data', type: CreateTesterDto })
+  @ApiBody({
+    description:
+      'Tester-family data for the first version of a scorer. Use PUT /testers/:id for later versions of the same tester name.',
+    type: CreateTesterDto,
+  })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiResponse({
     status: 202,
@@ -71,6 +75,11 @@ export class TesterController {
     type: TesterResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Conflict. Returned when the tester name already exists and the request should use PUT /testers/:id to create a higher version.',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   async createTester(
     @Body() body: CreateTesterDto,
