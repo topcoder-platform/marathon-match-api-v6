@@ -229,7 +229,7 @@ Create a tester (`POST /testers`) with:
 - `className` (fully-qualified Java class with static `runTester(String, ScorerConfig)`)
 - `sourceCode`
 
-`POST /testers` is only for a brand-new tester name. If that tester family already exists, use `PUT /testers/:id` and a higher `version` instead.
+`POST /testers` is only for a brand-new tester name. The API trims tester `name`, `version`, and `className` before checking or saving the record. If that tester family already exists, use `PUT /testers/:id` and a higher `version` instead.
 
 Compilation is async through pg-boss. The create/version-create endpoint returns before compilation finishes and includes the tester record you should poll for compilation status.
 

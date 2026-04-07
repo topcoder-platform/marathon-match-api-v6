@@ -26,9 +26,10 @@ To create a new tester family, call:
 
 `POST /v6/marathon-match/testers`
 
-This route only creates the first version for a tester name. If that tester
-family already exists, use `PUT /v6/marathon-match/testers/:id` with a higher
-`version`.
+This route only creates the first version for a tester name. The API trims the
+tester `name`, `version`, and `className` before checking or saving the
+record. If that tester family already exists, use
+`PUT /v6/marathon-match/testers/:id` with a higher `version`.
 
 To publish a new version of an existing tester, call:
 

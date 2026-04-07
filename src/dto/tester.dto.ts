@@ -19,7 +19,7 @@ import {
 export class CreateTesterDto {
   @ApiProperty({
     description:
-      'Name of the tester family. Must contain at least one non-whitespace character and must not already exist; later versions must use PUT /testers/:id.',
+      'Name of the tester family. Must contain at least one non-whitespace character, is trimmed before persistence, and must not already exist; later versions must use PUT /testers/:id.',
     example: 'Marathon Match Java Tester',
   })
   @IsString()
@@ -31,7 +31,7 @@ export class CreateTesterDto {
 
   @ApiProperty({
     description:
-      'Version of the tester. Must contain at least one non-whitespace character.',
+      'Version of the tester. Must contain at least one non-whitespace character and is trimmed before persistence.',
     example: '1.0.0',
   })
   @IsString()
@@ -55,7 +55,7 @@ export class CreateTesterDto {
 
   @ApiProperty({
     description:
-      'Main class name for the tester. Must contain at least one non-whitespace character.',
+      'Main class name for the tester. Must contain at least one non-whitespace character and is trimmed before persistence.',
     example: 'com.topcoder.mm.Tester',
   })
   @IsString()
@@ -74,7 +74,7 @@ export class CreateTesterDto {
 export class CreateTesterVersionDto {
   @ApiProperty({
     description:
-      'Version of the new tester build. Must contain at least one non-whitespace character and be higher than the current max version for that tester name.',
+      'Version of the new tester build. Must contain at least one non-whitespace character, is trimmed before persistence, and must be higher than the current max version for that tester name.',
     example: '1.0.1',
   })
   @IsString()
@@ -98,7 +98,7 @@ export class CreateTesterVersionDto {
 
   @ApiProperty({
     description:
-      'Main class name for the new tester version. Must contain at least one non-whitespace character.',
+      'Main class name for the new tester version. Must contain at least one non-whitespace character and is trimmed before persistence.',
     example: 'com.topcoder.mm.Tester',
   })
   @IsString()

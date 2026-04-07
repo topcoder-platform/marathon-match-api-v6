@@ -114,7 +114,8 @@ export class TesterService {
   ) {}
 
   /**
-   * Creates a tester record.
+   * Creates a tester record after trimming tester metadata fields that should
+   * not preserve surrounding whitespace.
    * @param body Input payload from POST /testers.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created tester mapped to `TesterResponseDto` with `PENDING` compile state.
@@ -126,10 +127,17 @@ export class TesterService {
     body: CreateTesterDto,
     user: JwtUser,
   ): Promise<TesterResponseDto> {
+    const normalizedBody: CreateTesterDto = {
+      ...body,
+      name: body.name.trim(),
+      version: body.version.trim(),
+      className: body.className.trim(),
+    };
+
     try {
       const existingVersions = await this.prisma.tester.findMany({
         where: {
-          name: body.name,
+          name: normalizedBody.name,
         },
         select: {
           version: true,
@@ -146,7 +154,7 @@ export class TesterService {
         );
 
         throw new ConflictException(
-          `Tester ${body.name} already exists. Use PUT /testers/:id to publish a version higher than ${maxExistingVersion}.`,
+          `Tester ${normalizedBody.name} already exists. Use PUT /testers/:id to publish a version higher than ${maxExistingVersion}.`,
         );
       }
 
@@ -154,7 +162,7 @@ export class TesterService {
       const created = await this.prisma.tester.create({
         data: {
           id: nanoid(14),
-          ...body,
+          ...normalizedBody,
           compilationStatus: CompilationStatus.PENDING,
           compilationError: null,
           jarFile: null,
@@ -177,7 +185,7 @@ export class TesterService {
       }
       const errorResponse = this.prismaErrorService.handleError(
         error,
-        `creating tester with name: ${body.name}`,
+        `creating tester with name: ${normalizedBody.name}`,
       );
       this.logger.error(errorResponse.message);
       throw new InternalServerErrorException({
@@ -189,7 +197,8 @@ export class TesterService {
   }
 
   /**
-   * Creates a new version record for an existing tester family.
+   * Creates a new version record for an existing tester family after trimming
+   * the submitted version and class-name metadata.
    * @param id Existing tester identifier used to resolve the tester family name.
    * @param body New tester-version payload.
    * @param user Authenticated user or machine token payload used for audit fields.
@@ -205,6 +214,12 @@ export class TesterService {
     user: JwtUser,
     includeJarFile: boolean = false,
   ): Promise<UpdateTesterResult> {
+    const normalizedBody: CreateTesterVersionDto = {
+      ...body,
+      version: body.version.trim(),
+      className: body.className.trim(),
+    };
+
     try {
       const existing = await this.prisma.tester.findUnique({
         where: { id },
@@ -231,7 +246,9 @@ export class TesterService {
         existing.version,
       );
 
-      if (compareVersionStrings(body.version.trim(), maxExistingVersion) <= 0) {
+      if (
+        compareVersionStrings(normalizedBody.version, maxExistingVersion) <= 0
+      ) {
         throw new BadRequestException(
           `Version must be greater than the current max version ${maxExistingVersion} for tester ${existing.name}.`,
         );
@@ -242,9 +259,9 @@ export class TesterService {
         data: {
           id: nanoid(14),
           name: existing.name,
-          version: body.version,
-          sourceCode: body.sourceCode,
-          className: body.className,
+          version: normalizedBody.version,
+          sourceCode: normalizedBody.sourceCode,
+          className: normalizedBody.className,
           compilationStatus: CompilationStatus.PENDING,
           compilationError: null,
           jarFile: null,

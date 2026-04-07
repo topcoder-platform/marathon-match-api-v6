@@ -123,7 +123,7 @@ describe('TesterService', () => {
     await expect(
       service.createTester(
         {
-          name: testerRecord.name,
+          name: `  ${testerRecord.name}  `,
           version: '1.0.4',
           sourceCode: 'public class BridgeRunnersTesterV4 {}',
           className: 'com.topcoder.BridgeRunnersTesterV4',
@@ -176,8 +176,8 @@ describe('TesterService', () => {
       'tester-1',
       {
         sourceCode: 'public class BridgeRunnersTesterV2 {}',
-        version: '1.0.2',
-        className: 'com.topcoder.BridgeRunnersTesterV2',
+        version: ' 1.0.2 ',
+        className: ' com.topcoder.BridgeRunnersTesterV2 ',
       },
       {
         isMachine: false,
@@ -217,6 +217,16 @@ describe('TesterService', () => {
         version: true,
       },
     });
+    expect(prisma.tester.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: testerRecord.name,
+          version: '1.0.2',
+          className: 'com.topcoder.BridgeRunnersTesterV2',
+          sourceCode: 'public class BridgeRunnersTesterV2 {}',
+        }),
+      }),
+    );
     expect(prisma.tester.create.mock.calls[0][0].select).not.toHaveProperty(
       'jarFile',
     );
