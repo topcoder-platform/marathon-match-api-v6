@@ -61,6 +61,15 @@ type TesterResponseWithoutJarRecord = Prisma.testerGetPayload<{
   select: typeof testerResponseSelect;
 }>;
 
+const testerFamilyVersionSelect = {
+  name: true,
+  version: true,
+} satisfies Prisma.testerSelect;
+
+type TesterFamilyVersionRecord = Prisma.testerGetPayload<{
+  select: typeof testerFamilyVersionSelect;
+}>;
+
 const testerVersionSeedSelect = {
   id: true,
   name: true,
@@ -115,7 +124,8 @@ export class TesterService {
 
   /**
    * Creates a tester record after trimming tester metadata fields that should
-   * not preserve surrounding whitespace.
+   * not preserve surrounding whitespace and resolving duplicate tester-family
+   * names against the same canonical form used by the work app.
    * @param body Input payload from POST /testers.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created tester mapped to `TesterResponseDto` with `PENDING` compile state.
@@ -129,29 +139,19 @@ export class TesterService {
   ): Promise<TesterResponseDto> {
     const normalizedBody: CreateTesterDto = {
       ...body,
-      name: body.name.trim(),
-      version: body.version.trim(),
-      className: body.className.trim(),
+      name: this.normalizeTesterName(body.name),
+      version: this.normalizeTesterVersion(body.version),
+      className: this.normalizeTesterClassName(body.className),
     };
 
     try {
-      const existingVersions = await this.prisma.tester.findMany({
-        where: {
-          name: normalizedBody.name,
-        },
-        select: {
-          version: true,
-        },
-      });
+      const existingVersions = await this.listTesterFamilyVersionsByName(
+        normalizedBody.name,
+      );
 
       if (existingVersions.length > 0) {
-        const maxExistingVersion = existingVersions.reduce(
-          (currentMaxVersion, testerRecord) =>
-            compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
-              ? testerRecord.version
-              : currentMaxVersion,
-          existingVersions[0].version,
-        );
+        const maxExistingVersion =
+          this.getMaxTesterFamilyVersion(existingVersions);
 
         throw new ConflictException(
           `Tester ${normalizedBody.name} already exists. Use PUT /testers/:id to publish a version higher than ${maxExistingVersion}.`,
@@ -198,7 +198,8 @@ export class TesterService {
 
   /**
    * Creates a new version record for an existing tester family after trimming
-   * the submitted version and class-name metadata.
+   * the submitted version and class-name metadata and resolving the tester
+   * family name through the same canonical form used by tester lookup.
    * @param id Existing tester identifier used to resolve the tester family name.
    * @param body New tester-version payload.
    * @param user Authenticated user or machine token payload used for audit fields.
@@ -216,8 +217,8 @@ export class TesterService {
   ): Promise<UpdateTesterResult> {
     const normalizedBody: CreateTesterVersionDto = {
       ...body,
-      version: body.version.trim(),
-      className: body.className.trim(),
+      version: this.normalizeTesterVersion(body.version),
+      className: this.normalizeTesterClassName(body.className),
     };
 
     try {
@@ -230,27 +231,18 @@ export class TesterService {
         throw new NotFoundException(`Tester with ID ${id} not found.`);
       }
 
-      const existingVersions = await this.prisma.tester.findMany({
-        where: {
-          name: existing.name,
-        },
-        select: {
-          version: true,
-        },
-      });
-      const maxExistingVersion = existingVersions.reduce(
-        (currentMaxVersion, testerRecord) =>
-          compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
-            ? testerRecord.version
-            : currentMaxVersion,
-        existing.version,
+      const normalizedExistingName = this.normalizeTesterName(existing.name);
+      const existingVersions = await this.listTesterFamilyVersionsByName(
+        normalizedExistingName,
       );
+      const maxExistingVersion =
+        this.getMaxTesterFamilyVersion(existingVersions);
 
       if (
         compareVersionStrings(normalizedBody.version, maxExistingVersion) <= 0
       ) {
         throw new BadRequestException(
-          `Version must be greater than the current max version ${maxExistingVersion} for tester ${existing.name}.`,
+          `Version must be greater than the current max version ${maxExistingVersion} for tester ${normalizedExistingName}.`,
         );
       }
 
@@ -258,7 +250,7 @@ export class TesterService {
       const created = await this.prisma.tester.create({
         data: {
           id: nanoid(14),
-          name: existing.name,
+          name: normalizedExistingName,
           version: normalizedBody.version,
           sourceCode: normalizedBody.sourceCode,
           className: normalizedBody.className,
@@ -467,6 +459,74 @@ export class TesterService {
     testerData: TesterListRecord,
   ): TesterSummaryResponseDto {
     return testerData;
+  }
+
+  /**
+   * Normalizes tester names to the canonical form shared with the work app's
+   * tester-grouping logic.
+   * @param name Raw tester-family name from the API request or persistence layer.
+   * @returns Trimmed tester-family name.
+   */
+  private normalizeTesterName(name: string): string {
+    return name.trim();
+  }
+
+  /**
+   * Normalizes tester version metadata before comparison and persistence.
+   * @param version Raw tester version value.
+   * @returns Trimmed tester version.
+   */
+  private normalizeTesterVersion(version: string): string {
+    return version.trim();
+  }
+
+  /**
+   * Normalizes tester class names before persistence.
+   * @param className Raw tester class name.
+   * @returns Trimmed tester class name.
+   */
+  private normalizeTesterClassName(className: string): string {
+    return className.trim();
+  }
+
+  /**
+   * Loads every persisted tester-family version that matches a canonical
+   * tester name after trimming stored rows and request values.
+   * @param name Canonical tester-family name to resolve.
+   * @returns Matching tester-family records with normalized name/version fields.
+   */
+  private async listTesterFamilyVersionsByName(
+    name: string,
+  ): Promise<TesterFamilyVersionRecord[]> {
+    const normalizedName = this.normalizeTesterName(name);
+    const testerVersions = await this.prisma.tester.findMany({
+      select: testerFamilyVersionSelect,
+    });
+
+    return testerVersions
+      .map((testerRecord) => ({
+        ...testerRecord,
+        name: this.normalizeTesterName(testerRecord.name),
+        version: this.normalizeTesterVersion(testerRecord.version),
+      }))
+      .filter((testerRecord) => testerRecord.name === normalizedName);
+  }
+
+  /**
+   * Resolves the highest version within a tester family.
+   * @param testerVersions Tester-family records that already share a canonical name.
+   * @returns Highest canonical version string in the family.
+   */
+  private getMaxTesterFamilyVersion(
+    testerVersions: TesterFamilyVersionRecord[],
+  ): string {
+    return testerVersions.reduce(
+      (currentMaxVersion, testerRecord) =>
+        compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
+          ? testerRecord.version
+          : currentMaxVersion,
+      testerVersions[0].version,
+    );
   }
 
   /**

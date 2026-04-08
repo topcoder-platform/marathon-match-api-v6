@@ -116,8 +116,18 @@ describe('TesterService', () => {
     const { service, prisma, testerCompilationService } = createService();
 
     prisma.tester.findMany.mockResolvedValue([
-      { version: '1.0.0' },
-      { version: '1.0.3' },
+      {
+        name: ` ${testerRecord.name} `,
+        version: '1.0.0',
+      },
+      {
+        name: testerRecord.name,
+        version: '1.0.3',
+      },
+      {
+        name: 'Different Tester',
+        version: '9.9.9',
+      },
     ]);
 
     await expect(
@@ -136,10 +146,8 @@ describe('TesterService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(prisma.tester.findMany).toHaveBeenCalledWith({
-      where: {
-        name: testerRecord.name,
-      },
       select: {
+        name: true,
         version: true,
       },
     });
@@ -152,14 +160,24 @@ describe('TesterService', () => {
 
     prisma.tester.findUnique.mockResolvedValue({
       id: testerRecord.id,
-      name: testerRecord.name,
-      version: testerRecord.version,
+      name: ` ${testerRecord.name} `,
+      version: ` ${testerRecord.version} `,
       className: testerRecord.className,
       sourceCode: testerRecord.sourceCode,
     });
     prisma.tester.findMany.mockResolvedValue([
-      { version: '1.0.0' },
-      { version: '1.0.1' },
+      {
+        name: ` ${testerRecord.name} `,
+        version: '1.0.0',
+      },
+      {
+        name: testerRecord.name,
+        version: '1.0.1',
+      },
+      {
+        name: 'Different Tester',
+        version: '9.9.9',
+      },
     ]);
     prisma.tester.create.mockResolvedValue({
       ...testerRecord,
@@ -210,10 +228,8 @@ describe('TesterService', () => {
       },
     });
     expect(prisma.tester.findMany).toHaveBeenCalledWith({
-      where: {
-        name: testerRecord.name,
-      },
       select: {
+        name: true,
         version: true,
       },
     });
@@ -242,14 +258,24 @@ describe('TesterService', () => {
 
     prisma.tester.findUnique.mockResolvedValue({
       id: testerRecord.id,
-      name: testerRecord.name,
-      version: testerRecord.version,
+      name: ` ${testerRecord.name} `,
+      version: ` ${testerRecord.version} `,
       className: testerRecord.className,
       sourceCode: testerRecord.sourceCode,
     });
     prisma.tester.findMany.mockResolvedValue([
-      { version: '1.0.0' },
-      { version: '1.0.10' },
+      {
+        name: testerRecord.name,
+        version: '1.0.0',
+      },
+      {
+        name: ` ${testerRecord.name} `,
+        version: ' 1.0.10 ',
+      },
+      {
+        name: 'Different Tester',
+        version: '9.9.9',
+      },
     ]);
 
     await expect(
@@ -267,6 +293,12 @@ describe('TesterService', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
+    expect(prisma.tester.findMany).toHaveBeenCalledWith({
+      select: {
+        name: true,
+        version: true,
+      },
+    });
     expect(prisma.tester.create).not.toHaveBeenCalled();
     expect(prisma.tester.update).not.toHaveBeenCalled();
     expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
