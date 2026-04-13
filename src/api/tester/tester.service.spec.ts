@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 
@@ -110,6 +110,41 @@ describe('TesterService', () => {
         sourceCode: true,
       }),
     });
+  });
+
+  it('rejects creating a tester family when the tester name already exists', async () => {
+    const { service, prisma, testerCompilationService } = createService();
+
+    prisma.tester.findMany.mockResolvedValue([
+      { version: '1.0.0' },
+      { version: '1.0.3' },
+    ]);
+
+    await expect(
+      service.createTester(
+        {
+          name: testerRecord.name,
+          version: '1.0.4',
+          sourceCode: 'public class BridgeRunnersTesterV4 {}',
+          className: 'com.topcoder.BridgeRunnersTesterV4',
+        },
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.tester.findMany).toHaveBeenCalledWith({
+      where: {
+        name: testerRecord.name,
+      },
+      select: {
+        version: true,
+      },
+    });
+    expect(prisma.tester.create).not.toHaveBeenCalled();
+    expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
   });
 
   it('creates a new tester version and omits jar data by default', async () => {
