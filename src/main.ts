@@ -7,6 +7,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ApiModule } from './api/api.module';
 import { LoggerService } from './shared/modules/global/logger.service';
 import { Response } from 'express';
+import { isHealthCheckRequestUrl } from './shared/request/healthCheckRequest';
 
 const API_PREFIX = '/v6/marathon-match'; // Service prefix for all routes
 
@@ -52,15 +53,18 @@ async function bootstrap() {
     const requestLogger = LoggerService.forRoot('HttpRequest');
     const startTime = Date.now();
     const { method, originalUrl, ip, headers } = req;
+    const shouldLogRequest = !isHealthCheckRequestUrl(originalUrl);
 
     // Log request
-    requestLogger.log({
-      type: 'request',
-      method,
-      url: originalUrl,
-      ip,
-      userAgent: headers['user-agent'],
-    });
+    if (shouldLogRequest) {
+      requestLogger.log({
+        type: 'request',
+        method,
+        url: originalUrl,
+        ip,
+        userAgent: headers['user-agent'],
+      });
+    }
 
     // Intercept response to log it
     const originalSend = res.send;
@@ -69,13 +73,15 @@ async function bootstrap() {
       const statusCode = res.statusCode;
 
       // Log response
-      requestLogger.log({
-        type: 'response',
-        statusCode,
-        method,
-        url: originalUrl,
-        responseTime: `${responseTime}ms`,
-      });
+      if (shouldLogRequest) {
+        requestLogger.log({
+          type: 'response',
+          statusCode,
+          method,
+          url: originalUrl,
+          responseTime: `${responseTime}ms`,
+        });
+      }
 
       // If there's a 500+ error, log it as an error
       if (statusCode >= 500) {

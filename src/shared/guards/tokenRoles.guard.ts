@@ -12,6 +12,7 @@ import { JwtService } from '../modules/global/jwt.service';
 import { SCOPES_KEY } from '../decorators/scopes.decorator';
 import { LoggerService } from '../modules/global/logger.service';
 import { UserRole } from '../enums/userRole.enum';
+import { isHealthCheckRequestUrl } from '../request/healthCheckRequest';
 
 export const ROLES_KEY = 'roles';
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
@@ -30,6 +31,10 @@ export class TokenRolesGuard implements CanActivate {
     const controllerClass = context.getClass?.();
     const controllerName = controllerClass?.name || 'UnknownController';
     const handlerName = handler?.name || 'UnknownHandler';
+    const request = context.switchToHttp().getRequest<Request>();
+    const shouldLogRequest = !isHealthCheckRequestUrl(
+      request?.originalUrl || request?.url || request?.path,
+    );
 
     // Get required roles and scopes from decorators
     const requiredRoles =
@@ -40,15 +45,16 @@ export class TokenRolesGuard implements CanActivate {
 
     // If no roles or scopes are required, allow access
     if (requiredRoles.length === 0 && requiredScopes.length === 0) {
-      this.logger.log({
-        message: 'No roles or scopes required, allowing request',
-        controllerName,
-        handlerName,
-      });
+      if (shouldLogRequest) {
+        this.logger.log({
+          message: 'No roles or scopes required, allowing request',
+          controllerName,
+          handlerName,
+        });
+      }
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request>();
     const requestMeta = this.buildRequestLogMeta(
       request,
       controllerName,

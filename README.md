@@ -17,6 +17,7 @@ Swagger UI:
 - [Marathon Match Setup](docs/marathon-match-setup.md) - for challenge administrators
 - [Submission Phase Scoring](docs/submission-phase-scoring.md) - for DevOps
 - [Review Phase Scoring](docs/review-phase-scoring.md) - for DevOps
+- [Full Marathon Match Test Script](docs/full-marathon-match-test.md) - for end-to-end smoke tests with production baseline fixtures
 
 ## Configuration values
 
