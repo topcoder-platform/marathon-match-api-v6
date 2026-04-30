@@ -7,6 +7,9 @@
 # migration files
 /prisma/Scorecards
 
+# Test files
+/scripts/fixtures
+
 # Logs
 logs
 *.log
