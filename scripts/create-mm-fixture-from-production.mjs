@@ -636,10 +636,29 @@ function buildManifestSubmission(submission, summations, filePath, index) {
 function getSummationScore(summations, predicate) {
   const matches = summations
     .filter(predicate)
-    .filter((summation) => summation.aggregateScore !== undefined && summation.aggregateScore !== null)
+    .filter(isCompletedScoringSummation)
     .sort((left, right) => getSummationSortValue(right) - getSummationSortValue(left));
   const score = Number(matches[0]?.aggregateScore);
   return Number.isFinite(score) ? score : undefined;
+}
+
+/**
+ * Checks whether a review summation represents completed scoring.
+ * @param {Record<string, unknown>} summation Review summation row.
+ * @returns {boolean} True when aggregate score is present and progress is not in-flight.
+ */
+function isCompletedScoringSummation(summation) {
+  if (summation.aggregateScore === undefined || summation.aggregateScore === null) {
+    return false;
+  }
+
+  const testStatus = summation.metadata?.testStatus;
+  if (testStatus === 'IN PROGRESS') {
+    return false;
+  }
+
+  const testProgress = summation.metadata?.testProgress;
+  return typeof testProgress === 'number' ? testProgress >= 1 : true;
 }
 
 /**

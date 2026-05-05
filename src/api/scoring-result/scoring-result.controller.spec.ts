@@ -27,6 +27,7 @@ describe('ScoringResultController Swagger', () => {
         {
           provide: ScoringResultService,
           useValue: {
+            processScoringProgress: jest.fn(),
             processScoringResult: jest.fn(),
             triggerSystemScore: jest.fn(),
           },
@@ -54,11 +55,13 @@ describe('ScoringResultController Swagger', () => {
 
     expect(scoringResultsPath?.post).toBeDefined();
 
+    const scoringResultsPost = scoringResultsPath?.post as any;
     const requestSchemaRef =
-      scoringResultsPath.post.requestBody.content['application/json'].schema
-        .$ref;
+      scoringResultsPost.requestBody.content['application/json'].schema.$ref;
     const requestSchemaName = requestSchemaRef.split('/').pop();
-    const requestSchema = document.components.schemas[requestSchemaName ?? ''];
+    const requestSchema = document.components?.schemas?.[
+      requestSchemaName ?? ''
+    ] as any;
 
     expect(requestSchema.properties).toEqual(
       expect.objectContaining({
@@ -81,6 +84,51 @@ describe('ScoringResultController Swagger', () => {
         'score',
         'testPhase',
         'reviewTypeId',
+      ]),
+    );
+  });
+
+  it('documents the scoring-progress request body fields', () => {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().setTitle('Test').setVersion('1.0').build(),
+    );
+
+    const scoringProgressPath =
+      document.paths['/v6/marathon-match/internal/scoring-progress'];
+
+    expect(scoringProgressPath?.post).toBeDefined();
+
+    const scoringProgressPost = scoringProgressPath?.post as any;
+    const requestSchemaRef =
+      scoringProgressPost.requestBody.content['application/json'].schema.$ref;
+    const requestSchemaName = requestSchemaRef.split('/').pop();
+    const requestSchema = document.components?.schemas?.[
+      requestSchemaName ?? ''
+    ] as any;
+
+    expect(requestSchema.properties).toEqual(
+      expect.objectContaining({
+        challengeId: expect.objectContaining({ type: 'string' }),
+        submissionId: expect.objectContaining({ type: 'string' }),
+        testPhase: expect.objectContaining({ type: 'string' }),
+        reviewTypeId: expect.objectContaining({ type: 'string' }),
+        progress: expect.objectContaining({ type: 'number' }),
+        status: expect.objectContaining({ enum: expect.any(Array) }),
+        completedTests: expect.objectContaining({ type: 'number' }),
+        totalTests: expect.objectContaining({ type: 'number' }),
+        failedTests: expect.objectContaining({ type: 'number' }),
+        metadata: expect.objectContaining({ type: 'object' }),
+      }),
+    );
+    expect(requestSchema.required).toEqual(
+      expect.arrayContaining([
+        'challengeId',
+        'submissionId',
+        'testPhase',
+        'reviewTypeId',
+        'progress',
+        'status',
       ]),
     );
   });

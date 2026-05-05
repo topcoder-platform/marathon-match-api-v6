@@ -213,10 +213,12 @@ Auth model in code:
 
 | Method | Path | Required role/scope |
 | --- | --- | --- |
+| `POST` | `/v6/marathon-match/internal/scoring-progress` | `administrator` OR `update:marathon-match` |
 | `POST` | `/v6/marathon-match/internal/scoring-results` | `administrator` OR `update:marathon-match` |
 | `POST` | `/v6/marathon-match/internal/system-score` | `administrator` OR `update:marathon-match` |
 
 `POST /v6/marathon-match/internal/scoring-results` rejects callbacks whose `challengeId` does not map to an existing Marathon Match config.
+`POST /v6/marathon-match/internal/scoring-progress` stores runner progress in review summation metadata as `testProgress` (`0` to `1`) and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`).
 
 ## How to set up a challenge for marathon match scoring
 
@@ -368,6 +370,7 @@ SYSTEM review scoring uses the same scorer pipeline after autopilot dispatches:
 
 - `POST /v6/marathon-match/internal/system-score`
 - ECS scorer task execution
+- `POST /v6/marathon-match/internal/scoring-progress`
 - `POST /v6/marathon-match/internal/scoring-results`
 
 ## Review phase scoring flow

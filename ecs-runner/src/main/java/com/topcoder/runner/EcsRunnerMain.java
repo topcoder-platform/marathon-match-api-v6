@@ -68,9 +68,14 @@ public class EcsRunnerMain {
     private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
     private static final String ISOLATED_TESTER_RESULT_MARKER =
         "__MM_ISOLATED_TESTER_RESULT__:";
+    private static final String ISOLATED_TESTER_PROGRESS_MARKER =
+        "__MM_ISOLATED_TESTER_PROGRESS__:";
     private static final String ISOLATION_WRAPPER_PATH = "/usr/local/bin/mm-net-isolate";
     private static final String ISOLATED_EXECUTION_USER = "runner";
     private static final String ISOLATED_EXECUTION_GROUP = "runner";
+    private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
+    private static final String TEST_STATUS_SUCCESS = "SUCCESS";
+    private static final String TEST_STATUS_FAILED = "FAILED";
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
@@ -94,6 +99,10 @@ public class EcsRunnerMain {
     private static String logChallengeId = "<unset>";
     private static String logSubmissionId = "<unset>";
     private static String logTestPhase = "<unset>";
+    private static double lastReportedProgress = 0.0;
+    private static int lastReportedCompletedTests = 0;
+    private static int lastReportedTotalTests = 0;
+    private static int lastReportedFailedTests = 0;
 
     /**
      * Executes the ECS runner workflow end-to-end using environment-provided IDs and token.
@@ -111,17 +120,21 @@ public class EcsRunnerMain {
         String submissionId = "<missing>";
         String testPhase = "provisional";
         String reviewId = null;
+        String accessToken = null;
+        String marathonMatchBaseUrl = null;
+        String reviewTypeId = null;
+        String scorecardId = null;
 
         try {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
             submissionId = getRequiredEnv("SUBMISSION_ID");
-            String accessToken = getRequiredEnv("ACCESS_TOKEN");
+            accessToken = getRequiredEnv("ACCESS_TOKEN");
             boolean debugLogAccessToken = isTruthyEnv("DEBUG_LOG_ACCESS_TOKEN");
             boolean debugLogFullAccessToken = isTruthyEnv("DEBUG_LOG_FULL_ACCESS_TOKEN");
-            String marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
+            marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
-            String reviewTypeId = getRequiredEnv("REVIEW_TYPE_ID");
+            reviewTypeId = getRequiredEnv("REVIEW_TYPE_ID");
             reviewId = getOptionalEnv("REVIEW_ID", "");
             if (reviewId != null && reviewId.isEmpty()) {
                 reviewId = null;
@@ -247,6 +260,30 @@ public class EcsRunnerMain {
                     phaseNumberOfTests
                 );
                 logScorerConfig(scorerConfig);
+                scorecardId = scorerConfig.getScoreCardId();
+
+                if (isProgressTrackedPhase(testPhase)) {
+                    postScoringProgressSafely(
+                        httpClient,
+                        marathonMatchBaseUrl,
+                        accessToken,
+                        new ScoringProgressRequest(
+                            challengeId,
+                            submissionId,
+                            testPhase,
+                            reviewTypeId,
+                            reviewId,
+                            scorecardId,
+                            0.0,
+                            TEST_STATUS_IN_PROGRESS,
+                            0,
+                            resolvePositiveInt(scorerConfig.getNumberOfTests(), 1),
+                            0,
+                            "Scoring task started",
+                            buildProgressMetadata(testPhase, reviewTypeId)
+                        )
+                    );
+                }
 
                 logInfo(
                     "tester.isolated",
@@ -265,7 +302,13 @@ public class EcsRunnerMain {
                         tester.getClassName(),
                         submissionDir,
                         scorerConfig,
-                        testerJarPath
+                        testerJarPath,
+                        httpClient,
+                        marathonMatchBaseUrl,
+                        accessToken,
+                        reviewTypeId,
+                        reviewId,
+                        scorecardId
                     );
                 } finally {
                     killLingeringIsolatedProcesses();
@@ -355,6 +398,17 @@ public class EcsRunnerMain {
                 "runner.failure",
                 "Runner failed with error: " + error.getMessage(),
                 error
+            );
+            postFailureProgressSafely(
+                challengeId,
+                submissionId,
+                testPhase,
+                reviewId,
+                accessToken,
+                marathonMatchBaseUrl,
+                reviewTypeId,
+                scorecardId,
+                error.getMessage()
             );
             error.printStackTrace();
         } finally {
@@ -471,7 +525,13 @@ public class EcsRunnerMain {
         String testerClassName,
         Path submissionDir,
         ScorerConfig scorerConfig,
-        Path testerJarPath
+        Path testerJarPath,
+        CloseableHttpClient httpClient,
+        String marathonMatchBaseUrl,
+        String accessToken,
+        String reviewTypeId,
+        String reviewId,
+        String scorecardId
     ) throws Exception {
         Path scorerConfigPath = null;
         try {
@@ -516,6 +576,31 @@ public class EcsRunnerMain {
                         encodedResult = line.substring(
                             ISOLATED_TESTER_RESULT_MARKER.length()
                         );
+                    } else if (line.startsWith(ISOLATED_TESTER_PROGRESS_MARKER)) {
+                        IsolatedProgressUpdate progressUpdate =
+                            parseIsolatedProgressUpdate(line);
+                        if (progressUpdate != null && isProgressTrackedPhase(testPhase)) {
+                            postScoringProgressSafely(
+                                httpClient,
+                                marathonMatchBaseUrl,
+                                accessToken,
+                                new ScoringProgressRequest(
+                                    challengeId,
+                                    submissionId,
+                                    testPhase,
+                                    reviewTypeId,
+                                    reviewId,
+                                    scorecardId,
+                                    progressUpdate.getProgress(),
+                                    progressUpdate.getStatus(),
+                                    progressUpdate.getCompletedTests(),
+                                    progressUpdate.getTotalTests(),
+                                    progressUpdate.getFailedTests(),
+                                    progressUpdate.getMessage(),
+                                    buildProgressMetadata(testPhase, reviewTypeId)
+                                )
+                            );
+                        }
                     } else {
                         System.out.println(line);
                     }
@@ -551,6 +636,34 @@ public class EcsRunnerMain {
             return parseTesterExecutionResult(resultPayload, testerClassName);
         } finally {
             deletePathRecursively(scorerConfigPath);
+        }
+    }
+
+    /**
+     * Parses one base64-encoded progress marker emitted by the isolated tester child.
+     *
+     * @param line Raw stdout line from the child JVM.
+     * @return Progress update payload, or {@code null} when decoding fails.
+     */
+    private static IsolatedProgressUpdate parseIsolatedProgressUpdate(String line) {
+        try {
+            String encodedProgress = line.substring(
+                ISOLATED_TESTER_PROGRESS_MARKER.length()
+            );
+            String serializedProgress = new String(
+                Base64.getDecoder().decode(encodedProgress),
+                StandardCharsets.UTF_8
+            );
+            return OBJECT_MAPPER.readValue(
+                serializedProgress,
+                IsolatedProgressUpdate.class
+            );
+        } catch (Exception error) {
+            logWarn(
+                "tester.progress",
+                "Unable to parse isolated tester progress marker: " + error.getMessage()
+            );
+            return null;
         }
     }
 
@@ -1307,6 +1420,21 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Determines whether review summation progress should be posted for a phase.
+     */
+    private static boolean isProgressTrackedPhase(String testPhase) {
+        String normalized = normalizeTestPhase(testPhase);
+        return "provisional".equals(normalized) || "system".equals(normalized);
+    }
+
+    /**
+     * Checks whether a string value is null or whitespace-only.
+     */
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    /**
      * Performs an authorized HTTP GET and deserializes JSON body to a class.
      */
     private static <T> T fetchJson(
@@ -1470,6 +1598,184 @@ public class EcsRunnerMain {
                 );
             }
         }
+    }
+
+    /**
+     * Posts a scoring progress payload to marathon-match API without failing the runner.
+     *
+     * @param httpClient Trusted parent HTTP client.
+     * @param marathonMatchBaseUrl Marathon Match API base URL.
+     * @param accessToken Bearer token for the internal API.
+     * @param progressRequest Progress payload to persist in review summation metadata.
+     */
+    private static void postScoringProgressSafely(
+        CloseableHttpClient httpClient,
+        String marathonMatchBaseUrl,
+        String accessToken,
+        ScoringProgressRequest progressRequest
+    ) {
+        rememberScoringProgress(progressRequest);
+
+        try {
+            postScoringProgress(
+                httpClient,
+                marathonMatchBaseUrl,
+                accessToken,
+                progressRequest
+            );
+        } catch (Exception error) {
+            logWarn(
+                "api.progress",
+                "Unable to post scoring progress: " + error.getMessage()
+            );
+        }
+    }
+
+    /**
+     * Best-effort failure update used when the runner exits before final callback.
+     *
+     * @param challengeId Challenge ID.
+     * @param submissionId Submission ID.
+     * @param testPhase Scoring phase.
+     * @param reviewId Optional review ID for system scoring.
+     * @param accessToken Bearer token, when bootstrap reached token loading.
+     * @param marathonMatchBaseUrl Marathon Match API base URL, when available.
+     * @param reviewTypeId Review type ID, when available.
+     * @param scorecardId Scorecard ID, when available.
+     * @param message Failure message.
+     */
+    private static void postFailureProgressSafely(
+        String challengeId,
+        String submissionId,
+        String testPhase,
+        String reviewId,
+        String accessToken,
+        String marathonMatchBaseUrl,
+        String reviewTypeId,
+        String scorecardId,
+        String message
+    ) {
+        if (
+            !isProgressTrackedPhase(testPhase)
+                || isBlank(accessToken)
+                || isBlank(marathonMatchBaseUrl)
+                || isBlank(reviewTypeId)
+                || isBlank(challengeId)
+                || "<missing>".equals(challengeId)
+                || isBlank(submissionId)
+                || "<missing>".equals(submissionId)
+        ) {
+            return;
+        }
+
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            postScoringProgressSafely(
+                httpClient,
+                marathonMatchBaseUrl,
+                accessToken,
+                new ScoringProgressRequest(
+                    challengeId,
+                    submissionId,
+                    testPhase,
+                    reviewTypeId,
+                    reviewId,
+                    scorecardId,
+                    lastReportedProgress,
+                    TEST_STATUS_FAILED,
+                    lastReportedCompletedTests,
+                    lastReportedTotalTests,
+                    Math.max(1, lastReportedFailedTests),
+                    message,
+                    buildProgressMetadata(testPhase, reviewTypeId)
+                )
+            );
+        } catch (Exception error) {
+            logWarn(
+                "api.progress",
+                "Unable to post failure progress: " + error.getMessage()
+            );
+        }
+    }
+
+    /**
+     * Posts scoring progress to marathon-match API.
+     *
+     * @param httpClient Trusted parent HTTP client.
+     * @param marathonMatchBaseUrl Marathon Match API base URL.
+     * @param accessToken Bearer token for the internal API.
+     * @param progressRequest Progress payload to persist in review summation metadata.
+     * @throws Exception When the API rejects the progress update.
+     */
+    private static void postScoringProgress(
+        CloseableHttpClient httpClient,
+        String marathonMatchBaseUrl,
+        String accessToken,
+        ScoringProgressRequest progressRequest
+    ) throws Exception {
+        String url = marathonMatchBaseUrl + "/internal/scoring-progress";
+        String payload = OBJECT_MAPPER.writeValueAsString(progressRequest);
+
+        HttpPost request = new HttpPost(url);
+        request.setHeader("Authorization", "Bearer " + accessToken);
+        request.setHeader("Content-Type", "application/json");
+        request.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
+        logInfo(
+            "http.post.progress",
+            "POST " + url + " payloadChars=" + payload.length()
+        );
+
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            int statusCode = response.getStatusLine().getStatusCode();
+            String responseBody = response.getEntity() == null
+                ? ""
+                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            logInfo(
+                "http.post.progress",
+                "POST "
+                    + url
+                    + " returned HTTP "
+                    + statusCode
+                    + ", responsePreview="
+                    + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+            );
+
+            if (statusCode < 200 || statusCode >= 300) {
+                throw new RuntimeException(
+                    "POST " + url + " failed: HTTP " + statusCode + " - " + responseBody
+                );
+            }
+        }
+    }
+
+    /**
+     * Tracks the most recent progress so failure handling can preserve it.
+     *
+     * @param progressRequest Progress payload being posted.
+     */
+    private static void rememberScoringProgress(
+        ScoringProgressRequest progressRequest
+    ) {
+        lastReportedProgress = progressRequest.getProgress();
+        lastReportedCompletedTests = progressRequest.getCompletedTests();
+        lastReportedTotalTests = progressRequest.getTotalTests();
+        lastReportedFailedTests = progressRequest.getFailedTests();
+    }
+
+    /**
+     * Builds common metadata for progress-only review summation updates.
+     *
+     * @param testPhase Scoring phase.
+     * @param reviewTypeId Review type identifier.
+     * @return Metadata map sent with progress updates.
+     */
+    private static Map<String, Object> buildProgressMetadata(
+        String testPhase,
+        String reviewTypeId
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("testType", normalizeTestPhase(testPhase));
+        metadata.put("reviewTypeId", reviewTypeId);
+        return metadata;
     }
 
     /**
@@ -2049,6 +2355,7 @@ public class EcsRunnerMain {
             MarathonController controller = new MarathonController();
             List<Map<String, Object>> testScores = new ArrayList<Map<String, Object>>();
             double totalScore = 0.0;
+            int failedTests = 0;
             StringBuilder outputText = new StringBuilder();
 
             long endSeed = startSeed + numberOfTests - 1L;
@@ -2062,12 +2369,16 @@ public class EcsRunnerMain {
 
                 double seedScore = testResult.getScore();
                 totalScore += seedScore;
+                String seedError = testResult.getError();
+                if (seedScore < 0 || (seedError != null && !seedError.trim().isEmpty())) {
+                    failedTests += 1;
+                }
 
                 Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
                 seedResult.put("testcase", seed);
                 seedResult.put("score", seedScore);
                 seedResult.put("runTimeMs", testResult.getRunTime());
-                seedResult.put("error", testResult.getError());
+                seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
                 outputText.append("Test Case #").append(seed).append(":\n");
@@ -2088,6 +2399,14 @@ public class EcsRunnerMain {
                     outputText.append(testResult.getOutput().trim()).append('\n');
                 }
                 outputText.append('\n');
+
+                emitIsolatedTesterProgress(
+                    testScores.size(),
+                    numberOfTests,
+                    failedTests,
+                    failedTests > 0 ? TEST_STATUS_FAILED : TEST_STATUS_IN_PROGRESS,
+                    "Completed seed " + seed
+                );
             }
 
             double averageScore = testScores.isEmpty()
@@ -2126,6 +2445,47 @@ public class EcsRunnerMain {
             );
         } finally {
             deletePathRecursively(compileWorkDir);
+        }
+    }
+
+    /**
+     * Emits a progress marker for the trusted parent process to forward to the API.
+     *
+     * @param completedTests Number of seeds completed by the generic runner.
+     * @param totalTests Total seed count configured for the scoring phase.
+     * @param failedTests Number of completed tests that reported errors.
+     * @param status Current progress status.
+     * @param message Short progress message for metadata diagnostics.
+     */
+    private static void emitIsolatedTesterProgress(
+        int completedTests,
+        int totalTests,
+        int failedTests,
+        String status,
+        String message
+    ) {
+        try {
+            Map<String, Object> progress = new LinkedHashMap<String, Object>();
+            double progressValue = totalTests <= 0
+                ? 0.0
+                : Math.min(1.0, Math.max(0.0, (double) completedTests / totalTests));
+            progress.put("progress", progressValue);
+            progress.put("status", status);
+            progress.put("completedTests", completedTests);
+            progress.put("totalTests", totalTests);
+            progress.put("failedTests", failedTests);
+            progress.put("message", message);
+
+            String serializedProgress = OBJECT_MAPPER.writeValueAsString(progress);
+            String encodedProgress = Base64
+                .getEncoder()
+                .encodeToString(serializedProgress.getBytes(StandardCharsets.UTF_8));
+            System.out.println(ISOLATED_TESTER_PROGRESS_MARKER + encodedProgress);
+        } catch (Exception error) {
+            logWarn(
+                "tester.progress",
+                "Unable to emit isolated tester progress: " + error.getMessage()
+            );
         }
     }
 
@@ -3008,6 +3368,152 @@ public class EcsRunnerMain {
             this.metadata = metadata;
             this.currentReview = currentReview;
             this.impactedReviews = impactedReviews;
+        }
+    }
+
+    /**
+     * Request body for intermediate scorer progress updates.
+     */
+    private static class ScoringProgressRequest {
+        @JsonProperty("challengeId")
+        private final String challengeId;
+
+        @JsonProperty("submissionId")
+        private final String submissionId;
+
+        @JsonProperty("testPhase")
+        private final String testPhase;
+
+        @JsonProperty("reviewTypeId")
+        private final String reviewTypeId;
+
+        @JsonProperty("reviewId")
+        private final String reviewId;
+
+        @JsonProperty("scorecardId")
+        private final String scorecardId;
+
+        @JsonProperty("progress")
+        private final double progress;
+
+        @JsonProperty("status")
+        private final String status;
+
+        @JsonProperty("completedTests")
+        private final int completedTests;
+
+        @JsonProperty("totalTests")
+        private final int totalTests;
+
+        @JsonProperty("failedTests")
+        private final int failedTests;
+
+        @JsonProperty("message")
+        private final String message;
+
+        @JsonProperty("metadata")
+        private final Map<String, Object> metadata;
+
+        ScoringProgressRequest(
+            String challengeId,
+            String submissionId,
+            String testPhase,
+            String reviewTypeId,
+            String reviewId,
+            String scorecardId,
+            double progress,
+            String status,
+            int completedTests,
+            int totalTests,
+            int failedTests,
+            String message,
+            Map<String, Object> metadata
+        ) {
+            this.challengeId = challengeId;
+            this.submissionId = submissionId;
+            this.testPhase = testPhase;
+            this.reviewTypeId = reviewTypeId;
+            this.reviewId = reviewId;
+            this.scorecardId = scorecardId;
+            this.progress = Math.min(1.0, Math.max(0.0, progress));
+            this.status = status;
+            this.completedTests = Math.max(0, completedTests);
+            this.totalTests = Math.max(0, totalTests);
+            this.failedTests = Math.max(0, failedTests);
+            this.message = message;
+            this.metadata = metadata == null
+                ? new LinkedHashMap<String, Object>()
+                : metadata;
+        }
+
+        double getProgress() {
+            return progress;
+        }
+
+        int getCompletedTests() {
+            return completedTests;
+        }
+
+        int getTotalTests() {
+            return totalTests;
+        }
+
+        int getFailedTests() {
+            return failedTests;
+        }
+    }
+
+    /**
+     * Progress update emitted by the isolated tester child after each seed.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class IsolatedProgressUpdate {
+        @JsonProperty("progress")
+        private double progress;
+
+        @JsonProperty("status")
+        private String status;
+
+        @JsonProperty("completedTests")
+        private int completedTests;
+
+        @JsonProperty("totalTests")
+        private int totalTests;
+
+        @JsonProperty("failedTests")
+        private int failedTests;
+
+        @JsonProperty("message")
+        private String message;
+
+        double getProgress() {
+            return Math.min(1.0, Math.max(0.0, progress));
+        }
+
+        String getStatus() {
+            if (TEST_STATUS_FAILED.equals(status)) {
+                return TEST_STATUS_FAILED;
+            }
+            if (TEST_STATUS_SUCCESS.equals(status)) {
+                return TEST_STATUS_SUCCESS;
+            }
+            return TEST_STATUS_IN_PROGRESS;
+        }
+
+        int getCompletedTests() {
+            return Math.max(0, completedTests);
+        }
+
+        int getTotalTests() {
+            return Math.max(0, totalTests);
+        }
+
+        int getFailedTests() {
+            return Math.max(0, failedTests);
+        }
+
+        String getMessage() {
+            return message;
         }
     }
 

@@ -334,6 +334,7 @@ Artifact checks after scoring:
 - Artifact names match the tester output expectations.
 - Failed submissions either have diagnostic artifacts or a clear runner-log failure.
 - If no artifacts are present, inspect the ECS logs and the review summation metadata.
+- During Provisional and System scoring, Review API exposes progress in `reviewSummation.metadata.testProgress` (`0` to `1`) and status in `reviewSummation.metadata.testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`) when metadata is requested.
 
 ## Monitoring ECS Runner Logs
 
@@ -389,5 +390,5 @@ During the challenge:
 After submission closes:
 
 - Confirm System scoring starts during Review.
-- Confirm final review summations and aggregate scores are present.
+- Confirm final review summations have `metadata.testProgress = 1`, `metadata.testStatus = SUCCESS`, and aggregate scores present.
 - Confirm artifacts and logs are retained for troubleshooting.

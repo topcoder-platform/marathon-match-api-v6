@@ -2184,7 +2184,7 @@ async function waitForSubmissionPhaseScoring(runtime, submissions) {
       });
       const artifacts = await getArtifacts(runtime, submission.submissionId);
       const expectedScore = getExpectedScore(submission, 'provisional');
-      const scored = provisional.length > 0 && hasValidScore(provisional[0]);
+      const scored = provisional.length > 0 && hasCompletedScore(provisional[0]);
       const artifactsReady = artifacts.length >= runtime.minArtifacts;
       if (scored && expectedScore !== undefined) {
         assertScoreClose(
@@ -2228,7 +2228,7 @@ async function waitForSystemScoring(runtime, submissions) {
         system: true,
       });
       const expectedScore = getExpectedScore(submission, 'system');
-      const scored = system.length > 0 && hasValidScore(system[0]);
+      const scored = system.length > 0 && hasCompletedScore(system[0]);
       if (scored && expectedScore !== undefined) {
         assertScoreClose(
           system[0].aggregateScore,
@@ -2301,12 +2301,22 @@ async function getArtifacts(runtime, submissionId) {
 }
 
 /**
- * Checks whether a summation has a numeric aggregate score.
+ * Checks whether a summation has a completed numeric aggregate score.
  * @param {Record<string, unknown>} summation Review summation.
- * @returns {boolean} True when score is numeric.
+ * @returns {boolean} True when scoring is no longer in progress and score is numeric.
  */
-function hasValidScore(summation) {
-  return typeof summation.aggregateScore === 'number' && Number.isFinite(summation.aggregateScore);
+function hasCompletedScore(summation) {
+  if (typeof summation.aggregateScore !== 'number' || !Number.isFinite(summation.aggregateScore)) {
+    return false;
+  }
+
+  const testStatus = summation.metadata?.testStatus;
+  if (testStatus === 'IN PROGRESS') {
+    return false;
+  }
+
+  const testProgress = summation.metadata?.testProgress;
+  return typeof testProgress === 'number' ? testProgress >= 1 : true;
 }
 
 /**

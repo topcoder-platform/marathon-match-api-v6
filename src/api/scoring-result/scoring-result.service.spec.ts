@@ -13,6 +13,7 @@ jest.mock('src/shared/modules/global/prisma.service', () => ({
 import {
   ScoringResultCallbackPayload,
   ScoringResultService,
+  ScoringTestStatus,
 } from './scoring-result.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 
@@ -108,6 +109,9 @@ describe('ScoringResultService', () => {
     const createReviewSummationSpy = jest
       .spyOn(service as any, 'createReviewSummation')
       .mockResolvedValue(undefined);
+    const findExistingReviewSummationSpy = jest
+      .spyOn(service as any, 'findExistingReviewSummation')
+      .mockResolvedValue(null);
     const completeSystemReviewIfNeededSpy = jest
       .spyOn(service as any, 'completeSystemReviewIfNeeded')
       .mockResolvedValue(undefined);
@@ -127,9 +131,16 @@ describe('ScoringResultService', () => {
         isProvisional: true,
         metadata: expect.objectContaining({
           reviewTypeId: basePayload.reviewTypeId,
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
           testType: 'provisional',
         }),
       }),
+    );
+    expect(findExistingReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      basePayload.submissionId,
+      'provisional',
     );
     expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
       'm2m-token',
@@ -149,6 +160,9 @@ describe('ScoringResultService', () => {
       scoreDirection: ScoreDirection.MAXIMIZE,
     });
     m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    jest
+      .spyOn(service as any, 'findExistingReviewSummation')
+      .mockResolvedValue(null);
     httpService.post.mockReturnValue(
       throwError(() => ({
         response: {
@@ -170,6 +184,64 @@ describe('ScoringResultService', () => {
     expect(thrownError).toBeInstanceOf(BadRequestException);
     expect((thrownError as BadRequestException).message).toBe(
       `Failed to create review summation: HTTP 404: Submission ${basePayload.submissionId} not found.`,
+    );
+  });
+
+  it('persists scoring progress as review summation metadata', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummation')
+      .mockResolvedValue({
+        id: 'summation-1',
+        metadata: {
+          testType: 'provisional',
+        },
+      });
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 4,
+        failedTests: 0,
+        progress: 0.2,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.InProgress,
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        totalTests: 20,
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'summation-1',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        isProvisional: true,
+        metadata: expect.objectContaining({
+          testProgress: 0.2,
+          testStatus: ScoringTestStatus.InProgress,
+          testProgressDetails: expect.objectContaining({
+            completedTests: 4,
+            failedTests: 0,
+            status: ScoringTestStatus.InProgress,
+            totalTests: 20,
+          }),
+        }),
+      }),
     );
   });
 });

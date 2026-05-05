@@ -28,6 +28,28 @@ export interface ScoringResultCallbackPayload {
   impactedReviews?: Record<string, unknown>[];
 }
 
+export enum ScoringTestStatus {
+  InProgress = 'IN PROGRESS',
+  Success = 'SUCCESS',
+  Failed = 'FAILED',
+}
+
+export interface ScoringProgressCallbackPayload {
+  challengeId: string;
+  submissionId: string;
+  testPhase: string;
+  reviewTypeId: string;
+  progress: number;
+  status: ScoringTestStatus;
+  reviewId?: string;
+  scorecardId?: string;
+  completedTests?: number;
+  totalTests?: number;
+  failedTests?: number;
+  message?: string;
+  metadata?: Record<string, unknown>;
+}
+
 interface ReviewSummationPayload {
   submissionId: string;
   aggregateScore: number;
@@ -66,6 +88,7 @@ interface ScoringResultConfigSummary {
 interface RelativeTestScoreEntry {
   testcase: string;
   score: number;
+  error?: string;
 }
 
 interface RelativeReviewRecord {
@@ -108,10 +131,13 @@ export class ScoringResultService {
       throw new Error('Unable to get M2M token for review summation upsert.');
     }
 
-    const fallbackMetadata = this.normalizeMetadata(
-      payload.metadata,
-      normalizedPhase,
-      payload.reviewTypeId,
+    const fallbackMetadata = this.withFinalTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      payload.score,
     );
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
@@ -187,13 +213,61 @@ export class ScoringResultService {
       testPhase: normalizedPhase,
     });
 
-    await this.createReviewSummation(token, reviewPayload);
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.completeSystemReviewIfNeeded(
       token,
       payload.reviewId,
       reviewPayload.aggregateScore,
       normalizedPhase,
     );
+  }
+
+  /**
+   * Processes one runner progress callback and creates or updates the phase review
+   * summation with progress metadata. The review-api schema stores this Marathon
+   * Match-specific state in `metadata.testProgress` and `metadata.testStatus`.
+   */
+  async processScoringProgress(
+    payload: ScoringProgressCallbackPayload,
+  ): Promise<void> {
+    const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
+    await this.requireScoringResultConfig(payload.challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error('Unable to get M2M token for review summation progress.');
+    }
+
+    const fallbackScorecardId = await this.resolveScorecardId(
+      token,
+      payload.scorecardId,
+    );
+    const metadata = this.withTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      {
+        completedTests: payload.completedTests,
+        failedTests: payload.failedTests,
+        message: payload.message,
+        progress: payload.progress,
+        reviewId: payload.reviewId,
+        status: payload.status,
+        totalTests: payload.totalTests,
+      },
+    );
+
+    const reviewPayload = this.buildSummationPayload({
+      submissionId: payload.submissionId,
+      score: payload.status === ScoringTestStatus.Success ? 0 : -1,
+      scorecardId: fallbackScorecardId,
+      metadata,
+      testPhase: normalizedPhase,
+    });
+
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
   }
 
   /**
@@ -710,7 +784,7 @@ export class ScoringResultService {
         bestScore,
       );
 
-      if (rawTestScore.score < 0) {
+      if (rawTestScore.score < 0 || rawTestScore.error) {
         failedTests += 1;
       }
 
@@ -731,17 +805,29 @@ export class ScoringResultService {
       aggregateScore = -1;
     }
 
-    const metadata: Record<string, unknown> = {
-      ...reviewRecord.metadata,
-      relativeScoringEnabled: true,
-      scoreDirection,
-      relativeScores,
-      tests: {
-        total: totalTests,
-        passed: totalTests - failedTests,
-        failed: failedTests,
+    const metadata = this.withTestProgressMetadata(
+      {
+        ...reviewRecord.metadata,
+        relativeScoringEnabled: true,
+        scoreDirection,
+        relativeScores,
+        tests: {
+          total: totalTests,
+          passed: totalTests - failedTests,
+          failed: failedTests,
+        },
       },
-    };
+      {
+        completedTests: totalTests,
+        failedTests,
+        progress: 1,
+        status:
+          failedTests > 0
+            ? ScoringTestStatus.Failed
+            : ScoringTestStatus.Success,
+        totalTests,
+      },
+    );
 
     const reviewObject: Record<string, unknown> = {
       ...reviewRecord.reviewObject,
@@ -818,6 +904,7 @@ export class ScoringResultService {
       result.push({
         testcase,
         score,
+        error: this.asString(entry.error),
       });
     }
 
@@ -914,6 +1001,7 @@ export class ScoringResultService {
     const reviewIsFinal = this.parseBooleanFlag(input.reviewObject?.isFinal);
     const metaIsProvisional = this.parseBooleanFlag(metadata.isProvisional);
     const metaIsExample = this.parseBooleanFlag(metadata.isExample);
+    const testStatus = this.asString(metadata.testStatus);
 
     const shouldSetFinal =
       metaIsFinal === true ||
@@ -931,7 +1019,10 @@ export class ScoringResultService {
     return {
       submissionId: input.submissionId,
       aggregateScore: input.score,
-      isPassing: input.score >= 0,
+      isPassing:
+        input.score >= 0 &&
+        testStatus !== ScoringTestStatus.InProgress &&
+        testStatus !== ScoringTestStatus.Failed,
       reviewedDate: new Date().toISOString(),
       ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
       ...(shouldSetFinal ? { isFinal: true } : {}),
@@ -973,17 +1064,19 @@ export class ScoringResultService {
     );
     const scorecardId = await this.resolveScorecardId(token, rawScorecardId);
 
-    const metadata = this.normalizeMetadata(
-      this.asRecord(reviewObject.metadata),
-      args.testPhase,
-      this.asString(args.fallbackMetadata.reviewTypeId),
-      args.fallbackMetadata,
-    );
-
     const score = this.resolveReviewScore(
       reviewObject,
       args.testPhase,
       args.fallbackScore,
+    );
+    const metadata = this.withFinalTestProgressMetadata(
+      this.normalizeMetadata(
+        this.asRecord(reviewObject.metadata),
+        args.testPhase,
+        this.asString(args.fallbackMetadata.reviewTypeId),
+        args.fallbackMetadata,
+      ),
+      score,
     );
 
     const reviewPayload = this.buildSummationPayload({
@@ -1001,7 +1094,7 @@ export class ScoringResultService {
       return reviewPayload.aggregateScore;
     }
 
-    await this.createReviewSummation(token, reviewPayload);
+    await this.upsertReviewSummation(token, args.testPhase, reviewPayload);
     return reviewPayload.aggregateScore;
   }
 
@@ -1052,6 +1145,161 @@ export class ScoringResultService {
     }
 
     return normalized;
+  }
+
+  /**
+   * Adds final progress/status fields to scorer metadata after tests finish.
+   * @param metadata Review summation metadata built from runner callback data.
+   * @param finalScore Aggregate score returned by the runner.
+   * @returns Metadata with `testProgress` and `testStatus` populated.
+   */
+  private withFinalTestProgressMetadata(
+    metadata: Record<string, unknown>,
+    finalScore: number,
+  ): Record<string, unknown> {
+    const totalTests = this.resolveTotalTests(metadata);
+    const completedTests =
+      totalTests ?? this.countCompletedTestScores(metadata);
+    const failedTests = this.countFailedTestScores(metadata);
+    const status =
+      finalScore < 0 || failedTests > 0
+        ? ScoringTestStatus.Failed
+        : ScoringTestStatus.Success;
+
+    return this.withTestProgressMetadata(metadata, {
+      completedTests,
+      failedTests,
+      progress: 1,
+      status,
+      totalTests: totalTests ?? completedTests,
+    });
+  }
+
+  /**
+   * Adds normalized progress fields to review summation metadata.
+   * @param metadata Existing metadata to preserve.
+   * @param progress Progress details supplied by the runner or final callback.
+   * @returns Metadata with a numeric progress value, status flag, and detail object.
+   */
+  private withTestProgressMetadata(
+    metadata: Record<string, unknown>,
+    progress: {
+      progress: number;
+      status: ScoringTestStatus;
+      completedTests?: number;
+      totalTests?: number;
+      failedTests?: number;
+      message?: string;
+      reviewId?: string;
+    },
+  ): Record<string, unknown> {
+    const normalizedProgress = this.clampProgress(progress.progress);
+    const completedTests = this.normalizeNonNegativeInteger(
+      progress.completedTests,
+    );
+    const totalTests = this.normalizeNonNegativeInteger(progress.totalTests);
+    const failedTests = this.normalizeNonNegativeInteger(progress.failedTests);
+    const message = this.asString(progress.message);
+    const reviewId = this.asString(progress.reviewId);
+    const details: Record<string, unknown> = {
+      progress: normalizedProgress,
+      status: progress.status,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (completedTests !== undefined) {
+      details.completedTests = completedTests;
+    }
+    if (totalTests !== undefined) {
+      details.totalTests = totalTests;
+    }
+    if (failedTests !== undefined) {
+      details.failedTests = failedTests;
+    }
+    if (message) {
+      details.message = message;
+    }
+    if (reviewId) {
+      details.reviewId = reviewId;
+    }
+
+    return {
+      ...metadata,
+      testProgress: normalizedProgress,
+      testStatus: progress.status,
+      testProgressDetails: details,
+    };
+  }
+
+  /**
+   * Creates or updates one phase review summation for a submission.
+   * @param token M2M token for review-api.
+   * @param testPhase Normalized or raw phase value.
+   * @param payload Review summation payload to persist.
+   */
+  private async upsertReviewSummation(
+    token: string,
+    testPhase: string,
+    payload: ReviewSummationPayload,
+  ): Promise<void> {
+    const existingReview = await this.findExistingReviewSummation(
+      token,
+      payload.submissionId,
+      testPhase,
+    );
+    const reviewSummationId = this.asString(existingReview?.id);
+
+    if (reviewSummationId) {
+      await this.updateReviewSummation(token, reviewSummationId, payload);
+      return;
+    }
+
+    await this.createReviewSummation(token, payload);
+  }
+
+  /**
+   * Looks up an existing review summation for one submission and scoring phase.
+   * @param token M2M token for review-api.
+   * @param submissionId Submission ID.
+   * @param testPhase Example, provisional, or system scoring phase.
+   * @returns The matching review summation record, or null when none exists.
+   */
+  private async findExistingReviewSummation(
+    token: string,
+    submissionId: string,
+    testPhase: string,
+  ): Promise<Record<string, unknown> | null> {
+    const params: Record<string, string> = {
+      metadata: 'true',
+      submissionId,
+    };
+    const normalizedPhase = this.normalizeTestPhase(testPhase);
+
+    if (normalizedPhase === 'example') {
+      params.example = 'true';
+    } else if (normalizedPhase === 'system') {
+      params.system = 'true';
+    } else {
+      params.provisional = 'true';
+    }
+
+    const response = await firstValueFrom(
+      this.httpService.get(this.buildReviewSummationUrl(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params,
+      }),
+    );
+    const reviewSummations = this.extractReviewSummationArray(response.data);
+
+    return (
+      reviewSummations.find((review) =>
+        this.matchesPhaseReview(review, normalizedPhase),
+      ) ??
+      reviewSummations[0] ??
+      null
+    );
   }
 
   /**
@@ -1335,6 +1583,75 @@ export class ScoringResultService {
   }
 
   /**
+   * Keeps runner progress values inside the review summation 0..1 contract.
+   */
+  private clampProgress(value: number): number {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+
+    return Math.min(1, Math.max(0, value));
+  }
+
+  /**
+   * Converts a numeric value to a non-negative integer when possible.
+   */
+  private normalizeNonNegativeInteger(
+    value: number | undefined,
+  ): number | undefined {
+    if (value === undefined || value === null || !Number.isFinite(value)) {
+      return undefined;
+    }
+
+    return Math.max(0, Math.floor(value));
+  }
+
+  /**
+   * Resolves total test count from runner metadata.
+   */
+  private resolveTotalTests(
+    metadata: Record<string, unknown>,
+  ): number | undefined {
+    const tests = this.asRecord(metadata.tests);
+    const totalTests =
+      this.toNumber(metadata.numberOfTests) ?? this.toNumber(tests.total);
+
+    return totalTests === null
+      ? undefined
+      : this.normalizeNonNegativeInteger(totalTests);
+  }
+
+  /**
+   * Counts test score entries emitted by the runner.
+   */
+  private countCompletedTestScores(metadata: Record<string, unknown>): number {
+    const testScores = metadata.testScores;
+    return Array.isArray(testScores) ? testScores.length : 0;
+  }
+
+  /**
+   * Counts test score entries that represent failed test execution.
+   */
+  private countFailedTestScores(metadata: Record<string, unknown>): number {
+    const testScores = metadata.testScores;
+    if (!Array.isArray(testScores)) {
+      return 0;
+    }
+
+    let failedTests = 0;
+    for (const testScore of testScores) {
+      const entry = this.asRecord(testScore);
+      const score = this.toNumber(entry.score);
+      const error = this.asString(entry.error);
+      if ((score !== null && score < 0) || error) {
+        failedTests += 1;
+      }
+    }
+
+    return failedTests;
+  }
+
+  /**
    * Parses boolean values from booleans and string booleans.
    */
   private parseBooleanFlag(value: unknown): boolean | null {
@@ -1434,6 +1751,33 @@ export class ScoringResultService {
 
     if (Array.isArray(wrapper.data)) {
       return wrapper.data.map((entry) => this.asRecord(entry));
+    }
+
+    return [];
+  }
+
+  /**
+   * Extracts review-api review summation arrays from paginated and wrapped responses.
+   */
+  private extractReviewSummationArray(
+    data: unknown,
+  ): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const wrapper = this.asRecord(data);
+    if (Array.isArray(wrapper.data)) {
+      return wrapper.data.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(wrapper.result);
+    if (Array.isArray(resultRecord.content)) {
+      return resultRecord.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(resultRecord.data)) {
+      return resultRecord.data.map((entry) => this.asRecord(entry));
     }
 
     return [];
