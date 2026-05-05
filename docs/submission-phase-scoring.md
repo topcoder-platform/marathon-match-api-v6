@@ -79,7 +79,7 @@ The ECS task keeps trusted network access only on the parent runner process so i
 
 - a scrubbed environment that does not include `ACCESS_TOKEN`
 - socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
-- callback review payloads trusted only when returned from the tester result map, not from writable files under the submission workspace
+- callback review payloads created by the trusted runner's generic Marathon flow, or by a custom tester `runTester(...)` result map when a tester opts into that advanced path
 
 ## Observability
 

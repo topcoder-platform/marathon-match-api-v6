@@ -6,8 +6,8 @@
     "timelineTemplateId": "6969125a-a12f-4b89-8de6-e66b0056f36b",
     "projectId": "100575",
     "phaseDurations": {
-      "registration": 3600,
-      "submission": 3600
+      "registration": 360,
+      "submission": 360
     },
     "phaseIds": {
       "registration": "a93544bc-c165-4af4-b55e-18f3593b457a",

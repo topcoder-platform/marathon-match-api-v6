@@ -8,6 +8,8 @@ This document covers the Review-phase Marathon Match flow from the Submission ph
 
 When the Review phase opens for a Marathon Match challenge, `autopilot-v6` routes the phase-open event through `PhaseReviewService.handlePhaseOpenedForChallenge(...)`. For Marathon Match review phases, that service delegates to `MarathonMatchReviewService.handleReviewPhaseOpened(...)`.
 
+Manual phase changes are supported through the same path. If Review is opened directly in challenge-api, autopilot's challenge-update handling replays the phase-open work; startup recovery also replays already-open Review phases so missed update events still create and dispatch SYSTEM reviews.
+
 ## Flow
 
 ```mermaid

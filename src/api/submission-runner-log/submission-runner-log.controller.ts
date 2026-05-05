@@ -65,12 +65,12 @@ export class SubmissionRunnerLogController {
    * @returns Mapping metadata and CloudWatch log events.
    */
   @Get('/:submissionId/runner-logs')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot, UserRole.ProjectManager)
   @Scopes(Scope.ReadMarathonMatch)
   @ApiOperation({
     summary: 'Get ECS runner logs for a submission',
     description:
-      'Roles: Admin | Scopes: read:marathon-match. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
+      'Roles: Admin, Copilot, Manager | Scopes: read:marathon-match. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
   })
   @ApiParam({
     name: 'submissionId',

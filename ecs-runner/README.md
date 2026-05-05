@@ -19,7 +19,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback.
 - The tester and submission execute in a separate child JVM as the `runner` user with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
 - The child JVM and all descendant submission processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
-- Trusted callback review payloads such as `currentReview` and `impactedReviews` must be returned from the tester `runTester(...)` result map. Files under `artifacts/private/` are no longer used as trusted callback input.
+- The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
 
 ## Recommended ECR naming and tags
 

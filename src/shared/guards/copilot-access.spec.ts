@@ -80,6 +80,10 @@ describe('copilot scorer setup access source metadata', () => {
     __dirname,
     '../../api/tester/tester.controller.ts',
   );
+  const submissionRunnerLogControllerPath = path.resolve(
+    __dirname,
+    '../../api/submission-runner-log/submission-runner-log.controller.ts',
+  );
 
   it.each(['createConfig', 'getDefaults', 'getConfig', 'updateConfig'])(
     'allows copilots on marathon match config setup route %s',
@@ -97,4 +101,20 @@ describe('copilot scorer setup access source metadata', () => {
       expectRolesToIncludeCopilot(testerControllerPath, methodName);
     },
   );
+
+  it('allows copilots on submission runner log route', () => {
+    expectRolesToIncludeCopilot(
+      submissionRunnerLogControllerPath,
+      'getRunnerLogs',
+    );
+  });
+
+  it('allows managers on submission runner log route', () => {
+    const roles = getRolesDecoratorArguments(
+      submissionRunnerLogControllerPath,
+      'getRunnerLogs',
+    );
+
+    expect(roles).toContain('UserRole.ProjectManager');
+  });
 });

@@ -3,14 +3,18 @@ package com.topcoder.runner;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.topcoder.marathon.MarathonController;
+import com.topcoder.marathon.MarathonTestResult;
 import com.topcoder.scorer.models.ScorerConfig;
 import com.topcoder.scorer.models.ScoringResult;
 import com.topcoder.scorer.services.SubmissionService;
+import java.io.BufferedWriter;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.management.ManagementFactory;
 import java.net.URL;
@@ -21,12 +25,14 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -34,6 +40,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.apache.http.HttpEntity;
@@ -62,6 +71,25 @@ public class EcsRunnerMain {
     private static final String ISOLATION_WRAPPER_PATH = "/usr/local/bin/mm-net-isolate";
     private static final String ISOLATED_EXECUTION_USER = "runner";
     private static final String ISOLATED_EXECUTION_GROUP = "runner";
+    private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
+    private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
+    private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
+        ".cpp",
+        ".java",
+        ".py",
+        ".cs",
+        ".cs_net7"
+    );
+    private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
+        "(?m)^\\s*package\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)\\s*;"
+    );
+    private static final Pattern JAVA_PUBLIC_CLASS_PATTERN = Pattern.compile(
+        "\\bpublic\\s+(?:final\\s+|abstract\\s+)?class\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b"
+    );
+    private static final Pattern JAVA_CLASS_PATTERN = Pattern.compile(
+        "\\bclass\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b"
+    );
 
     private static String logChallengeId = "<unset>";
     private static String logSubmissionId = "<unset>";
@@ -809,7 +837,7 @@ public class EcsRunnerMain {
 
     /**
      * Logs scorer configuration values used for tester execution.
-     * @param scorerConfig Scorer config passed to tester runTester().
+     * @param scorerConfig Scorer config used by generic or custom tester execution.
      */
     private static void logScorerConfig(ScorerConfig scorerConfig) {
         if (scorerConfig == null) {
@@ -1800,7 +1828,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Builds scorer config consumed by tester runTester(String, ScorerConfig).
+     * Builds scorer config consumed by Marathon tester execution.
      */
     private static ScorerConfig buildScorerConfig(
         MarathonMatchConfigResponse config,
@@ -1828,7 +1856,20 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Loads tester class from downloaded JAR and invokes runTester(String, ScorerConfig).
+     * Loads the tester class from the downloaded JAR and runs scorer execution.
+     *
+     * <p>Custom testers that expose {@code runTester(String, ScorerConfig)} are still
+     * supported for backward compatibility. Standard Topcoder Marathon testers can omit that
+     * method; in that case this runner locates, compiles, and executes the submitted source via
+     * {@link MarathonController}.
+     *
+     * @param testerClassName Fully qualified Marathon tester class name.
+     * @param submissionDir Extracted submission directory.
+     * @param scorerConfig Phase scoring configuration from marathon-match-api-v6.
+     * @param testerJarPath Downloaded tester JAR path.
+     * @return Structured tester execution result used for callback payloads.
+     * @throws Exception When class loading, custom invocation, generic compilation, or test
+     *                   execution fails.
      */
     private static TesterExecutionResult runTester(
         String testerClassName,
@@ -1854,19 +1895,32 @@ public class EcsRunnerMain {
                     "tester.invoke",
                     "Resolved tester class "
                         + testerClass.getName()
-                        + ". Looking up runTester method."
+                        + ". Looking for optional runTester method."
                 );
-                Method runTesterMethod = testerClass.getMethod(
-                    "runTester",
-                    String.class,
-                    ScorerConfig.class
-                );
+                Method runTesterMethod = findCustomRunTesterMethod(testerClass);
+                if (runTesterMethod == null) {
+                    logInfo(
+                        "tester.invoke",
+                        "No custom runTester(String, ScorerConfig) found. "
+                            + "Using generic MarathonController execution."
+                    );
+                    return runGenericMarathonTester(
+                        testerClassName,
+                        submissionDir,
+                        scorerConfig
+                    );
+                }
+
                 logInfo(
                     "tester.invoke",
                     "Invoking runTester(String, ScorerConfig) on class "
                         + testerClassName
                 );
-                Object runResult = runTesterMethod.invoke(null, submissionDir, scorerConfig);
+                Object runResult = invokeCustomRunTester(
+                    runTesterMethod,
+                    submissionDir,
+                    scorerConfig
+                );
                 logInfo(
                     "tester.invoke",
                     "runTester returned instance of "
@@ -1879,6 +1933,756 @@ public class EcsRunnerMain {
                 currentThread.setContextClassLoader(originalContextLoader);
             }
         }
+    }
+
+    /**
+     * Finds the optional custom tester entrypoint used by older tester artifacts.
+     *
+     * @param testerClass Loaded tester class from the tester JAR.
+     * @return Public {@code runTester(String, ScorerConfig)} method, or {@code null} when the
+     *         tester only supports standard MarathonController execution.
+     */
+    private static Method findCustomRunTesterMethod(Class<?> testerClass) {
+        try {
+            return testerClass.getMethod("runTester", String.class, ScorerConfig.class);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Invokes a custom tester entrypoint and unwraps reflective exceptions.
+     *
+     * @param runTesterMethod Public custom tester method.
+     * @param submissionDir Extracted submission directory.
+     * @param scorerConfig Scorer configuration passed to custom tester code.
+     * @return Raw return value from custom tester code.
+     * @throws Exception When custom tester code throws or reflection cannot invoke the method.
+     */
+    private static Object invokeCustomRunTester(
+        Method runTesterMethod,
+        String submissionDir,
+        ScorerConfig scorerConfig
+    ) throws Exception {
+        try {
+            return runTesterMethod.invoke(null, submissionDir, scorerConfig);
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException(cause);
+        }
+    }
+
+    /**
+     * Runs a standard Topcoder Marathon tester without requiring tester-specific ECS code.
+     *
+     * <p>The method creates artifact directories, selects a supported submission source file,
+     * compiles it when needed, runs the configured tester for every seed in the phase range, and
+     * returns the aggregate score plus per-test metadata used by relative scoring.
+     *
+     * @param testerClassName Fully qualified Marathon tester class name.
+     * @param submissionPath Extracted submission directory.
+     * @param scorerConfig Phase scoring configuration with seeds and timeout values.
+     * @return Structured tester execution result for callback creation.
+     * @throws Exception When submission validation, source discovery, compilation, test
+     *                   execution, or artifact writing fails.
+     */
+    private static TesterExecutionResult runGenericMarathonTester(
+        String testerClassName,
+        String submissionPath,
+        ScorerConfig scorerConfig
+    ) throws Exception {
+        if (submissionPath == null || submissionPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("submissionPath is required.");
+        }
+        if (scorerConfig == null) {
+            throw new IllegalArgumentException("ScorerConfig is required.");
+        }
+
+        Path submissionRoot = Paths.get(submissionPath);
+        if (!Files.isDirectory(submissionRoot)) {
+            throw new IllegalArgumentException(
+                "Submission directory does not exist: " + submissionRoot
+            );
+        }
+
+        Path workspaceRoot = resolveWorkspaceRoot(submissionRoot);
+        Path artifactsRoot = workspaceRoot.resolve("artifacts");
+        Path artifactsPublicDir = artifactsRoot.resolve("public");
+        Path artifactsPrivateDir = artifactsRoot.resolve("private");
+        Files.createDirectories(artifactsPublicDir);
+        Files.createDirectories(artifactsPrivateDir);
+
+        String expectedSolutionBaseName = deriveExpectedSolutionBaseName(testerClassName);
+        Path submissionSource = locateSubmissionSource(
+            submissionRoot,
+            expectedSolutionBaseName
+        );
+
+        int timeLimitMs = resolvePositiveInt(
+            scorerConfig.getTimeLimit(),
+            DEFAULT_TEST_TIMEOUT_MS
+        );
+        int compileTimeoutMs = resolvePositiveInt(
+            scorerConfig.getCompileTimeout(),
+            DEFAULT_COMPILE_TIMEOUT_MS
+        );
+        long startSeed = scorerConfig.getStartSeed();
+        int numberOfTests = resolvePositiveInt(scorerConfig.getNumberOfTests(), 1);
+        Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
+        Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
+
+        try {
+            CompiledSubmission compiledSubmission = compileAndBuildExecutionCommand(
+                submissionSource,
+                compileWorkDir,
+                compileTimeoutMs,
+                expectedSolutionBaseName,
+                compileLogPath
+            );
+
+            MarathonController controller = new MarathonController();
+            List<Map<String, Object>> testScores = new ArrayList<Map<String, Object>>();
+            double totalScore = 0.0;
+            StringBuilder outputText = new StringBuilder();
+
+            long endSeed = startSeed + numberOfTests - 1L;
+            for (long seed = startSeed; seed <= endSeed; seed++) {
+                MarathonTestResult testResult = controller.run(
+                    testerClassName,
+                    seed,
+                    compiledSubmission.getExecutionCommand(),
+                    timeLimitMs
+                );
+
+                double seedScore = testResult.getScore();
+                totalScore += seedScore;
+
+                Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
+                seedResult.put("testcase", seed);
+                seedResult.put("score", seedScore);
+                seedResult.put("runTimeMs", testResult.getRunTime());
+                seedResult.put("error", testResult.getError());
+                testScores.add(seedResult);
+
+                outputText.append("Test Case #").append(seed).append(":\n");
+                outputText.append("Score = ").append(seedScore).append('\n');
+                outputText.append("Run Time = ")
+                    .append(testResult.getRunTime())
+                    .append("ms\n");
+                if (
+                    testResult.getError() != null
+                        && !testResult.getError().trim().isEmpty()
+                ) {
+                    outputText.append(testResult.getError().trim()).append('\n');
+                }
+                if (
+                    testResult.getOutput() != null
+                        && !testResult.getOutput().trim().isEmpty()
+                ) {
+                    outputText.append(testResult.getOutput().trim()).append('\n');
+                }
+                outputText.append('\n');
+            }
+
+            double averageScore = testScores.isEmpty()
+                ? 0.0
+                : totalScore / testScores.size();
+
+            try (BufferedWriter writer = Files.newBufferedWriter(
+                artifactsPublicDir.resolve("output.txt"),
+                StandardCharsets.UTF_8
+            )) {
+                writer.write(outputText.toString());
+            }
+
+            Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+            metadata.put("testerClass", testerClassName);
+            metadata.put("solutionSourceFile", submissionSource.getFileName().toString());
+            metadata.put("normalizedSourceFile", compiledSubmission.getSourceFileName());
+            metadata.put("sourceLanguage", compiledSubmission.getSourceLanguage());
+            metadata.put("startSeed", startSeed);
+            metadata.put("numberOfTests", numberOfTests);
+            metadata.put("timeLimitMs", timeLimitMs);
+            metadata.put("compileTimeoutMs", compileTimeoutMs);
+            metadata.put("aggregateMode", "average");
+            metadata.put("testScores", testScores);
+
+            Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
+            currentReview.put("score", averageScore);
+            currentReview.put("aggregateScore", averageScore);
+            currentReview.put("metadata", metadata);
+
+            return new TesterExecutionResult(
+                averageScore,
+                metadata,
+                currentReview,
+                new ArrayList<Map<String, Object>>()
+            );
+        } finally {
+            deletePathRecursively(compileWorkDir);
+        }
+    }
+
+    /**
+     * Chooses the workspace root where public/private artifacts should be written.
+     *
+     * @param submissionRoot Extracted submission root.
+     * @return Nested {@code submission} directory when present, otherwise the extracted root.
+     */
+    private static Path resolveWorkspaceRoot(Path submissionRoot) {
+        Path nestedSubmissionDir = submissionRoot.resolve("submission");
+        return Files.isDirectory(nestedSubmissionDir) ? nestedSubmissionDir : submissionRoot;
+    }
+
+    /**
+     * Locates a supported source file in extracted submission content.
+     *
+     * @param submissionRoot Extracted submission root.
+     * @param expectedSolutionBaseName Preferred problem solution base name inferred from the
+     *                                 tester class, such as {@code BridgeRunners}.
+     * @return Selected source file path.
+     * @throws IOException When walking the submission directory fails.
+     * @throws IllegalArgumentException When no supported source file is found.
+     */
+    private static Path locateSubmissionSource(
+        Path submissionRoot,
+        String expectedSolutionBaseName
+    ) throws IOException {
+        List<Path> candidates = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> stream = Files.walk(submissionRoot)) {
+            stream
+                .filter(path -> Files.isRegularFile(path))
+                .filter(path -> !isIgnoredSubmissionSource(path))
+                .filter(path -> isSupportedSource(path.getFileName().toString()))
+                .forEach(candidates::add);
+        }
+
+        if (candidates.isEmpty()) {
+            throw new IllegalArgumentException(
+                "No supported submission source was found under "
+                    + submissionRoot
+                    + ". Expected one of: "
+                    + SUPPORTED_SOURCE_EXTENSIONS
+            );
+        }
+
+        Path preferred = findPreferredSubmissionSource(
+            candidates,
+            expectedSolutionBaseName
+        );
+        if (preferred != null) {
+            return preferred;
+        }
+
+        candidates.sort(new Comparator<Path>() {
+            @Override
+            public int compare(Path left, Path right) {
+                int extensionCompare = Integer.compare(
+                    sourceExtensionRank(left),
+                    sourceExtensionRank(right)
+                );
+                if (extensionCompare != 0) {
+                    return extensionCompare;
+                }
+                return left.toAbsolutePath()
+                    .toString()
+                    .compareTo(right.toAbsolutePath().toString());
+            }
+        });
+        return candidates.get(0);
+    }
+
+    /**
+     * Checks whether a submission path should be ignored during source discovery.
+     *
+     * @param path Candidate file path from the extracted submission.
+     * @return {@code true} for metadata/resource fork files and generated artifact paths.
+     */
+    private static boolean isIgnoredSubmissionSource(Path path) {
+        String fileName = path.getFileName() == null
+            ? ""
+            : path.getFileName().toString();
+        if (fileName.startsWith("._")) {
+            return true;
+        }
+
+        for (Path part : path) {
+            String value = part.toString();
+            if ("__MACOSX".equals(value) || "artifacts".equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Selects a source file whose filename matches the inferred problem solution base name.
+     *
+     * @param candidates Supported source candidates.
+     * @param expectedSolutionBaseName Inferred solution base name, or blank when unknown.
+     * @return Preferred source path, or {@code null} when none match.
+     */
+    private static Path findPreferredSubmissionSource(
+        List<Path> candidates,
+        String expectedSolutionBaseName
+    ) {
+        if (expectedSolutionBaseName == null || expectedSolutionBaseName.trim().isEmpty()) {
+            return null;
+        }
+
+        for (String extension : SUPPORTED_SOURCE_EXTENSIONS) {
+            String expectedFileName = expectedSolutionBaseName + extension;
+            for (Path candidate : candidates) {
+                if (candidate.getFileName().toString().equalsIgnoreCase(expectedFileName)) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Checks whether a filename has a source extension supported by the generic runner.
+     *
+     * @param fileName Candidate filename.
+     * @return {@code true} for C++, Java, Python, Mono C#, or .NET 7 C# submissions.
+     */
+    private static boolean isSupportedSource(String fileName) {
+        return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
+    }
+
+    /**
+     * Ranks source extensions for deterministic fallback selection.
+     *
+     * @param path Candidate source path.
+     * @return Lower rank for more preferred extensions.
+     */
+    private static int sourceExtensionRank(Path path) {
+        String extension = extensionOf(path.getFileName().toString()).toLowerCase(Locale.US);
+        int rank = SUPPORTED_SOURCE_EXTENSIONS.indexOf(extension);
+        return rank < 0 ? Integer.MAX_VALUE : rank;
+    }
+
+    /**
+     * Extracts a supported source extension from a filename.
+     *
+     * @param fileName Source filename.
+     * @return Extension with leading dot, preserving the special {@code .cs_net7} extension.
+     */
+    private static String extensionOf(String fileName) {
+        String lower = fileName.toLowerCase(Locale.US);
+        if (lower.endsWith(".cs_net7")) {
+            return ".cs_net7";
+        }
+
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex < 0) {
+            return "";
+        }
+        return fileName.substring(dotIndex);
+    }
+
+    /**
+     * Returns a filename without its supported source extension.
+     *
+     * @param fileName Source filename.
+     * @return Filename base without extension.
+     */
+    private static String sourceBaseName(String fileName) {
+        String extension = extensionOf(fileName);
+        if (extension.isEmpty()) {
+            return fileName;
+        }
+        return fileName.substring(0, fileName.length() - extension.length());
+    }
+
+    /**
+     * Infers the expected Marathon solution class/file base name from the tester class.
+     *
+     * @param testerClassName Fully qualified tester class name.
+     * @return Simple class name with a trailing {@code Tester} suffix removed when present.
+     */
+    private static String deriveExpectedSolutionBaseName(String testerClassName) {
+        if (testerClassName == null || testerClassName.trim().isEmpty()) {
+            return "";
+        }
+
+        String simpleName = testerClassName.trim();
+        int dotIndex = simpleName.lastIndexOf('.');
+        if (dotIndex >= 0) {
+            simpleName = simpleName.substring(dotIndex + 1);
+        }
+
+        String suffix = "Tester";
+        if (simpleName.endsWith(suffix) && simpleName.length() > suffix.length()) {
+            return simpleName.substring(0, simpleName.length() - suffix.length());
+        }
+        return simpleName;
+    }
+
+    /**
+     * Compiles a submission source when needed and builds the command used by MarathonController.
+     *
+     * @param sourceFile Selected source file from the extracted submission.
+     * @param workDir Temporary compile working directory.
+     * @param compileTimeoutMs Compile timeout in milliseconds.
+     * @param expectedSolutionBaseName Inferred solution base name for source normalization.
+     * @param compileLogPath Public artifact file that receives compiler output.
+     * @return Compiled submission details, including the executable command string.
+     * @throws Exception When source copying, project generation, compilation, or language
+     *                   detection fails.
+     */
+    private static CompiledSubmission compileAndBuildExecutionCommand(
+        Path sourceFile,
+        Path workDir,
+        int compileTimeoutMs,
+        String expectedSolutionBaseName,
+        Path compileLogPath
+    ) throws Exception {
+        String extension = extensionOf(sourceFile.getFileName().toString()).toLowerCase(Locale.US);
+        String language = sourceLanguageName(extension);
+
+        if (".java".equals(extension)) {
+            JavaEntryPoint entryPoint = resolveJavaEntryPoint(
+                sourceFile,
+                expectedSolutionBaseName
+            );
+            Path packageDir = resolveJavaPackageDirectory(workDir, entryPoint.getPackageName());
+            Files.createDirectories(packageDir);
+            Path normalizedSource = packageDir.resolve(entryPoint.getClassName() + ".java");
+            Files.copy(sourceFile, normalizedSource, StandardCopyOption.REPLACE_EXISTING);
+
+            runCommand(
+                Arrays.asList("javac", workDir.relativize(normalizedSource).toString()),
+                workDir,
+                compileTimeoutMs,
+                "Java compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                "java -Xms1G -Xmx1G -cp "
+                    + workDir.toAbsolutePath()
+                    + " "
+                    + entryPoint.getQualifiedClassName(),
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        Path normalizedSource = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + extension);
+        Files.copy(sourceFile, normalizedSource, StandardCopyOption.REPLACE_EXISTING);
+
+        if (".cpp".equals(extension)) {
+            String binaryPath = workDir
+                .resolve(GENERIC_SOLUTION_BASE_NAME)
+                .toAbsolutePath()
+                .toString();
+            runCommand(
+                Arrays.asList(
+                    "g++",
+                    "-std=gnu++17",
+                    "-O3",
+                    normalizedSource.getFileName().toString(),
+                    "-o",
+                    binaryPath
+                ),
+                workDir,
+                compileTimeoutMs,
+                "C++ compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                binaryPath,
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".py".equals(extension)) {
+            return new CompiledSubmission(
+                "python3 " + normalizedSource.toAbsolutePath(),
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".cs".equals(extension)) {
+            String exePath = workDir
+                .resolve(GENERIC_SOLUTION_BASE_NAME + ".exe")
+                .toAbsolutePath()
+                .toString();
+            runCommand(
+                Arrays.asList(
+                    "mcs",
+                    "/r:System.Numerics.dll",
+                    "-out:" + exePath,
+                    normalizedSource.getFileName().toString()
+                ),
+                workDir,
+                compileTimeoutMs,
+                "C# (Mono) compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                "mono " + exePath,
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".cs_net7".equals(extension)) {
+            Path csproj = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".csproj");
+            Files.write(
+                csproj,
+                Arrays.asList(
+                    "<Project Sdk=\"Microsoft.NET.Sdk\">",
+                    "  <PropertyGroup>",
+                    "    <TargetFramework>net7.0</TargetFramework>",
+                    "    <OutputType>Exe</OutputType>",
+                    "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
+                    "  </PropertyGroup>",
+                    "</Project>"
+                ),
+                StandardCharsets.UTF_8
+            );
+
+            Path normalizedCsSource = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".cs");
+            Files.copy(sourceFile, normalizedCsSource, StandardCopyOption.REPLACE_EXISTING);
+            Path publishDir = workDir.resolve(GENERIC_SOLUTION_BASE_NAME);
+            runCommand(
+                Arrays.asList(
+                    "dotnet",
+                    "publish",
+                    csproj.getFileName().toString(),
+                    "-c",
+                    "Release",
+                    "-o",
+                    publishDir.toAbsolutePath().toString()
+                ),
+                workDir,
+                compileTimeoutMs,
+                "C# (.NET 7) compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                "dotnet "
+                    + publishDir
+                        .resolve(GENERIC_SOLUTION_BASE_NAME + ".dll")
+                        .toAbsolutePath(),
+                normalizedCsSource.getFileName().toString(),
+                language
+            );
+        }
+
+        throw new IllegalArgumentException("Unsupported submission extension: " + extension);
+    }
+
+    /**
+     * Converts a supported extension into a readable metadata language label.
+     *
+     * @param extension Supported source extension.
+     * @return Language label for scorer metadata.
+     */
+    private static String sourceLanguageName(String extension) {
+        if (".cpp".equals(extension)) {
+            return "cpp";
+        }
+        if (".java".equals(extension)) {
+            return "java";
+        }
+        if (".py".equals(extension)) {
+            return "python";
+        }
+        if (".cs".equals(extension)) {
+            return "csharp-mono";
+        }
+        if (".cs_net7".equals(extension)) {
+            return "csharp-net7";
+        }
+        return "unknown";
+    }
+
+    /**
+     * Parses Java package/class names so Java submissions can be compiled under the correct file.
+     *
+     * @param sourceFile Java source path.
+     * @param expectedSolutionBaseName Inferred solution class name used as a fallback preference.
+     * @return Java entrypoint information for compiling and executing the submission.
+     * @throws IOException When reading the source file fails.
+     */
+    private static JavaEntryPoint resolveJavaEntryPoint(
+        Path sourceFile,
+        String expectedSolutionBaseName
+    ) throws IOException {
+        String sourceText = new String(Files.readAllBytes(sourceFile), StandardCharsets.UTF_8);
+        String packageName = "";
+        Matcher packageMatcher = JAVA_PACKAGE_PATTERN.matcher(sourceText);
+        if (packageMatcher.find()) {
+            packageName = packageMatcher.group(1);
+        }
+
+        String className = findJavaClassName(sourceText, expectedSolutionBaseName);
+        if (className == null || className.trim().isEmpty()) {
+            className = sourceBaseName(sourceFile.getFileName().toString());
+        }
+
+        return new JavaEntryPoint(packageName, className);
+    }
+
+    /**
+     * Finds the Java class that should be launched for a Java submission.
+     *
+     * @param sourceText Java source content.
+     * @param expectedSolutionBaseName Preferred solution class name inferred from tester class.
+     * @return Public class name, expected class name when present, first class name, or null.
+     */
+    private static String findJavaClassName(
+        String sourceText,
+        String expectedSolutionBaseName
+    ) {
+        Matcher publicClassMatcher = JAVA_PUBLIC_CLASS_PATTERN.matcher(sourceText);
+        if (publicClassMatcher.find()) {
+            return publicClassMatcher.group(1);
+        }
+
+        if (
+            expectedSolutionBaseName != null
+                && !expectedSolutionBaseName.trim().isEmpty()
+                && sourceText.matches("(?s).*\\bclass\\s+"
+                    + Pattern.quote(expectedSolutionBaseName)
+                    + "\\b.*")
+        ) {
+            return expectedSolutionBaseName;
+        }
+
+        Matcher classMatcher = JAVA_CLASS_PATTERN.matcher(sourceText);
+        if (classMatcher.find()) {
+            return classMatcher.group(1);
+        }
+        return null;
+    }
+
+    /**
+     * Resolves the package directory where Java source should be copied before compilation.
+     *
+     * @param workDir Temporary compile root.
+     * @param packageName Java package name, or blank for the default package.
+     * @return Directory where the normalized Java source file should be written.
+     */
+    private static Path resolveJavaPackageDirectory(Path workDir, String packageName) {
+        Path packageDir = workDir;
+        if (packageName == null || packageName.trim().isEmpty()) {
+            return packageDir;
+        }
+
+        String[] parts = packageName.split("\\.");
+        for (String part : parts) {
+            packageDir = packageDir.resolve(part);
+        }
+        return packageDir;
+    }
+
+    /**
+     * Executes a compiler command with timeout and appends compiler output to an artifact log.
+     *
+     * @param command Command and arguments.
+     * @param workDir Working directory for the compiler process.
+     * @param timeoutMs Timeout in milliseconds.
+     * @param failureContext Message prefix used when compilation fails.
+     * @param logFile Public artifact log file for compiler output.
+     * @throws Exception When the process cannot start, times out, is interrupted, or exits
+     *                   unsuccessfully.
+     */
+    private static void runCommand(
+        List<String> command,
+        Path workDir,
+        int timeoutMs,
+        String failureContext,
+        Path logFile
+    ) throws Exception {
+        Files.createDirectories(logFile.getParent());
+        appendText(logFile, "$ " + String.join(" ", command) + "\n");
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(workDir.toFile());
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+
+        Process process;
+        try {
+            process = processBuilder.start();
+        } catch (IOException error) {
+            throw new RuntimeException(
+                failureContext
+                    + " Unable to start command '"
+                    + String.join(" ", command)
+                    + "'.",
+                error
+            );
+        }
+
+        boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            appendText(
+                logFile,
+                "\nTimed out after " + timeoutMs + "ms.\n"
+            );
+            throw new RuntimeException(
+                failureContext
+                    + " Timed out after "
+                    + timeoutMs
+                    + "ms: "
+                    + String.join(" ", command)
+            );
+        }
+
+        int exitCode = process.exitValue();
+        appendText(logFile, "\nExit code: " + exitCode + "\n");
+        if (exitCode != 0) {
+            throw new RuntimeException(
+                failureContext
+                    + " Exit code "
+                    + exitCode
+                    + ": "
+                    + String.join(" ", command)
+            );
+        }
+    }
+
+    /**
+     * Appends UTF-8 text to a file, creating the file when needed.
+     *
+     * @param filePath File to append.
+     * @param text Text to write.
+     * @throws IOException When the append operation fails.
+     */
+    private static void appendText(Path filePath, String text) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(
+            filePath,
+            StandardCharsets.UTF_8,
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.APPEND
+        )) {
+            writer.write(text);
+        }
+    }
+
+    /**
+     * Returns a fallback value when a configured integer is not positive.
+     *
+     * @param configured Configured value.
+     * @param fallback Default value.
+     * @return Positive configured value or fallback.
+     */
+    private static int resolvePositiveInt(int configured, int fallback) {
+        return configured > 0 ? configured : fallback;
     }
 
     /**
@@ -2052,6 +2856,100 @@ public class EcsRunnerMain {
             output.write(buffer, 0, bytesRead);
         }
         return output.toByteArray();
+    }
+
+    /**
+     * Describes a compiled or interpreted submission command produced by the generic runner.
+     */
+    private static class CompiledSubmission {
+        private final String executionCommand;
+        private final String sourceFileName;
+        private final String sourceLanguage;
+
+        /**
+         * Creates compiled submission details.
+         * @param executionCommand Command string passed to MarathonController for every seed.
+         * @param sourceFileName Normalized source filename used in the compile workspace.
+         * @param sourceLanguage Language label written to scorer metadata.
+         */
+        CompiledSubmission(
+            String executionCommand,
+            String sourceFileName,
+            String sourceLanguage
+        ) {
+            this.executionCommand = executionCommand;
+            this.sourceFileName = sourceFileName;
+            this.sourceLanguage = sourceLanguage;
+        }
+
+        /**
+         * Gets the command string passed to MarathonController.
+         * @return Command used to launch the compiled/interpreted submission.
+         */
+        String getExecutionCommand() {
+            return executionCommand;
+        }
+
+        /**
+         * Gets the normalized source filename used in the compile workspace.
+         * @return Source filename written to scorer metadata.
+         */
+        String getSourceFileName() {
+            return sourceFileName;
+        }
+
+        /**
+         * Gets the source language label.
+         * @return Language label written to scorer metadata.
+         */
+        String getSourceLanguage() {
+            return sourceLanguage;
+        }
+    }
+
+    /**
+     * Java package/class information needed to compile and launch Java submissions.
+     */
+    private static class JavaEntryPoint {
+        private final String packageName;
+        private final String className;
+
+        /**
+         * Creates Java entrypoint metadata.
+         * @param packageName Java package name, or blank for default package.
+         * @param className Java class containing the submission main method.
+         */
+        JavaEntryPoint(String packageName, String className) {
+            this.packageName = packageName == null ? "" : packageName;
+            this.className = className;
+        }
+
+        /**
+         * Gets the Java package name.
+         * @return Package name, or blank for the default package.
+         */
+        String getPackageName() {
+            return packageName;
+        }
+
+        /**
+         * Gets the Java class name.
+         * @return Class name used for compilation and execution.
+         */
+        String getClassName() {
+            return className;
+        }
+
+        /**
+         * Gets the Java class name including package prefix when present.
+         * @return Qualified class name passed to the Java launcher.
+         */
+        String getQualifiedClassName() {
+            if (packageName.isEmpty()) {
+                return className;
+            }
+            return packageName + "." + className;
+        }
     }
 
     /**

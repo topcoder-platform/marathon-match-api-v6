@@ -1,6 +1,6 @@
 # Full Marathon Match Test Script
 
-`scripts/run-full-marathon-match-test.mjs` drives a full Marathon Match smoke run against deployed Topcoder APIs. It creates a Marathon Match challenge through challenge-api-v6, creates a custom tester from `tester.java`, configures the Marathon Match challenge, registers submitters, submits fixture submissions during the Submission phase, waits for provisional scoring and artifacts, opens Review, waits for SYSTEM scoring on each member's latest submission, and can close the challenge through challenge-api.
+`scripts/run-full-marathon-match-test.mjs` drives a full Marathon Match smoke run against deployed Topcoder APIs. It creates a Marathon Match challenge through challenge-api-v6, creates a custom tester from `tester.java`, configures the Marathon Match challenge, registers submitters, submits fixture submissions during the Submission phase, waits for provisional scoring and artifacts, opens Review, waits for SYSTEM scoring on each member's latest submission, and waits for autopilot-v6 to close Review and complete the challenge.
 
 ## Fixture Directory
 
@@ -72,6 +72,8 @@ If `submissions` is omitted, submission files can be placed directly in the fixt
 
 Registration and Submission durations are seconds. They default to `3600` each and can be set with `--registration-duration-seconds`, `--submission-duration-seconds`, `REGISTRATION_DURATION_SECONDS`, `SUBMISSION_DURATION_SECONDS`, or `challenge.phaseDurations`.
 
+The tester source can be a standard Topcoder Marathon tester with a `main(...)` method. The ECS runner handles submission source discovery, compilation, seed execution, aggregate scoring, and `metadata.testScores` output. Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special cases.
+
 For advanced create payload fields, add `challenge.createPayload` with any valid `POST /v6/challenges` body fields. The script still applies the configured Registration and Submission duration overrides.
 
 ## Create Fixtures from Production
@@ -95,7 +97,7 @@ The generated manifest intentionally leaves challenge IDs, tester settings, seed
 Use an admin token or M2M token that can call:
 
 - `marathon-match-api-v6`: tester and config CRUD
-- `challenge-api-v6`: challenge create/update, phase advance, close Marathon Match
+- `challenge-api-v6`: challenge create/update and phase advance
 - `resource-api-v6`: create submitter resources
 - `review-api-v6`: create/list submissions, list review summations, list artifacts
 
@@ -139,14 +141,14 @@ During Submission, every created submission must receive a provisional review su
 
 During Review, the script waits for a SYSTEM review summation on the latest submission for each member. If `expectedScores.provisional` or `expectedScores.system` is present in the manifest, the script checks the scored value using `--score-tolerance` (default `0.000001`).
 
-Use `--require-test-scores` when the tester should always return `metadata.testScores`.
+Use `--require-test-scores` when the runner should always produce `metadata.testScores`.
 
 ## Phase Controls
 
 By default the script:
 
 1. Creates the challenge through `POST /v6/challenges`, unless `--challenge-id` is supplied.
-2. Patches the challenge to `ACTIVE` if needed.
+2. Approves the challenge with `PATCH /v6/challenges/:challengeId` and `{"approvalStatus":"APPROVED"}`, then patches it to `ACTIVE` if needed.
 3. Opens Registration.
 4. Registers submitters.
 5. Activates the Marathon Match config.
@@ -154,7 +156,7 @@ By default the script:
 7. Creates submissions.
 8. Closes Submission and opens Review.
 9. Waits for SYSTEM scoring.
-10. Calls `POST /v6/challenges/:challengeId/close-marathon-match`.
+10. Waits for autopilot-v6 to close Review and mark the challenge `COMPLETED`.
 
 Useful skip switches:
 
@@ -162,6 +164,6 @@ Useful skip switches:
 - `--skip-phase-advance`
 - `--skip-registration`
 - `--skip-config`
-- `--skip-final-close`
+- `--skip-final-close` skips the final wait for autopilot-v6 to close Review and complete the challenge.
 
 These are intended for reruns against a challenge that is already in the desired state.

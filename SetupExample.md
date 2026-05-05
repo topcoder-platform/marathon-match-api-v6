@@ -40,29 +40,18 @@ export PG_BOSS_COMPILE_TEAM_SIZE=1
 export PG_BOSS_COMPILE_TEAM_CONCURRENCY=1
 ```
 
-## 2. Prepare an API-Compatible BridgeRunners Tester
+## 2. Prepare a BridgeRunners Tester
 
-The baseline MM-164 `BridgeRunnersTester.java` is not directly compatible with this runner.
-The in-repo example file above already includes the required adapter method.
-
-`marathon-match-api-v6` runner loads your tester class and invokes:
-
-`public static runTester(String submissionPath, com.topcoder.scorer.models.ScorerConfig config)`
+The baseline MM-164 `BridgeRunnersTester.java` can be used as a standard Topcoder Marathon tester.
+The ECS runner now provides the generic submission source discovery, compilation, seed execution, artifact output, and aggregate score payload.
 
 Before creating the tester record:
 
-1. Use `./examples/BridgeRunnersTester.java`
-   as your initial tester source.
-2. Ensure the static `runTester(...)` method:
-   - compiles/launches the submission from `submissionPath`,
-   - runs seeds from `config.getStartSeed()` for `config.getNumberOfTests()`,
-   - returns either:
-     - `double`, or
-     - `Map` containing `score` (numeric), optionally `metadata`.
-3. Make sure `className` in API payload matches the Java class exactly.
+1. Use `./examples/BridgeRunnersTester.java` as your initial tester source.
+2. Make sure `className` in API payload matches the Java class exactly.
    - The baseline file has no `package` declaration, so class name is `BridgeRunnersTester`.
 
-Important: the current `ecs-runner/Dockerfile` runtime image is Java JRE-oriented. If your `runTester(...)` compiles submissions at runtime (common for MM flows), ensure required toolchains are present in the runner image for the languages you want to test.
+Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special-case scorers, but they are no longer required for normal Marathon Match testers.
 
 ## 3. Create the Tester Record
 

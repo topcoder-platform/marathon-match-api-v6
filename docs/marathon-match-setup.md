@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Scorer section in `marathon-match-api-v6` connects a Marathon Match challenge to a compiled Java tester and the ECS task that runs it. Once the config is active, new submissions can be scored automatically during the submission phases, and the same tester can be reused for SYSTEM reviews when the Review phase opens.
+The Scorer section in `marathon-match-api-v6` connects a Marathon Match challenge to a compiled Java tester and the ECS task that runs it. Once the config is active, new submissions can be scored automatically during the Submission phase, and the same tester will be reused for SYSTEM reviews when the Review phase opens.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Each Marathon Match config points to a compiled tester record. A tester includes
 - `name`: logical tester name
 - `version`: string label for that tester build or family revision
 - `className`: fully qualified Java class name
-- `sourceCode`: Java source that exposes `public static runTester(String, ScorerConfig)`
+- `sourceCode`: standard Topcoder Marathon tester Java source. A custom `public static runTester(String, ScorerConfig)` method is optional for special-case scorers; the ECS runner provides the default submission compile/run/score flow.
 
 To create a new tester family, call:
 

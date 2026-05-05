@@ -89,7 +89,7 @@ Skip switches:
   --skip-phase-advance          Do not open/close Registration, Submission, or Review.
   --skip-registration           Do not create submitter resources.
   --skip-config                 Do not create/update Marathon Match config.
-  --skip-final-close            Do not call close-marathon-match.
+  --skip-final-close            Do not wait for autopilot to close Review and complete the challenge.
 `);
   process.exit(0);
 }
@@ -1722,10 +1722,25 @@ async function upsertMarathonConfig(runtime, fixture, compiledTester, phases) {
 }
 
 /**
- * Activates a challenge and opens Registration when requested.
+ * Approves a challenge before launch activation.
+ * @param {Record<string, unknown>} runtime Runtime configuration with challenge API base, token, and challenge ID.
+ * @returns {Promise<void>} Resolves when the approval PATCH succeeds.
+ * @throws {ApiError} When Challenge API rejects the approval request.
+ */
+async function approveChallengeForLaunch(runtime) {
+  logStep('Approving challenge', { challengeId: runtime.challengeId });
+  await requestJson(runtime, joinUrl(runtime.challengeApiBase, 'challenges', runtime.challengeId), {
+    method: 'PATCH',
+    body: { approvalStatus: 'APPROVED' },
+  });
+}
+
+/**
+ * Approves and activates a challenge, then opens Registration when requested.
  * @param {Record<string, unknown>} runtime Runtime configuration.
  * @param {Record<string, unknown>} phases Phase data.
  * @returns {Promise<void>} Resolves when launch steps finish.
+ * @throws {ApiError} When Challenge API rejects an approval, activation, or phase request.
  */
 async function launchChallenge(runtime, phases) {
   if (runtime.skipChallengeLaunch) {
@@ -1735,6 +1750,7 @@ async function launchChallenge(runtime, phases) {
 
   const challenge = await getChallenge(runtime);
   if (String(challenge.status ?? '').toUpperCase() !== 'ACTIVE') {
+    await approveChallengeForLaunch(runtime);
     logStep('Activating challenge', { challengeId: runtime.challengeId });
     await requestJson(runtime, joinUrl(runtime.challengeApiBase, 'challenges', runtime.challengeId), {
       method: 'PATCH',
@@ -2374,32 +2390,42 @@ function getSubmissionSortValue(submission) {
 }
 
 /**
- * Closes Submission, opens Review, and then completes the Marathon Match.
+ * Waits for autopilot to close Review and complete the Marathon Match.
  * @param {Record<string, unknown>} runtime Runtime configuration.
  * @returns {Promise<Record<string, unknown> | null>} Completed challenge response.
  */
-async function completeChallenge(runtime) {
-  if (!runtime.skipPhaseAdvance) {
-    await ensurePhaseState(runtime, 'Submission', false);
-    await ensurePhaseState(runtime, 'Review', true);
-  }
-
+async function waitForAutopilotCompletion(runtime) {
   if (runtime.skipFinalClose) {
-    logStep('Skipping final close-marathon-match call');
+    logStep('Skipping final autopilot completion wait');
     return null;
   }
 
-  logStep('Closing Marathon Match challenge', { challengeId: runtime.challengeId });
-  await requestJson(
-    runtime,
-    joinUrl(runtime.challengeApiBase, 'challenges', runtime.challengeId, 'close-marathon-match'),
-    { method: 'POST' },
-  );
+  await waitFor('autopilot Review phase closure', runtime, async () => {
+    const challenge = await getChallenge(runtime);
+    const reviewPhase = findPhaseByNames(extractChallengePhases(challenge), [
+      'Review',
+    ]);
+    if (!reviewPhase) {
+      throw new Error('Challenge does not include a Review phase.');
+    }
 
-  return waitFor('challenge COMPLETED status', runtime, async () => {
+    if (!reviewPhase.isOpen) {
+      logStep('Review phase closed by autopilot', {
+        challengeId: runtime.challengeId,
+        phaseId: reviewPhase.id,
+      });
+      return challenge;
+    }
+
+    return null;
+  });
+
+  return waitFor('autopilot challenge COMPLETED status', runtime, async () => {
     const challenge = await getChallenge(runtime);
     if (String(challenge.status ?? '').toUpperCase() === 'COMPLETED') {
-      logStep('Challenge completed', { challengeId: runtime.challengeId });
+      logStep('Challenge completed by autopilot', {
+        challengeId: runtime.challengeId,
+      });
       return challenge;
     }
 
@@ -2450,13 +2476,13 @@ async function main() {
     await ensurePhaseState(runtime, 'Review', true);
   }
   const latest = await waitForSystemScoring(runtime, createdSubmissions);
-  const completedChallenge = await completeChallenge(runtime);
+  const completedChallenge = await waitForAutopilotCompletion(runtime);
 
   logStep('Full Marathon Match test completed', {
     challengeId: runtime.challengeId,
     submissions: createdSubmissions.length,
     latestSystemSubmissions: latest.length,
-    status: completedChallenge?.status ?? 'not-closed-by-script',
+    status: completedChallenge?.status ?? 'autopilot-completion-not-waited',
   });
 }
 

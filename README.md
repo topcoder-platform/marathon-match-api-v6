@@ -139,7 +139,7 @@ The ECS task still needs trusted outbound access to fetch challenge config, down
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM as the `runner` user with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
 - A native wrapper blocks creation of non-`AF_UNIX` sockets for that child JVM and all descendant submission processes, so submissions cannot open live outbound network connections.
-- Callback review payloads such as `currentReview` and `impactedReviews` are now trusted only when returned directly from the tester `runTester(...)` result map. Workspace files under `artifacts/private/` are no longer used for callback review updates.
+- Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
 ## Exit code 137 (OOM) mitigation
 
@@ -206,7 +206,7 @@ Auth model in code:
 
 | Method | Path | Required role/scope |
 | --- | --- | --- |
-| `GET` | `/v6/marathon-match/submissions/:submissionId/runner-logs` | `administrator` OR `read:marathon-match` |
+| `GET` | `/v6/marathon-match/submissions/:submissionId/runner-logs` | `administrator` OR `copilot` OR `Manager` OR `read:marathon-match` |
 
 ### Internal scoring callback endpoint
 
@@ -227,7 +227,7 @@ Create a tester (`POST /testers`) with:
 
 - `name`
 - `version`
-- `className` (fully-qualified Java class with static `runTester(String, ScorerConfig)`)
+- `className` (fully-qualified Java Marathon tester class)
 - `sourceCode`
 
 `POST /testers` is only for a brand-new tester name. If that tester family already exists, use `PUT /testers/:id` and a higher `version` instead.
@@ -347,7 +347,7 @@ sequenceDiagram
           F->>MM: GET /challenge/:id/tester-jar
           F->>MM: GET /testers/:testerId
           F->>SA: Download submission artifacts
-          F->>F: Load tester JAR + invoke runTester(...)
+          F->>F: Load tester JAR + generic MarathonController execution
           F->>MM: POST /internal/scoring-results
           MM->>SRS: processScoringResult(payload)
           SRS->>RA: POST/PUT review summations
