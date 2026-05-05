@@ -1126,7 +1126,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Ensures metadata carries the active test type and optional review type.
+   * Ensures metadata carries the active test type/process and optional review type.
    */
   private normalizeMetadata(
     metadata: Record<string, unknown> | undefined,
@@ -1134,11 +1134,20 @@ export class ScoringResultService {
     reviewTypeId?: string,
     fallbackMetadata?: Record<string, unknown>,
   ): Record<string, unknown> {
+    const normalizedTestPhase = this.normalizeTestPhase(testPhase);
     const normalized: Record<string, unknown> = {
       ...(fallbackMetadata ?? {}),
       ...(metadata ?? {}),
-      testType: this.normalizeTestPhase(testPhase),
+      testType: normalizedTestPhase,
     };
+    if (
+      normalizedTestPhase === 'provisional' ||
+      normalizedTestPhase === 'system'
+    ) {
+      normalized.testProcess = normalizedTestPhase;
+    } else {
+      delete normalized.testProcess;
+    }
 
     if (reviewTypeId) {
       normalized.reviewTypeId = reviewTypeId;
@@ -1201,6 +1210,7 @@ export class ScoringResultService {
     const failedTests = this.normalizeNonNegativeInteger(progress.failedTests);
     const message = this.asString(progress.message);
     const reviewId = this.asString(progress.reviewId);
+    const testProcess = this.asString(metadata.testProcess);
     const details: Record<string, unknown> = {
       progress: normalizedProgress,
       status: progress.status,
@@ -1221,6 +1231,9 @@ export class ScoringResultService {
     }
     if (reviewId) {
       details.reviewId = reviewId;
+    }
+    if (testProcess) {
+      details.testProcess = testProcess;
     }
 
     return {

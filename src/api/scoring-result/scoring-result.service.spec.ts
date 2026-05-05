@@ -133,6 +133,7 @@ describe('ScoringResultService', () => {
           reviewTypeId: basePayload.reviewTypeId,
           testProgress: 1,
           testStatus: ScoringTestStatus.Success,
+          testProcess: 'provisional',
           testType: 'provisional',
         }),
       }),
@@ -206,6 +207,7 @@ describe('ScoringResultService', () => {
       .mockResolvedValue({
         id: 'summation-1',
         metadata: {
+          testProcess: 'provisional',
           testType: 'provisional',
         },
       });
@@ -234,10 +236,12 @@ describe('ScoringResultService', () => {
         metadata: expect.objectContaining({
           testProgress: 0.2,
           testStatus: ScoringTestStatus.InProgress,
+          testProcess: 'provisional',
           testProgressDetails: expect.objectContaining({
             completedTests: 4,
             failedTests: 0,
             status: ScoringTestStatus.InProgress,
+            testProcess: 'provisional',
             totalTests: 20,
           }),
         }),

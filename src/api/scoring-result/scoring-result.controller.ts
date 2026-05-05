@@ -93,6 +93,7 @@ class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
     additionalProperties: true,
     example: {
       reviewTypeId: 'cfca92f1-4f76-4c27-8fc4-4db60ff6e778',
+      testProcess: 'provisional',
       testType: 'provisional',
     },
   })

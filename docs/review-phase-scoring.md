@@ -64,7 +64,7 @@ sequenceDiagram
 
 After `ScoringResultService` writes the SYSTEM review summation, `completeSystemReviewIfNeeded` patches the originating review to `COMPLETED` and writes the final score back to Review API.
 
-While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProgress` (`0` to `1`) and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested.
+While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested.
 
 ## Relative scoring at completion
 

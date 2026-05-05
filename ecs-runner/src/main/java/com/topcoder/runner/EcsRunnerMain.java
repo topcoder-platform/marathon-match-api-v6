@@ -1773,13 +1773,17 @@ public class EcsRunnerMain {
         String reviewTypeId
     ) {
         Map<String, Object> metadata = new LinkedHashMap<String, Object>();
-        metadata.put("testType", normalizeTestPhase(testPhase));
+        String normalizedTestPhase = normalizeTestPhase(testPhase);
+        if (isProgressTrackedPhase(normalizedTestPhase)) {
+            metadata.put("testProcess", normalizedTestPhase);
+        }
+        metadata.put("testType", normalizedTestPhase);
         metadata.put("reviewTypeId", reviewTypeId);
         return metadata;
     }
 
     /**
-     * Builds callback metadata with enforced testType and reviewTypeId.
+     * Builds callback metadata with enforced testProcess, testType, and reviewTypeId.
      */
     private static Map<String, Object> buildCallbackMetadata(
         Map<String, Object> metadata,
@@ -1790,7 +1794,13 @@ public class EcsRunnerMain {
             ? new LinkedHashMap<String, Object>()
             : new LinkedHashMap<String, Object>(metadata);
 
-        result.put("testType", normalizeTestPhase(testPhase));
+        String normalizedTestPhase = normalizeTestPhase(testPhase);
+        if (isProgressTrackedPhase(normalizedTestPhase)) {
+            result.put("testProcess", normalizedTestPhase);
+        } else {
+            result.remove("testProcess");
+        }
+        result.put("testType", normalizedTestPhase);
         result.put("reviewTypeId", reviewTypeId);
         return result;
     }
