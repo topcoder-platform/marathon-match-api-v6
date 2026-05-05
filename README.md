@@ -79,6 +79,7 @@ The service is configured via environment variables.
 | Variable | Required | Default | Used for |
 | --- | --- | --- | --- |
 | `CHALLENGE_API_URL` | No | `https://api.topcoder-dev.com` | Challenge API lookup for current active phase |
+| `RESOURCES_API_URL` | No | `${CHALLENGE_API_URL}/v6/resources` | Resource API lookup for challenge-specific copilot access to manual reruns |
 | `DISABLE_PG_BOSS` | No | `false` | Disable pg-boss queue/worker and run tester compilation inline |
 | `DEFAULT_REVIEW_SCORECARD_ID` | Yes (for UI defaults) | None | Default review scorecard returned by `GET /challenge/defaults` |
 | `DEFAULT_TEST_TIMEOUT_MS` | No | `90000` | Default test timeout returned by `GET /challenge/defaults` |

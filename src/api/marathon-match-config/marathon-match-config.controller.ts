@@ -10,6 +10,7 @@ import {
   Put,
   Query,
   Res,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
@@ -36,6 +37,7 @@ import { Scopes } from 'src/shared/decorators/scopes.decorator';
 import { User } from 'src/shared/decorators/user.decorator';
 import { Scope } from 'src/shared/enums/scopes.enum';
 import { UserRole } from 'src/shared/enums/userRole.enum';
+import { ChallengeCopilotResourceGuard } from 'src/shared/guards/challenge-copilot-resource.guard';
 import { Roles } from 'src/shared/guards/tokenRoles.guard';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { MarathonMatchConfigService } from './marathon-match-config.service';
@@ -110,11 +112,13 @@ export class MarathonMatchConfigController {
    * @returns Accepted rerun dispatch summary.
    */
   @Post('/:challengeId/rerun')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot, UserRole.User)
   @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
   @ApiOperation({
     summary: 'Rerun latest submissions for a Marathon Match challenge',
-    description: 'Roles: Admin | Scopes: update:marathon-match',
+    description:
+      'Roles: Admin or challenge Copilot resource | Scopes: update:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',

@@ -15,7 +15,7 @@ Before starting:
 
 - You need Work app access for challenge creation/editing, as a copilot.  You should know the project and budget you have to work with.
 - You need the `copilot` role for normal scorer/tester setup in the Work app.
-- Manual reruns require administrator access, or an M2M token with `update:marathon-match`.
+- Manual reruns require administrator access, an M2M token with `update:marathon-match`, or the challenge's assigned `Copilot` resource.
 
 ## End-To-End Flow
 
@@ -284,7 +284,7 @@ Use this flow when the tester source changes after the challenge is active.
 3. Create the new version with the updated Java source.
 4. Wait until compilation reaches `SUCCESS`.
 5. Save the scorer config so the challenge points at the new tester ID.
-6. Trigger a rerun of latest submissions using the "Rerun scores" button on the UI
+6. Trigger a rerun of latest submissions using the `Rerun scores` button on the UI.
 7. Monitor the rerun ECS tasks, runner logs, artifacts, and review scores.
 
 
@@ -391,4 +391,3 @@ After submission closes:
 - Confirm System scoring starts during Review.
 - Confirm final review summations and aggregate scores are present.
 - Confirm artifacts and logs are retained for troubleshooting.
-

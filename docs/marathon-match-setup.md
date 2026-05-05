@@ -160,6 +160,8 @@ To switch an active challenge to a newer tester:
 
 The rerun endpoint selects `isLatest` submissions for the challenge in received order and launches ECS scorer tasks for them in parallel. This does not happen automatically when `testerId` changes, so the rerun call is the operational step that recalculates scores.
 
+Reruns can be requested by admins, M2M tokens with `update:marathon-match`, or the `Copilot` resource assigned to the challenge.
+
 Warning: rerunning after a tester change recalculates scores for all current submitters.
 
 ## Rollback

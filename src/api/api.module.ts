@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { GlobalProvidersModule } from 'src/shared/modules/global/globalProviders.module';
 import { PgBossModule } from 'src/shared/modules/pg-boss/pg-boss.module';
+import { ChallengeCopilotResourceGuard } from 'src/shared/guards/challenge-copilot-resource.guard';
 import { HealthCheckController } from './health-check/healthCheck.controller';
 import { MarathonMatchConfigController } from './marathon-match-config/marathon-match-config.controller';
 import { MarathonMatchConfigService } from './marathon-match-config/marathon-match-config.service';
@@ -30,6 +31,7 @@ import { TesterService } from './tester/tester.service';
     MarathonMatchConfigService,
     ScoringResultService,
     SubmissionRunnerLogService,
+    ChallengeCopilotResourceGuard,
   ],
 })
 export class ApiModule {}

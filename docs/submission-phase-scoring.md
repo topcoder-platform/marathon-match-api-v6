@@ -105,3 +105,5 @@ Use:
 `POST /v6/marathon-match/challenge/:challengeId/rerun`
 
 This endpoint selects the latest submission for each member in received order and launches ECS scorer tasks in parallel using the challenge's `PROVISIONAL` phase config. Use it after changing the tester or when current latest submissions need to be rescored without waiting for new submission events.
+
+Rerun access is limited to admins, M2M tokens with `update:marathon-match`, and the `Copilot` resource assigned to the challenge.
