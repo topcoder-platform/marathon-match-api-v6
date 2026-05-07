@@ -1697,14 +1697,18 @@ export class ScoringResultService {
   }
 
   /**
-   * Converts strings and numbers into trimmed strings.
+   * Converts strings, numbers, and bigint values into trimmed strings.
    */
   private asString(value: unknown): string | undefined {
     if (value === null || value === undefined) {
       return undefined;
     }
 
-    if (typeof value !== 'string' && typeof value !== 'number') {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'bigint'
+    ) {
       return undefined;
     }
 

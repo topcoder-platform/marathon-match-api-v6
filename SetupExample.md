@@ -180,19 +180,19 @@ jq -n \
     example: {
       configType: "EXAMPLE",
       phaseId: $examplePhaseId,
-      startSeed: 1,
+      startSeed: "1",
       numberOfTests: 10
     },
     provisional: {
       configType: "PROVISIONAL",
       phaseId: $provisionalPhaseId,
-      startSeed: 753376358,
+      startSeed: "753376358",
       numberOfTests: 20
     },
     system: {
       configType: "SYSTEM",
       phaseId: $systemPhaseId,
-      startSeed: 1651246628,
+      startSeed: "1651246628",
       numberOfTests: 50
     }
   }' > /tmp/mm-bridge-config.json

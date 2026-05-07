@@ -123,7 +123,7 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 - `REVIEW_TYPE_ID`
 - `TEST_PHASE`
 - `PHASE_CONFIG_TYPE`
-- `PHASE_START_SEED`
+- `PHASE_START_SEED` (decimal 64-bit integer string)
 - `PHASE_NUMBER_OF_TESTS`
 - `REVIEW_ID` (optional; used for SYSTEM review completion callbacks)
 
@@ -261,7 +261,7 @@ Create config on the challenge id (`POST /challenge/:challengeId`) and include a
 - `active` (`true` to enable scoring)
 - phase mappings (`example`, `provisional`, `system`) with:
   - `phaseId` (from challenge-api `phases[].phaseId`, not the challenge-phase row `id`)
-  - `startSeed`
+  - `startSeed` as a decimal string for full PostgreSQL `BIGINT`/Java `long` range support
   - `numberOfTests`
 
 Config identity semantics:

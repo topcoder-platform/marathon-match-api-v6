@@ -109,7 +109,7 @@ describe('MarathonMatchConfigService', () => {
         {
           id: 'phase-system',
           configType: PhaseConfigType.SYSTEM,
-          startSeed: 100,
+          startSeed: BigInt(100),
           numberOfTests: 50,
           phaseId: 'review-phase',
           createdAt: new Date('2026-03-01T00:00:00.000Z'),
@@ -135,6 +135,7 @@ describe('MarathonMatchConfigService', () => {
     expect(result.reviewScorecardId).toBe(
       'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
     );
+    expect(result.system?.startSeed).toBe('100');
     expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
     expect(httpService.get).toHaveBeenCalledWith(
       'https://api.topcoder-dev.com/v6/scorecards/12345',
@@ -189,6 +190,106 @@ describe('MarathonMatchConfigService', () => {
         },
       },
     );
+  });
+
+  it('normalizes large startSeed strings to BigInt when creating phase configs', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const maxRangeStartSeed = '9223372036854775800';
+    const challengePayload = {
+      id: '30000123',
+      phases: [
+        {
+          id: 'challenge-phase-row',
+          phaseId: 'submission-phase',
+        },
+      ],
+    };
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    prisma.tester.findUnique.mockResolvedValue({
+      id: 'tester-1',
+    });
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<void>) => callback(prisma),
+    );
+    prisma.marathonMatchConfig.create.mockResolvedValue({});
+    prisma.phaseConfig.create.mockResolvedValue({});
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      name: 'MM June 2026 Config',
+      active: true,
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+      createdBy: '40051399',
+      updatedBy: '40051399',
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          startSeed: BigInt(maxRangeStartSeed),
+          numberOfTests: 8,
+          phaseId: 'submission-phase',
+          createdAt: new Date('2026-03-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+          marathonMatchConfigId: 'generated-id',
+        },
+      ],
+    });
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: challengePayload,
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: 'resolved-scorecard-id',
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: challengePayload,
+        }),
+      );
+
+    const result = await service.createConfig(
+      '30000123',
+      {
+        ...createConfigPayload(),
+        provisional: {
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'challenge-phase-row',
+          startSeed: maxRangeStartSeed,
+          numberOfTests: 8,
+        },
+      },
+      {
+        isMachine: false,
+        userId: '40051399',
+      } as never,
+    );
+
+    expect(prisma.phaseConfig.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        configType: PhaseConfigType.PROVISIONAL,
+        phaseId: 'submission-phase',
+        startSeed: BigInt(maxRangeStartSeed),
+        numberOfTests: 8,
+      }),
+    });
+    expect(result.provisional?.startSeed).toBe(maxRangeStartSeed);
   });
 
   it('rejects create requests when challengeId does not resolve', async () => {

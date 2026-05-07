@@ -9,10 +9,75 @@ import {
   IsOptional,
   IsString,
   IsUrl,
-  Max,
   Min,
+  registerDecorator,
   ValidateNested,
+  ValidationOptions,
 } from 'class-validator';
+
+const MAX_START_SEED = BigInt('9223372036854775807');
+const START_SEED_PATTERN = /^(0|[1-9]\d*)$/;
+
+/**
+ * Converts supported start seed inputs into a trimmed decimal string for validation.
+ * @param value Raw request value from JSON or a programmatic service call.
+ * @returns Decimal string for safe inputs, or the original value when it should fail validation.
+ */
+function transformStartSeed(value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? String(value) : value;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return value;
+}
+
+/**
+ * Checks whether a value is a non-negative PostgreSQL BIGINT and Java long seed.
+ * @param value Candidate transformed start seed.
+ * @returns True when the value is a decimal integer string in the supported range.
+ */
+function isStartSeed(value: unknown): value is string {
+  if (typeof value !== 'string' || !START_SEED_PATTERN.test(value)) {
+    return false;
+  }
+
+  try {
+    return BigInt(value) <= MAX_START_SEED;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Registers validation for Marathon Match start seed request fields.
+ * @param validationOptions Optional class-validator message and grouping options.
+ * @returns Property decorator that validates decimal string BIGINT seed values.
+ */
+function IsStartSeed(validationOptions?: ValidationOptions): PropertyDecorator {
+  return (object: object, propertyName: string | symbol) => {
+    registerDecorator({
+      name: 'isStartSeed',
+      target: object.constructor,
+      propertyName: String(propertyName),
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          return isStartSeed(value);
+        },
+        defaultMessage: () =>
+          'startSeed must be a non-negative 64-bit integer string between 0 and 9223372036854775807.',
+      },
+    });
+  };
+}
 
 /**
  * Base payload for phase-specific marathon match execution settings.
@@ -29,13 +94,14 @@ export class PhaseConfigDto {
 
   @ApiProperty({
     description:
-      'Starting seed for test generation. Maximum is 2147483647 to stay within PostgreSQL Int range. Service runtime also enforces Number.isSafeInteger before persistence.',
-    example: 12345,
+      'Starting seed for test generation as a decimal string. Values are stored as PostgreSQL BIGINT and passed to the Java runner as a long. Existing numeric JSON input is accepted only when it is a safe integer; send large 64-bit seeds as strings.',
+    type: String,
+    format: 'int64',
+    example: '12345',
   })
-  @IsInt()
-  @Min(0)
-  @Max(2147483647)
-  startSeed: number;
+  @Transform(({ value }: TransformFnParams) => transformStartSeed(value))
+  @IsStartSeed()
+  startSeed: string;
 
   @ApiProperty({
     description: 'Number of tests to execute for this phase',

@@ -189,6 +189,30 @@ function getIntegerOption(args, key, envNames, defaultValue) {
 }
 
 /**
+ * Reads a non-negative 64-bit integer option as a decimal string.
+ * @param {Record<string, string | boolean>} args Parsed CLI args.
+ * @param {string} key CLI key.
+ * @param {string[]} envNames Environment variable fallbacks.
+ * @param {string | number} defaultValue Default value.
+ * @returns {string} Resolved decimal string.
+ */
+function getBigIntStringOption(args, key, envNames, defaultValue) {
+  const raw = String(
+    getStringOption(args, key, envNames, String(defaultValue)) ?? '',
+  ).trim();
+  if (!/^(0|[1-9]\d*)$/.test(raw)) {
+    throw new Error(`Option ${key} must be a non-negative 64-bit integer.`);
+  }
+
+  const parsed = BigInt(raw);
+  if (parsed > BigInt('9223372036854775807')) {
+    throw new Error(`Option ${key} must be at most 9223372036854775807.`);
+  }
+
+  return raw;
+}
+
+/**
  * Reads an optional integer option from CLI args or environment variables.
  * @param {Record<string, string | boolean>} args Parsed CLI args.
  * @param {string} key CLI key.
@@ -370,9 +394,9 @@ function buildRuntimeConfig(args) {
       ['COMPILE_TIMEOUT_MS'],
       120_000,
     ),
-    exampleStartSeed: getIntegerOption(args, 'exampleStartSeed', [], 1),
+    exampleStartSeed: getBigIntStringOption(args, 'exampleStartSeed', [], 1),
     exampleNumberOfTests: getIntegerOption(args, 'exampleNumberOfTests', [], 10),
-    provisionalStartSeed: getIntegerOption(
+    provisionalStartSeed: getBigIntStringOption(
       args,
       'provisionalStartSeed',
       [],
@@ -384,7 +408,12 @@ function buildRuntimeConfig(args) {
       [],
       20,
     ),
-    systemStartSeed: getIntegerOption(args, 'systemStartSeed', [], 1_651_246_628),
+    systemStartSeed: getBigIntStringOption(
+      args,
+      'systemStartSeed',
+      [],
+      1_651_246_628,
+    ),
     systemNumberOfTests: getIntegerOption(args, 'systemNumberOfTests', [], 50),
     minArtifacts: getIntegerOption(args, 'minArtifacts', ['MIN_ARTIFACTS'], 1),
     waitTimeoutMs: getIntegerOption(
@@ -1666,7 +1695,9 @@ async function upsertMarathonConfig(runtime, fixture, compiledTester, phases) {
     example: {
       configType: 'EXAMPLE',
       phaseId: phases.examplePhaseId,
-      startSeed: Number(manifestConfig.example?.startSeed ?? runtime.exampleStartSeed),
+      startSeed: String(
+        manifestConfig.example?.startSeed ?? runtime.exampleStartSeed,
+      ),
       numberOfTests: Number(
         manifestConfig.example?.numberOfTests ?? runtime.exampleNumberOfTests,
       ),
@@ -1674,7 +1705,7 @@ async function upsertMarathonConfig(runtime, fixture, compiledTester, phases) {
     provisional: {
       configType: 'PROVISIONAL',
       phaseId: phases.provisionalPhaseId,
-      startSeed: Number(
+      startSeed: String(
         manifestConfig.provisional?.startSeed ?? runtime.provisionalStartSeed,
       ),
       numberOfTests: Number(
@@ -1685,7 +1716,9 @@ async function upsertMarathonConfig(runtime, fixture, compiledTester, phases) {
     system: {
       configType: 'SYSTEM',
       phaseId: phases.systemPhaseId,
-      startSeed: Number(manifestConfig.system?.startSeed ?? runtime.systemStartSeed),
+      startSeed: String(
+        manifestConfig.system?.startSeed ?? runtime.systemStartSeed,
+      ),
       numberOfTests: Number(
         manifestConfig.system?.numberOfTests ?? runtime.systemNumberOfTests,
       ),

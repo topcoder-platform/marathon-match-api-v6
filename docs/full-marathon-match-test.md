@@ -43,9 +43,9 @@ fixtures/my-mm/
     "name": "Production Baseline Full Test",
     "relativeScoringEnabled": true,
     "scoreDirection": "MAXIMIZE",
-    "example": { "startSeed": 1, "numberOfTests": 10 },
-    "provisional": { "startSeed": 753376358, "numberOfTests": 20 },
-    "system": { "startSeed": 1651246628, "numberOfTests": 50 }
+    "example": { "startSeed": "1", "numberOfTests": 10 },
+    "provisional": { "startSeed": "753376358", "numberOfTests": 20 },
+    "system": { "startSeed": "1651246628", "numberOfTests": 50 }
   },
   "submissions": [
     {

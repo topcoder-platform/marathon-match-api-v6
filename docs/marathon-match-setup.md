@@ -127,7 +127,7 @@ Each of `example`, `provisional`, and `system` must contain:
 | Field | Type | Notes |
 | --- | --- | --- |
 | `phaseId` | string | Canonical challenge phase definition ID from challenge-api `phases[].phaseId` (not the challenge-phase row `id`) |
-| `startSeed` | number | Non-negative integer in the runtime-validated DB range: `0..2147483647` |
+| `startSeed` | string | Non-negative 64-bit integer stored as PostgreSQL `BIGINT` and passed to the Java runner as a `long`; use a decimal string for full range support (`0..9223372036854775807`) |
 | `numberOfTests` | number | Number of test cases to run |
 
 ## Step 5 - Activate and verify

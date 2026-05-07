@@ -156,7 +156,7 @@ The `Phase Execution` section has one card each for:
 Each card has:
 
 - `Phase`: the challenge phase that should trigger this run.
-- `Start Seed`: first seed used by the tester for this phase.
+- `Start Seed`: first seed used by the tester for this phase. The API stores it as PostgreSQL `BIGINT`; use decimal strings for large 64-bit seeds.
 - `Number of Tests`: number of seeds/testcases to execute.
 
 Recommended defaults currently used by the Work app are:
@@ -175,7 +175,7 @@ System scoring runs from the Review phase flow. Keep the System phase mapped to 
 
 Validation rules:
 
-- `Start Seed` must be an integer from `0` through `2147483647`.
+- `Start Seed` must be a non-negative 64-bit integer from `0` through `9223372036854775807`; send it as a decimal string to avoid JSON number precision loss.
 - `Number of Tests` must be an integer greater than or equal to `1`.
 - `Phase` should resolve to the canonical challenge `phaseId`.
 
@@ -234,7 +234,7 @@ At launch, the API injects container overrides including:
 - `REVIEW_TYPE_ID`
 - `TEST_PHASE`
 - `PHASE_CONFIG_TYPE`
-- `PHASE_START_SEED`
+- `PHASE_START_SEED` (decimal 64-bit integer string)
 - `PHASE_NUMBER_OF_TESTS`
 - `REVIEW_ID` for system-review callbacks when applicable
 

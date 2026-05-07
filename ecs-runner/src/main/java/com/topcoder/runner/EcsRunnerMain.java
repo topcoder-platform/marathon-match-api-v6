@@ -140,7 +140,7 @@ public class EcsRunnerMain {
                 reviewId = null;
             }
             testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
-            int phaseStartSeed = getOptionalIntEnv("PHASE_START_SEED", 0);
+            long phaseStartSeed = getOptionalLongEnv("PHASE_START_SEED", 0L);
             int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
             setLogContext(challengeId, submissionId, testPhase);
 
@@ -1270,6 +1270,32 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Reads an optional 64-bit integer environment variable and returns a default when missing.
+     *
+     * @param variableName Environment variable name.
+     * @param defaultValue Default value used when the variable is missing or blank.
+     * @return Parsed long value or the default value.
+     * @throws IllegalArgumentException When the configured value is not a valid Java long.
+     */
+    private static long getOptionalLongEnv(String variableName, long defaultValue) {
+        String value = System.getenv(variableName);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(
+                "Environment variable "
+                    + variableName
+                    + " must be a 64-bit integer. Received: "
+                    + value
+            );
+        }
+    }
+
+    /**
      * Parses boolean-like environment values.
      * @param variableName Environment variable name.
      * @returns True for "1", "true", "yes", or "on" (case-insensitive), otherwise false.
@@ -2145,14 +2171,32 @@ public class EcsRunnerMain {
 
     /**
      * Builds scorer config consumed by Marathon tester execution.
+     *
+     * @param config Marathon Match challenge configuration fetched from the API.
+     * @param tester Compiled tester metadata fetched from the API.
+     * @param reviewTypeId Review type ID written to callback metadata.
+     * @param phaseStartSeed First seed in the configured phase range.
+     * @param phaseNumberOfTests Number of seeds configured for the phase.
+     * @return ScorerConfig passed to generic or custom tester execution.
+     * @throws IllegalArgumentException When the configured seed range exceeds Java long bounds.
      */
     private static ScorerConfig buildScorerConfig(
         MarathonMatchConfigResponse config,
         TesterResponse tester,
         String reviewTypeId,
-        int phaseStartSeed,
+        long phaseStartSeed,
         int phaseNumberOfTests
     ) {
+        int resolvedNumberOfTests = resolvePositiveInt(phaseNumberOfTests, 1);
+        if (phaseStartSeed < 0L) {
+            throw new IllegalArgumentException("PHASE_START_SEED must be non-negative.");
+        }
+        if (phaseStartSeed > Long.MAX_VALUE - resolvedNumberOfTests + 1L) {
+            throw new IllegalArgumentException(
+                "PHASE_START_SEED plus PHASE_NUMBER_OF_TESTS exceeds Java long maximum value."
+            );
+        }
+
         ScorerConfig scorerConfig = new ScorerConfig();
         scorerConfig.setName(config.getChallengeIdOrId());
         scorerConfig.setTesterClass(tester.getClassName());
@@ -2305,8 +2349,8 @@ public class EcsRunnerMain {
      * @param submissionPath Extracted submission directory.
      * @param scorerConfig Phase scoring configuration with seeds and timeout values.
      * @return Structured tester execution result for callback creation.
-     * @throws Exception When submission validation, source discovery, compilation, test
-     *                   execution, or artifact writing fails.
+     * @throws Exception When submission validation, source discovery, seed range validation,
+     *                   compilation, test execution, or artifact writing fails.
      */
     private static TesterExecutionResult runGenericMarathonTester(
         String testerClassName,
@@ -2350,6 +2394,14 @@ public class EcsRunnerMain {
         );
         long startSeed = scorerConfig.getStartSeed();
         int numberOfTests = resolvePositiveInt(scorerConfig.getNumberOfTests(), 1);
+        if (startSeed < 0L) {
+            throw new IllegalArgumentException("startSeed must be non-negative.");
+        }
+        if (startSeed > Long.MAX_VALUE - numberOfTests + 1L) {
+            throw new IllegalArgumentException(
+                "Configured seed range exceeds Java long maximum value."
+            );
+        }
         Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
         Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
 
@@ -2385,7 +2437,7 @@ public class EcsRunnerMain {
                 }
 
                 Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
-                seedResult.put("testcase", seed);
+                seedResult.put("testcase", Long.toString(seed));
                 seedResult.put("score", seedScore);
                 seedResult.put("runTimeMs", testResult.getRunTime());
                 seedResult.put("error", seedError);
@@ -2435,7 +2487,7 @@ public class EcsRunnerMain {
             metadata.put("solutionSourceFile", submissionSource.getFileName().toString());
             metadata.put("normalizedSourceFile", compiledSubmission.getSourceFileName());
             metadata.put("sourceLanguage", compiledSubmission.getSourceLanguage());
-            metadata.put("startSeed", startSeed);
+            metadata.put("startSeed", Long.toString(startSeed));
             metadata.put("numberOfTests", numberOfTests);
             metadata.put("timeLimitMs", timeLimitMs);
             metadata.put("compileTimeoutMs", compileTimeoutMs);

@@ -76,21 +76,21 @@ describe('MarathonMatchSubmissionHandler', () => {
           id: 'phase-example',
           configType: 'EXAMPLE',
           phaseId: 'submission-phase',
-          startSeed: 1,
+          startSeed: BigInt(1),
           numberOfTests: 10,
         },
         {
           id: 'phase-provisional',
           configType: 'PROVISIONAL',
           phaseId: 'submission-phase',
-          startSeed: 500,
+          startSeed: BigInt(500),
           numberOfTests: 20,
         },
         {
           id: 'phase-system',
           configType: 'SYSTEM',
           phaseId: 'review-phase',
-          startSeed: 900,
+          startSeed: BigInt(900),
           numberOfTests: 30,
         },
       ],
@@ -137,7 +137,7 @@ describe('MarathonMatchSubmissionHandler', () => {
       },
       {
         configType: 'EXAMPLE',
-        startSeed: 1,
+        startSeed: BigInt(1),
         numberOfTests: 10,
       },
     );
@@ -151,7 +151,7 @@ describe('MarathonMatchSubmissionHandler', () => {
       },
       {
         configType: 'PROVISIONAL',
-        startSeed: 500,
+        startSeed: BigInt(500),
         numberOfTests: 20,
       },
     );

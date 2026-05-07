@@ -44,6 +44,15 @@ type MarathonMatchPhaseConfigInput = {
   configType: PhaseConfigType;
 };
 
+type NormalizedPhaseConfigInput = {
+  phase:
+    | (Omit<PhaseConfigDto, 'startSeed'> & {
+        startSeed: bigint;
+      })
+    | undefined;
+  configType: PhaseConfigType;
+};
+
 interface ChallengePhaseResponse {
   id?: string;
   phaseId?: string;
@@ -75,6 +84,7 @@ interface ChallengeResponse {
  */
 @Injectable()
 export class MarathonMatchConfigService {
+  private static readonly maxStartSeed = BigInt('9223372036854775807');
   private readonly logger = LoggerService.forRoot('MarathonMatchConfigService');
   private readonly challengeApiBaseUrl =
     process.env.CHALLENGE_API_URL?.replace(/\/+$/, '') ||
@@ -142,7 +152,7 @@ export class MarathonMatchConfigService {
    * @returns Created marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the referenced challenge or tester does not exist.
    * @throws ConflictException When a config already exists for the challenge.
-   * @throws BadRequestException When `challengeId` is invalid, `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is not a safe integer, or a phase identifier does not exist on the challenge.
+   * @throws BadRequestException When `challengeId` is invalid, `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createConfig(
@@ -170,10 +180,13 @@ export class MarathonMatchConfigService {
         { phase: body.provisional, configType: PhaseConfigType.PROVISIONAL },
         { phase: body.system, configType: PhaseConfigType.SYSTEM },
       ];
-      this.validateSafeStartSeeds(challengeId, phaseConfigs);
-      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+      const phaseConfigsWithBigIntSeeds = this.normalizeStartSeeds(
         challengeId,
         phaseConfigs,
+      );
+      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+        challengeId,
+        phaseConfigsWithBigIntSeeds,
       );
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
@@ -259,7 +272,7 @@ export class MarathonMatchConfigService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Updated marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the config or updated tester does not exist.
-   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is not a safe integer, or a phase identifier does not exist on the challenge.
+   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async updateConfig(
@@ -304,10 +317,13 @@ export class MarathonMatchConfigService {
         { phase: provisional, configType: PhaseConfigType.PROVISIONAL },
         { phase: system, configType: PhaseConfigType.SYSTEM },
       ];
-      this.validateSafeStartSeeds(challengeId, phaseConfigs);
-      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+      const phaseConfigsWithBigIntSeeds = this.normalizeStartSeeds(
         challengeId,
         phaseConfigs,
+      );
+      const normalizedPhaseConfigs = await this.normalizeConfiguredPhaseIds(
+        challengeId,
+        phaseConfigsWithBigIntSeeds,
       );
 
       await this.prisma.$transaction(async (prisma) => {
@@ -1147,8 +1163,8 @@ export class MarathonMatchConfigService {
    */
   private async normalizeConfiguredPhaseIds(
     challengeId: string,
-    phaseConfigs: MarathonMatchPhaseConfigInput[],
-  ): Promise<MarathonMatchPhaseConfigInput[]> {
+    phaseConfigs: NormalizedPhaseConfigInput[],
+  ): Promise<NormalizedPhaseConfigInput[]> {
     const configuredPhaseIds = phaseConfigs
       .map(({ phase }) => phase?.phaseId?.trim() ?? '')
       .filter((phaseId): phaseId is string => phaseId.length > 0);
@@ -1622,7 +1638,7 @@ export class MarathonMatchConfigService {
     return {
       id: phaseConfigData.id,
       configType: phaseConfigData.configType,
-      startSeed: phaseConfigData.startSeed,
+      startSeed: phaseConfigData.startSeed.toString(),
       numberOfTests: phaseConfigData.numberOfTests,
       phaseId: phaseConfigData.phaseId,
       createdAt: phaseConfigData.createdAt,
@@ -1631,28 +1647,87 @@ export class MarathonMatchConfigService {
   }
 
   /**
-   * Enforces runtime numeric safety for phase start seeds before persistence.
-   * DTO validation covers DB range constraints (e.g. @Max(2147483647)),
-   * while this check guarantees `Number.isSafeInteger` in service flows.
+   * Normalizes phase start seeds to BigInt before persistence and validates the complete seed range.
    * @param challengeId Challenge ID for context in validation errors.
-   * @param phaseConfigs Candidate phase configs to validate.
-   * @throws BadRequestException When any phase `startSeed` is not a safe integer.
+   * @param phaseConfigs Candidate phase configs to normalize.
+   * @returns Phase configs with `startSeed` converted to BigInt.
+   * @throws BadRequestException When any phase seed range cannot fit in PostgreSQL BIGINT/Java long.
    */
-  private validateSafeStartSeeds(
+  private normalizeStartSeeds(
     challengeId: string,
     phaseConfigs: MarathonMatchPhaseConfigInput[],
-  ): void {
-    for (const { phase, configType } of phaseConfigs) {
+  ): NormalizedPhaseConfigInput[] {
+    return phaseConfigs.map(({ phase, configType }) => {
       if (!phase) {
-        continue;
+        return { phase, configType };
       }
 
-      if (!Number.isSafeInteger(phase.startSeed)) {
+      const startSeed = this.parseStartSeed(phase.startSeed);
+      if (startSeed === null) {
         throw new BadRequestException(
-          `Invalid startSeed for ${configType} phase in challenge ${challengeId}. startSeed must be a safe integer.`,
+          `Invalid startSeed for ${configType} phase in challenge ${challengeId}. startSeed must be a non-negative 64-bit integer string between 0 and 9223372036854775807.`,
         );
       }
+
+      if (
+        !Number.isSafeInteger(phase.numberOfTests) ||
+        phase.numberOfTests < 1
+      ) {
+        throw new BadRequestException(
+          `Invalid numberOfTests for ${configType} phase in challenge ${challengeId}. numberOfTests must be a positive safe integer.`,
+        );
+      }
+
+      const endSeed = startSeed + BigInt(phase.numberOfTests) - BigInt(1);
+      if (endSeed > MarathonMatchConfigService.maxStartSeed) {
+        throw new BadRequestException(
+          `Invalid seed range for ${configType} phase in challenge ${challengeId}. startSeed + numberOfTests - 1 must be at most 9223372036854775807.`,
+        );
+      }
+
+      return {
+        configType,
+        phase: {
+          ...phase,
+          startSeed,
+        },
+      };
+    });
+  }
+
+  /**
+   * Parses a request start seed into a BigInt that can be stored and passed to Java as a long.
+   * @param value Candidate seed from DTO validation or a programmatic service call.
+   * @returns Parsed BigInt seed, or null when the value is invalid.
+   */
+  private parseStartSeed(value: unknown): bigint | null {
+    let parsed: bigint;
+
+    if (typeof value === 'bigint') {
+      parsed = value;
+    } else if (typeof value === 'number') {
+      if (!Number.isSafeInteger(value)) {
+        return null;
+      }
+      parsed = BigInt(value);
+    } else if (typeof value === 'string') {
+      const normalized = value.trim();
+      if (!/^(0|[1-9]\d*)$/.test(normalized)) {
+        return null;
+      }
+      parsed = BigInt(normalized);
+    } else {
+      return null;
     }
+
+    if (
+      parsed < BigInt(0) ||
+      parsed > MarathonMatchConfigService.maxStartSeed
+    ) {
+      return null;
+    }
+
+    return parsed;
   }
 
   /**

@@ -18,7 +18,7 @@ interface MarathonMatchTaskConfig {
 
 export interface MarathonMatchScoringPhase {
   configType: string;
-  startSeed: number;
+  startSeed: bigint | string;
   numberOfTests: number;
 }
 
