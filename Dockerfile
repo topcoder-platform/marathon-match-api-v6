@@ -14,9 +14,9 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 COPY . .
-RUN npm install pnpm -g
-RUN pnpm install
+RUN npm install pnpm@9.15.9 -g
+RUN pnpm install --frozen-lockfile
 RUN pnpm run lint
 RUN pnpm run build
 RUN chmod +x appStartUp.sh
-CMD ./appStartUp.sh
+CMD ["./appStartUp.sh"]
