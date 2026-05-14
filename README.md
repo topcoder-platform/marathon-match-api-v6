@@ -176,7 +176,7 @@ Auth model in code:
 
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
-| `GET` | `/v6/marathon-match/health` | None | DB health check |
+| `GET` | `/v6/marathon-match/health` | None | DB and Kafka consumer health check |
 | `GET` | `/v6/marathon-match/api-docs` | None | Swagger docs route |
 
 ### Tester endpoints

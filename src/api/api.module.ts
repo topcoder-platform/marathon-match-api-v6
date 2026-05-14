@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { GlobalProvidersModule } from 'src/shared/modules/global/globalProviders.module';
+import { KafkaModule } from 'src/shared/modules/kafka/kafka.module';
 import { PgBossModule } from 'src/shared/modules/pg-boss/pg-boss.module';
 import { ChallengeCopilotResourceGuard } from 'src/shared/guards/challenge-copilot-resource.guard';
 import { HealthCheckController } from './health-check/healthCheck.controller';
@@ -16,7 +17,12 @@ import { TesterController } from './tester/tester.controller';
 import { TesterService } from './tester/tester.service';
 
 @Module({
-  imports: [HttpModule, GlobalProvidersModule, PgBossModule],
+  imports: [
+    HttpModule,
+    GlobalProvidersModule,
+    PgBossModule,
+    KafkaModule.forRoot(),
+  ],
   controllers: [
     HealthCheckController,
     TesterController,
