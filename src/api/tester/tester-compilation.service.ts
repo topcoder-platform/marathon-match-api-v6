@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CompilationStatus, Prisma, tester } from '@prisma/client';
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
+import { constants as fsConstants, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -33,7 +33,11 @@ export class TesterCompilationService {
   private readonly mavenBinary = process.env.MVN_BINARY?.trim() || 'mvn';
   private readonly boilerplateDir =
     process.env.BOILERPLATE_DIR?.trim() ||
-    path.resolve(process.cwd(), 'src/java/boilerplate');
+    path.resolve(process.cwd(), 'ecs-runner/boilerplate');
+  private readonly pgBossDisabled = process.env.DISABLE_PG_BOSS === 'true';
+  private readonly compileJavaMaxHeapMb = this.getCompileJavaMaxHeapMb();
+  private readonly compileMavenOpts = this.getCompileMavenOpts();
+  private inlineCompilationChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,10 +45,12 @@ export class TesterCompilationService {
   ) {}
 
   /**
-   * Marks a tester for compilation and pushes an async compile job to pg-boss.
+   * Marks a tester for compilation and enqueues an async compile job.
+   * When `DISABLE_PG_BOSS=true`, compilation runs inline on this API instance
+   * using a serialized in-memory chain to avoid spawning overlapping Maven jobs.
    * @param testerId ID of the tester whose source should be compiled.
    * @param sourceCode Source code revision that should be compiled.
-   * @returns Promise that resolves when DB status is updated and the job is sent.
+   * @returns Promise that resolves when DB status is updated and compilation is queued or started.
    * @throws Error If queueing fails; the tester is marked FAILED for the same source revision.
    */
   async enqueueCompilation(
@@ -72,6 +78,18 @@ export class TesterCompilationService {
     }
 
     try {
+      if (this.pgBossDisabled) {
+        this.logger.warn(
+          `DISABLE_PG_BOSS=true, running compilation inline for tester ${testerId}.`,
+        );
+        this.inlineCompilationChain = this.inlineCompilationChain
+          .catch(() => undefined)
+          .then(async () => {
+            await this.runCompilation(payload);
+          });
+        return;
+      }
+
       await this.pgBoss.send('compile-tester', payload);
     } catch (error) {
       const errorMessage =
@@ -126,14 +144,15 @@ export class TesterCompilationService {
         return;
       }
 
-      tempDir = path.join(os.tmpdir(), `${testerId}-${Date.now()}`);
+      const tempRootDir = await this.resolveWritableTempRoot();
+      tempDir = path.join(tempRootDir, `${testerId}-${Date.now()}`);
       await fs.mkdir(tempDir, { recursive: true });
       await fs.cp(this.boilerplateDir, tempDir, { recursive: true });
 
       await this.writeTesterSource(tempDir, testerRecord);
 
       const pomPath = path.join(tempDir, 'pom.xml');
-      const compileResult = await this.executeMavenBuild(pomPath);
+      const compileResult = await this.executeMavenBuild(pomPath, tempDir);
 
       if (!compileResult.timedOut && compileResult.exitCode === 0) {
         const jarBytes = await this.readCompiledJar(tempDir);
@@ -211,12 +230,160 @@ export class TesterCompilationService {
   }
 
   /**
+   * Parses JVM heap cap (MB) used for Maven compilation child processes.
+   * @returns Heap cap in MB with a default of 384MB.
+   */
+  private getCompileJavaMaxHeapMb(): number {
+    const parsed = Number.parseInt(
+      process.env.COMPILE_JAVA_MAX_HEAP_MB ?? '',
+      10,
+    );
+
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+
+    return 384;
+  }
+
+  /**
+   * Builds `MAVEN_OPTS` for compilation workers with a default heap cap.
+   * Priority: `COMPILE_MAVEN_OPTS` > `MAVEN_OPTS` > generated `-Xmx`.
+   * If no `-Xmx` is present, an `-Xmx` cap is appended automatically.
+   * @returns Effective MAVEN_OPTS string for `mvn` child process.
+   */
+  private getCompileMavenOpts(): string {
+    const compileSpecificOptions = process.env.COMPILE_MAVEN_OPTS?.trim() ?? '';
+    const inheritedOptions = process.env.MAVEN_OPTS?.trim() ?? '';
+    const baseOptions = compileSpecificOptions || inheritedOptions;
+
+    if (/-Xmx\S+/i.test(baseOptions)) {
+      return baseOptions;
+    }
+
+    const heapCapOption = `-Xmx${this.compileJavaMaxHeapMb}m`;
+    return baseOptions ? `${baseOptions} ${heapCapOption}` : heapCapOption;
+  }
+
+  /**
    * Calculates the immutable hash marker used to associate jobs with source revisions.
    * @param sourceCode Tester source string.
    * @returns SHA-256 hash hex digest for the provided source.
    */
   private hashSourceCode(sourceCode: string): string {
     return createHash('sha256').update(sourceCode).digest('hex');
+  }
+
+  /**
+   * Finds a writable root directory for compilation temp workspaces.
+   *
+   * Candidate order:
+   * 1) `COMPILATION_TMP_DIR`
+   * 2) `TMPDIR`
+   * 3) `os.tmpdir()`
+   * 4) `<process.cwd()>/tmp`
+   *
+   * @returns Absolute writable directory path.
+   * @throws Error When none of the candidates can be created or written.
+   */
+  private async resolveWritableTempRoot(): Promise<string> {
+    const configuredTmpDir = process.env.COMPILATION_TMP_DIR?.trim();
+    const envTmpDir = process.env.TMPDIR?.trim();
+    const fallbackTmpDir = path.resolve(process.cwd(), 'tmp');
+
+    const candidates = Array.from(
+      new Set(
+        [configuredTmpDir, envTmpDir, os.tmpdir(), fallbackTmpDir].filter(
+          (value): value is string => Boolean(value && value.length > 0),
+        ),
+      ),
+    );
+
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        await this.ensureWritableDirectory(candidate);
+        return candidate;
+      } catch (error) {
+        lastError = error;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Temp root candidate is not writable: ${candidate}. ${errorMessage}`,
+        );
+      }
+    }
+
+    const detail =
+      lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(
+      `No writable temporary directory is available for tester compilation. Last error: ${detail}`,
+    );
+  }
+
+  /**
+   * Verifies a candidate temp root exists and is writable by creating a probe file.
+   * @param candidate Absolute candidate path.
+   * @returns Promise that resolves when write access is confirmed.
+   * @throws Error When directory creation or probe write fails.
+   */
+  private async ensureWritableDirectory(candidate: string): Promise<void> {
+    await fs.mkdir(candidate, { recursive: true });
+    await fs.access(candidate, fsConstants.W_OK);
+
+    const probeFile = path.join(
+      candidate,
+      `.mm-compile-probe-${process.pid}-${Date.now()}`,
+    );
+    const execProbeScript = `${probeFile}.sh`;
+
+    try {
+      await fs.writeFile(probeFile, 'ok', 'utf8');
+      await fs.writeFile(execProbeScript, '#!/bin/sh\nexit 0\n', {
+        mode: 0o755,
+      });
+      await this.verifyDirectoryExecSupport(execProbeScript);
+    } finally {
+      await fs.rm(probeFile, { force: true }).catch(() => undefined);
+      await fs.rm(execProbeScript, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Executes a small probe script to verify the candidate filesystem is not mounted `noexec`.
+   * @param scriptPath Absolute path to the probe script.
+   * @returns Promise that resolves when script execution succeeds.
+   * @throws Error When the script cannot execute on the candidate filesystem.
+   */
+  private async verifyDirectoryExecSupport(scriptPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(scriptPath, [], { env: process.env });
+      let stderr = '';
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('error', (error: Error) => {
+        reject(error);
+      });
+
+      child.on('close', (code: number | null) => {
+        if ((code ?? -1) === 0) {
+          resolve();
+          return;
+        }
+
+        const detail = stderr.trim();
+        reject(
+          new Error(
+            detail
+              ? `execution probe failed with code ${code}: ${detail}`
+              : `execution probe failed with code ${code}`,
+          ),
+        );
+      });
+    });
   }
 
   /**
@@ -300,17 +467,37 @@ export class TesterCompilationService {
   /**
    * Runs Maven package for the prepared boilerplate project and captures stderr.
    * @param pomPath Absolute path to the temporary `pom.xml` file.
+   * @param compileTempDir Writable temp directory used for Maven/JVM temp files.
    * @returns Compile result including exit code, stderr and timeout state.
    */
   private async executeMavenBuild(
     pomPath: string,
+    compileTempDir: string,
   ): Promise<MavenCompileResult> {
     return await new Promise<MavenCompileResult>((resolve) => {
+      const mavenOptsWithTmpDir = [
+        this.compileMavenOpts,
+        `-Djava.io.tmpdir=${compileTempDir}`,
+        `-Djansi.tmpdir=${compileTempDir}`,
+        '-Djansi.mode=off',
+      ]
+        .join(' ')
+        .trim();
+      const compileEnv = {
+        ...process.env,
+        TMPDIR: compileTempDir,
+        TMP: compileTempDir,
+        TEMP: compileTempDir,
+        JANSI_MODE: 'off',
+        JANSI_TMPDIR: compileTempDir,
+        MAVEN_OPTS: mavenOptsWithTmpDir,
+      };
+
       const child = spawn(
         this.mavenBinary,
         ['clean', 'package', '-f', pomPath, '-q'],
         {
-          env: process.env,
+          env: compileEnv,
         },
       );
 

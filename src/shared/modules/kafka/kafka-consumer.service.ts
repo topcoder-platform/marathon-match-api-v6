@@ -51,6 +51,9 @@ export interface KafkaModuleOptions {
   sasl?: KafkaSaslOptions;
   connectionTimeout?: number;
   requestTimeout?: number;
+  minBytes?: number;
+  maxBytes?: number;
+  maxWaitTime?: number;
   retry?: {
     retries: number;
     initialRetryTime: number;
@@ -99,14 +102,26 @@ export class KafkaConsumerService
       );
       return;
     }
-    this.connect();
+    try {
+      this.connect();
+    } catch (error) {
+      this.handleKafkaFailure(
+        'Kafka initialization failed during module startup',
+        error,
+      );
+    }
   }
 
-  async onApplicationBootstrap() {
+  onApplicationBootstrap() {
     if (this.isDisabled) {
       return;
     }
-    await this.startConsumer();
+    void this.startConsumer().catch((error) => {
+      this.handleKafkaFailure(
+        'Kafka consumer startup failed during application bootstrap',
+        error,
+      );
+    });
   }
 
   async onModuleDestroy() {
@@ -136,6 +151,21 @@ export class KafkaConsumerService
 
   connect(): void {
     try {
+      this.logger.log({
+        message: 'Initializing Kafka client',
+        brokers: this.options.brokers,
+        clientId: this.options.clientId,
+        groupId: this.options.groupId,
+        sslEnabled: this.options.ssl ?? false,
+        saslEnabled: Boolean(this.options.sasl),
+        saslMechanism: this.options.sasl?.mechanism,
+        connectionTimeoutMs: this.options.connectionTimeout,
+        requestTimeoutMs: this.options.requestTimeout,
+        minBytes: this.options.minBytes,
+        maxBytes: this.options.maxBytes,
+        maxWaitTime: this.options.maxWaitTime,
+      });
+
       this.consumer = new Consumer(this.createConsumerOptions());
       this.producer = new Producer(this.createProducerOptions());
 
@@ -216,31 +246,24 @@ export class KafkaConsumerService
       return;
     }
 
-    try {
-      await this.producer.connectToBrokers(null);
+    await this.producer.connectToBrokers(null);
 
-      this.stream = await this.consumer.consume({
-        topics,
-        autocommit: false,
-      });
+    this.stream = await this.consumer.consume({
+      topics,
+      autocommit: false,
+    });
 
-      this.stream.on('error', (error) => {
-        this.handleKafkaFailure('Kafka consumer stream error', error);
-      });
+    this.stream.on('error', (error) => {
+      this.handleKafkaFailure('Kafka consumer stream error', error);
+    });
 
-      this.consumerLoop = this.consumeStream(this.stream);
+    this.consumerLoop = this.consumeStream(this.stream);
 
-      this.kafkaState = KafkaConnectionState.ready;
-      this.kafkaFailureReason = undefined;
-      this.kafkaReconnectAttempts = 0;
+    this.kafkaState = KafkaConnectionState.ready;
+    this.kafkaFailureReason = undefined;
+    this.kafkaReconnectAttempts = 0;
 
-      this.logger.log('Kafka consumer started successfully');
-    } catch (error) {
-      const trace =
-        error instanceof Error ? (error.stack ?? error.message) : String(error);
-      this.logger.error('Failed to start Kafka consumer', trace);
-      throw error;
-    }
+    this.logger.log('Kafka consumer started successfully');
   }
 
   private async consumeStream(
@@ -636,8 +659,32 @@ export class KafkaConsumerService
     }
 
     if (this.options.requestTimeout !== undefined) {
-      consumerOptions.timeout = this.options.requestTimeout;
-      consumerOptions.maxWaitTime = this.options.requestTimeout;
+      const requestTimeoutMs = this.options.requestTimeout;
+      consumerOptions.timeout = requestTimeoutMs;
+    }
+
+    if (this.options.minBytes !== undefined) {
+      consumerOptions.minBytes = this.options.minBytes;
+    }
+
+    if (this.options.maxBytes !== undefined) {
+      consumerOptions.maxBytes = this.options.maxBytes;
+    }
+
+    if (this.options.maxWaitTime !== undefined) {
+      consumerOptions.maxWaitTime = this.options.maxWaitTime;
+    } else if (this.options.requestTimeout !== undefined) {
+      const requestTimeoutMs = this.options.requestTimeout;
+
+      // Keep fetch max-wait below request timeout to avoid edge timing races.
+      if (requestTimeoutMs <= 1) {
+        consumerOptions.maxWaitTime = 0;
+      } else {
+        consumerOptions.maxWaitTime = Math.max(
+          Math.min(requestTimeoutMs - 1000, 5000),
+          1,
+        );
+      }
     }
 
     if (this.options.retry?.retries !== undefined) {

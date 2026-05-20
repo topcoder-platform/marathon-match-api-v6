@@ -1,94 +1,119 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { CompilationStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
 
 /**
  * Request payload for creating a tester record.
- * Used by the tester controller for POST /testers requests.
+ * Used by the tester controller for POST /testers requests that create the
+ * first version of a tester family.
  */
 export class CreateTesterDto {
   @ApiProperty({
-    description: 'Name of the tester',
+    description:
+      'Name of the tester family. Must contain at least one non-whitespace character and must not already exist; later versions must use PUT /testers/:id.',
     example: 'Marathon Match Java Tester',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'name must contain at least one non-whitespace character',
+  })
   name: string;
 
-  @ApiProperty({ description: 'Version of the tester', example: '1.0.0' })
+  @ApiProperty({
+    description:
+      'Version of the tester. Must contain at least one non-whitespace character.',
+    example: '1.0.0',
+  })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'version must contain at least one non-whitespace character',
+  })
   version: string;
 
   @ApiProperty({
-    description: 'Source code used to build the tester',
+    description:
+      'Source code used to build the tester. Must contain at least one non-whitespace character.',
     example: 'public class Tester { }',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'sourceCode must contain at least one non-whitespace character',
+  })
   sourceCode: string;
 
   @ApiProperty({
-    description: 'Main class name for the tester',
+    description:
+      'Main class name for the tester. Must contain at least one non-whitespace character.',
     example: 'com.topcoder.mm.Tester',
   })
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, {
+    message: 'className must contain at least one non-whitespace character',
+  })
   className: string;
 }
 
 /**
- * Request payload for updating a tester.
- * Used by PUT /testers/:id and supports partial updates.
+ * Request payload for creating a new tester version.
+ * Used by PUT /testers/:id and requires a version greater than the current
+ * maximum version for that tester family.
  */
-export class UpdateTesterDto {
+export class CreateTesterVersionDto {
   @ApiProperty({
-    description: 'Name of the tester',
-    example: 'Marathon Match Java Tester',
-    required: false,
-  })
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  name?: string;
-
-  @ApiProperty({
-    description: 'Version of the tester',
+    description:
+      'Version of the new tester build. Must contain at least one non-whitespace character and be higher than the current max version for that tester name.',
     example: '1.0.1',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  version?: string;
+  @Matches(/\S/, {
+    message: 'version must contain at least one non-whitespace character',
+  })
+  version: string;
 
   @ApiProperty({
-    description: 'Source code used to build the tester',
+    description:
+      'Source code used to build the new tester version. Must contain at least one non-whitespace character.',
     example: 'public class Tester { }',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  sourceCode?: string;
+  @Matches(/\S/, {
+    message: 'sourceCode must contain at least one non-whitespace character',
+  })
+  sourceCode: string;
 
   @ApiProperty({
-    description: 'Main class name for the tester',
+    description:
+      'Main class name for the new tester version. Must contain at least one non-whitespace character.',
     example: 'com.topcoder.mm.Tester',
-    required: false,
   })
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  className?: string;
+  @Matches(/\S/, {
+    message: 'className must contain at least one non-whitespace character',
+  })
+  className: string;
 }
 
 /**
- * Response representation of a tester record.
- * Returned by create, update, get and list tester endpoints.
+ * Lightweight tester representation used by list responses.
+ * Returned by GET /testers without source or binary payload fields.
  */
-export class TesterResponseDto {
+export class TesterSummaryResponseDto {
   @ApiProperty({ description: 'Unique tester ID', example: 'V1StGXR8_Z5jdH' })
   id: string;
 
@@ -97,12 +122,6 @@ export class TesterResponseDto {
 
   @ApiProperty({ description: 'Version of the tester', example: '1.0.0' })
   version: string;
-
-  @ApiProperty({
-    description: 'Source code used to compile the tester',
-    example: 'public class Tester { }',
-  })
-  sourceCode: string;
 
   @ApiProperty({
     description: 'Main class name for the tester',
@@ -123,13 +142,6 @@ export class TesterResponseDto {
     example: null,
   })
   compilationError: string | null;
-
-  @ApiProperty({
-    description: 'Compiled jar content as a base64-encoded string',
-    nullable: true,
-    example: null,
-  })
-  jarFile: string | null;
 
   @ApiProperty({
     description: 'Creation timestamp',
@@ -156,6 +168,62 @@ export class TesterResponseDto {
     example: '40166514',
   })
   updatedBy: string | null;
+}
+
+/**
+ * Full tester representation used by create, version-create, and single-tester reads.
+ * Returned by POST /testers, PUT /testers/:id, and GET /testers/:id.
+ */
+export class TesterResponseDto extends TesterSummaryResponseDto {
+  @ApiProperty({
+    description: 'Source code used to compile the tester',
+    example: 'public class Tester { }',
+  })
+  sourceCode: string;
+
+  @ApiProperty({
+    description:
+      'Compiled jar content as a base64-encoded string. Returned only when explicitly requested.',
+    nullable: true,
+    example: null,
+  })
+  jarFile: string | null;
+}
+
+/**
+ * Query parameters that control tester detail responses.
+ * Used by GET /testers/:id and PUT /testers/:id.
+ */
+export class TesterResponseQueryDto {
+  @ApiProperty({
+    description:
+      'Include the compiled jar payload in the response. Defaults to false to avoid large response bodies.',
+    required: false,
+    type: Boolean,
+    example: false,
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) => {
+    const rawValue: unknown = value;
+    if (rawValue === undefined) {
+      return undefined;
+    }
+    if (typeof rawValue === 'boolean') {
+      return rawValue;
+    }
+    if (typeof rawValue === 'string') {
+      const normalizedValue = rawValue.trim().toLowerCase();
+      if (normalizedValue === 'true') {
+        return true;
+      }
+      if (normalizedValue === 'false') {
+        return false;
+      }
+    }
+    return rawValue;
+  })
+  @IsBoolean()
+  includeJarFile: boolean = false;
 }
 
 /**
@@ -186,9 +254,9 @@ export class TesterPaginatedResponseDto {
 
   @ApiProperty({
     description: 'List of testers matching the query',
-    type: [TesterResponseDto],
+    type: [TesterSummaryResponseDto],
   })
-  testers: TesterResponseDto[];
+  testers: TesterSummaryResponseDto[];
 }
 
 /**

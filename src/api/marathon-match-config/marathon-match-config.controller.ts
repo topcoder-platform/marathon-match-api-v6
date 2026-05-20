@@ -10,6 +10,7 @@ import {
   Put,
   Query,
   Res,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
@@ -26,6 +27,8 @@ import {
   CreateMarathonMatchConfigDto,
   MarathonMatchConfigPaginatedResponseDto,
   MarathonMatchConfigResponseDto,
+  MarathonMatchDefaultsResponseDto,
+  RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
@@ -34,12 +37,14 @@ import { Scopes } from 'src/shared/decorators/scopes.decorator';
 import { User } from 'src/shared/decorators/user.decorator';
 import { Scope } from 'src/shared/enums/scopes.enum';
 import { UserRole } from 'src/shared/enums/userRole.enum';
+import { ChallengeCopilotResourceGuard } from 'src/shared/guards/challenge-copilot-resource.guard';
 import { Roles } from 'src/shared/guards/tokenRoles.guard';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { MarathonMatchConfigService } from './marathon-match-config.service';
 
 /**
- * Exposes secured marathon match configuration CRUD endpoints.
+ * Exposes secured marathon match configuration endpoints for admin and copilot
+ * setup workflows.
  */
 @ApiTags('Marathon Match Config')
 @ApiBearerAuth()
@@ -57,11 +62,11 @@ export class MarathonMatchConfigController {
    * @returns The created marathon match config.
    */
   @Post('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.CreateMarathonMatch)
   @ApiOperation({
     summary: 'Create a marathon match config',
-    description: 'Roles: Admin | Scopes: create:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: create:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',
@@ -80,7 +85,14 @@ export class MarathonMatchConfigController {
   })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
-  @ApiResponse({ status: 404, description: 'Tester not found.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Challenge or tester not found.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A marathon match config already exists for the challenge.',
+  })
   async createConfig(
     @Param('challengeId') challengeId: string,
     @Body() body: CreateMarathonMatchConfigDto,
@@ -89,6 +101,49 @@ export class MarathonMatchConfigController {
     return await this.marathonMatchConfigService.createConfig(
       challengeId,
       body,
+      user,
+    );
+  }
+
+  /**
+   * Reruns the latest submissions for a marathon match configuration.
+   * @param challengeId Challenge ID.
+   * @param user Authenticated user for audit context.
+   * @returns Accepted rerun dispatch summary.
+   */
+  @Post('/:challengeId/rerun')
+  @Roles(UserRole.Admin, UserRole.Copilot, UserRole.User)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @ApiOperation({
+    summary: 'Rerun latest submissions for a Marathon Match challenge',
+    description:
+      'Roles: Admin or challenge Copilot resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the marathon match config rerun request',
+    example: '30000123',
+  })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiResponse({
+    status: 202,
+    description: 'Latest submissions queued for asynchronous rerun dispatch.',
+    type: RerunResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or PROVISIONAL phase config is missing.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
+  async rerunLatestSubmissions(
+    @Param('challengeId') challengeId: string,
+    @User() user: JwtUser,
+  ): Promise<RerunResponseDto> {
+    return await this.marathonMatchConfigService.rerunLatestSubmissions(
+      challengeId,
       user,
     );
   }
@@ -145,8 +200,8 @@ export class MarathonMatchConfigController {
   /**
    * Streams the compiled tester JAR for a challenge configuration.
    * @param challengeId Challenge ID.
-   * @param res HTTP response used for download headers.
-   * @returns Raw tester JAR bytes.
+   * @param res HTTP response used for download headers and binary payload.
+   * @returns Promise that resolves after writing binary response.
    */
   @Get('/:challengeId/tester-jar')
   @Roles(UserRole.Admin)
@@ -172,12 +227,34 @@ export class MarathonMatchConfigController {
   })
   async getTesterJar(
     @Param('challengeId') challengeId: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<Buffer> {
+    @Res() res: Response,
+  ): Promise<void> {
     const jar = await this.marathonMatchConfigService.getTesterJar(challengeId);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="tester.jar"');
-    return jar;
+    res.send(jar);
+  }
+
+  /**
+   * Retrieves default marathon match configuration values used to pre-populate the UI.
+   * @returns Default review scorecard ID, test timeout, compile timeout, and task definition values.
+   */
+  @Get('/defaults')
+  @Roles(UserRole.Admin, UserRole.Copilot)
+  @Scopes(Scope.ReadMarathonMatch)
+  @ApiOperation({
+    summary: 'Get marathon match config defaults',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Marathon match config defaults retrieved successfully.',
+    type: MarathonMatchDefaultsResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 500, description: 'Internal Server Error.' })
+  getDefaults(): MarathonMatchDefaultsResponseDto {
+    return this.marathonMatchConfigService.getDefaults();
   }
 
   /**
@@ -187,11 +264,11 @@ export class MarathonMatchConfigController {
    * @returns Marathon match config details.
    */
   @Get('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatch)
   @ApiOperation({
     summary: 'Get a marathon match config',
-    description: 'Roles: Admin | Scopes: read:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',
@@ -220,11 +297,11 @@ export class MarathonMatchConfigController {
    * @returns Updated marathon match configuration.
    */
   @Put('/:challengeId')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.UpdateMarathonMatch)
   @ApiOperation({
     summary: 'Update a marathon match config',
-    description: 'Roles: Admin | Scopes: update:marathon-match',
+    description: 'Roles: Admin, Copilot | Scopes: update:marathon-match',
   })
   @ApiParam({
     name: 'challengeId',

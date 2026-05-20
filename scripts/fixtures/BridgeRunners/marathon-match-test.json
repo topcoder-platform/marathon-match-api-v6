@@ -1,0 +1,78 @@
+{
+  "challenge": {
+    "name": "BridgeRunners Full Test Challenge",
+    "typeId": "929bc408-9cf2-4b3e-ba71-adfbf693046c",
+    "trackId": "c0f5d461-8219-4c14-878a-c3a3f356466d",
+    "timelineTemplateId": "6969125a-a12f-4b89-8de6-e66b0056f36b",
+    "projectId": "100575",
+    "phaseDurations": {
+      "registration": 360,
+      "submission": 360
+    },
+    "phaseIds": {
+      "registration": "a93544bc-c165-4af4-b55e-18f3593b457a",
+      "submission": "6950164f-3c5e-4bdc-abc8-22aaf5a1bd49"
+    },
+    "source": {
+      "challengeId": "911c1486-fc09-4c40-8a45-a46ad38fad3e",
+      "apiBase": "https://api.topcoder.com/v6"
+    }
+  },
+  "tester": {
+    "name": "BridgeRunnersTester",
+    "version": "2.0.0",
+    "className": "BridgeRunnersTester"
+  },
+  "config": {
+    "name": "BridgeRunners Full Test Config",
+    "reviewScorecardId": "xD-a3IqyTpzJmj",
+    "taskDefinitionName": "mm-ecs-runner",
+    "taskDefinitionVersion": "1",
+    "relativeScoringEnabled": true,
+    "scoreDirection": "MAXIMIZE",
+    "example": {
+      "startSeed": "1",
+      "numberOfTests": "10"
+    },
+    "provisional": {
+      "startSeed": "753376358",
+      "numberOfTests": "100"
+    },
+    "system": {
+      "startSeed": "165124662",
+      "numberOfTests": "2000"
+    }
+  },
+  "submissions": [
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/001-member-GRKWrh_yEZzo.zip",
+      "source": {
+        "submissionId": "GRKWrh_yEZzoTf",
+        "memberId": "13298470",
+        "memberHandle": "vlad_D",
+        "submittedDate": "2025-09-12T05:28:45.100Z",
+        "createdAt": "2025-09-12T01:28:45.000Z",
+        "legacySubmissionId": "770830",
+        "legacyUploadId": "888090",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/911c1486-fc09-4c40-8a45-a46ad38fad3e-13298470-SUBMISSION_ZIP-1757654884686.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/002-member-3_M3cWOVo5zU.zip",
+      "source": {
+        "submissionId": "3_M3cWOVo5zUAj",
+        "memberId": "13298470",
+        "memberHandle": "vlad_D",
+        "submittedDate": "2025-09-12T05:42:42.740Z",
+        "createdAt": "2025-09-12T01:42:42.000Z",
+        "legacySubmissionId": "770831",
+        "legacyUploadId": "888091",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/911c1486-fc09-4c40-8a45-a46ad38fad3e-13298470-SUBMISSION_ZIP-1757655753318.zip"
+      }
+    }
+  ]
+}

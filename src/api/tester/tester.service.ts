@@ -1,16 +1,19 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { CompilationStatus, Prisma, tester } from '@prisma/client';
+import { CompilationStatus, Prisma } from '@prisma/client';
+import { nanoid } from 'nanoid';
 import {
+  CreateTesterVersionDto,
   CreateTesterDto,
   SearchTesterQueryDto,
   TesterPaginatedResponseDto,
   TesterResponseDto,
-  UpdateTesterDto,
+  TesterSummaryResponseDto,
 } from 'src/dto/tester.dto';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
@@ -21,6 +24,79 @@ import { TesterCompilationService } from './tester-compilation.service';
 export interface UpdateTesterResult {
   tester: TesterResponseDto;
   compilationTriggered: boolean;
+}
+
+const testerListSelect = {
+  id: true,
+  name: true,
+  version: true,
+  className: true,
+  compilationStatus: true,
+  compilationError: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+  updatedBy: true,
+} satisfies Prisma.testerSelect;
+
+const testerResponseSelect = {
+  ...testerListSelect,
+  sourceCode: true,
+} satisfies Prisma.testerSelect;
+
+const testerResponseWithJarSelect = {
+  ...testerResponseSelect,
+  jarFile: true,
+} satisfies Prisma.testerSelect;
+
+type TesterListRecord = Prisma.testerGetPayload<{
+  select: typeof testerListSelect;
+}>;
+
+type TesterResponseRecord = Prisma.testerGetPayload<{
+  select: typeof testerResponseWithJarSelect;
+}>;
+
+type TesterResponseWithoutJarRecord = Prisma.testerGetPayload<{
+  select: typeof testerResponseSelect;
+}>;
+
+const testerVersionSeedSelect = {
+  id: true,
+  name: true,
+  version: true,
+  className: true,
+  sourceCode: true,
+} satisfies Prisma.testerSelect;
+
+/**
+ * Compares dotted or dashed tester version strings using numeric-aware segment
+ * comparison so `1.0.10` sorts after `1.0.2`.
+ * @param left Left-hand version string.
+ * @param right Right-hand version string.
+ * @returns Negative when left < right, positive when left > right, or 0 when equal.
+ */
+function compareVersionStrings(left: string, right: string): number {
+  const leftParts = left.split(/[.-]/);
+  const rightParts = right.split(/[.-]/);
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftPart = leftParts[index] || '0';
+    const rightPart = rightParts[index] || '0';
+    const leftNumber = Number(leftPart);
+    const rightNumber = Number(rightPart);
+
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      if (leftNumber !== rightNumber) {
+        return leftNumber - rightNumber;
+      }
+    } else if (leftPart !== rightPart) {
+      return leftPart.localeCompare(rightPart);
+    }
+  }
+
+  return 0;
 }
 
 /**
@@ -42,6 +118,8 @@ export class TesterService {
    * @param body Input payload from POST /testers.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created tester mapped to `TesterResponseDto` with `PENDING` compile state.
+   * @throws ConflictException When the tester family name already exists and
+   * a new version must be published through PUT /testers/:id instead.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createTester(
@@ -49,9 +127,33 @@ export class TesterService {
     user: JwtUser,
   ): Promise<TesterResponseDto> {
     try {
+      const existingVersions = await this.prisma.tester.findMany({
+        where: {
+          name: body.name,
+        },
+        select: {
+          version: true,
+        },
+      });
+
+      if (existingVersions.length > 0) {
+        const maxExistingVersion = existingVersions.reduce(
+          (currentMaxVersion, testerRecord) =>
+            compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
+              ? testerRecord.version
+              : currentMaxVersion,
+          existingVersions[0].version,
+        );
+
+        throw new ConflictException(
+          `Tester ${body.name} already exists. Use PUT /testers/:id to publish a version higher than ${maxExistingVersion}.`,
+        );
+      }
+
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const created = await this.prisma.tester.create({
         data: {
+          id: nanoid(14),
           ...body,
           compilationStatus: CompilationStatus.PENDING,
           compilationError: null,
@@ -59,6 +161,7 @@ export class TesterService {
           createdBy: actor,
           updatedBy: actor,
         },
+        select: testerResponseSelect,
       });
 
       this.triggerCompilation(created.id, created.sourceCode);
@@ -69,6 +172,9 @@ export class TesterService {
         jarFile: null,
       });
     } catch (error) {
+      if (error instanceof ConflictException) {
+        throw error;
+      }
       const errorResponse = this.prismaErrorService.handleError(
         error,
         `creating tester with name: ${body.name}`,
@@ -83,61 +189,89 @@ export class TesterService {
   }
 
   /**
-   * Updates a tester record by ID.
-   * @param id Tester identifier.
-   * @param body Partial update payload.
+   * Creates a new version record for an existing tester family.
+   * @param id Existing tester identifier used to resolve the tester family name.
+   * @param body New tester-version payload.
    * @param user Authenticated user or machine token payload used for audit fields.
-   * @returns Updated tester mapped to `TesterResponseDto` plus compile trigger metadata.
-   * Recompilation is triggered asynchronously only when `sourceCode` changed.
-   * @throws NotFoundException When the tester does not exist.
+   * @param includeJarFile When true, includes the compiled jar payload.
+   * @returns Created tester-version response DTO plus compile trigger metadata.
+   * @throws NotFoundException When the referenced tester does not exist.
+   * @throws BadRequestException When the requested version is not higher than the current max version.
    * @throws InternalServerErrorException When the database operation fails.
    */
-  async updateTester(
+  async createTesterVersion(
     id: string,
-    body: UpdateTesterDto,
+    body: CreateTesterVersionDto,
     user: JwtUser,
+    includeJarFile: boolean = false,
   ): Promise<UpdateTesterResult> {
     try {
       const existing = await this.prisma.tester.findUnique({
         where: { id },
+        select: testerVersionSeedSelect,
       });
 
       if (!existing) {
         throw new NotFoundException(`Tester with ID ${id} not found.`);
       }
 
-      const sourceCodeChanged =
-        typeof body.sourceCode === 'string' &&
-        body.sourceCode !== existing.sourceCode;
-      const actor = user.isMachine ? 'System' : (user.userId ?? null);
-      const updated = await this.prisma.tester.update({
-        where: { id },
-        data: {
-          ...body,
-          ...(sourceCodeChanged && {
-            compilationStatus: CompilationStatus.PENDING,
-            compilationError: null,
-            jarFile: null,
-          }),
-          updatedBy: actor,
+      const existingVersions = await this.prisma.tester.findMany({
+        where: {
+          name: existing.name,
+        },
+        select: {
+          version: true,
         },
       });
+      const maxExistingVersion = existingVersions.reduce(
+        (currentMaxVersion, testerRecord) =>
+          compareVersionStrings(testerRecord.version, currentMaxVersion) > 0
+            ? testerRecord.version
+            : currentMaxVersion,
+        existing.version,
+      );
 
-      if (sourceCodeChanged) {
-        this.triggerCompilation(updated.id, updated.sourceCode);
+      if (compareVersionStrings(body.version.trim(), maxExistingVersion) <= 0) {
+        throw new BadRequestException(
+          `Version must be greater than the current max version ${maxExistingVersion} for tester ${existing.name}.`,
+        );
       }
 
+      const actor = user.isMachine ? 'System' : (user.userId ?? null);
+      const created = await this.prisma.tester.create({
+        data: {
+          id: nanoid(14),
+          name: existing.name,
+          version: body.version,
+          sourceCode: body.sourceCode,
+          className: body.className,
+          compilationStatus: CompilationStatus.PENDING,
+          compilationError: null,
+          jarFile: null,
+          createdBy: actor,
+          updatedBy: actor,
+        },
+        select: includeJarFile
+          ? testerResponseWithJarSelect
+          : testerResponseSelect,
+      });
+
+      this.triggerCompilation(created.id, created.sourceCode);
+
       return {
-        tester: this.mapTesterResponse(updated),
-        compilationTriggered: sourceCodeChanged,
+        tester: this.mapTesterResponse(created),
+        compilationTriggered: true,
       };
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       const errorResponse = this.prismaErrorService.handleError(
         error,
-        `updating tester with ID: ${id}`,
+        `creating tester version from tester ID: ${id}`,
       );
       this.logger.error(errorResponse.message);
       throw new InternalServerErrorException({
@@ -190,14 +324,21 @@ export class TesterService {
   /**
    * Retrieves a single tester by ID.
    * @param id Tester identifier.
+   * @param includeJarFile When true, includes the compiled jar payload.
    * @returns Tester details mapped to `TesterResponseDto`.
    * @throws NotFoundException When the tester does not exist.
    * @throws InternalServerErrorException When the database operation fails.
    */
-  async getTester(id: string): Promise<TesterResponseDto> {
+  async getTester(
+    id: string,
+    includeJarFile: boolean = false,
+  ): Promise<TesterResponseDto> {
     try {
       const testerData = await this.prisma.tester.findUnique({
         where: { id },
+        select: includeJarFile
+          ? testerResponseWithJarSelect
+          : testerResponseSelect,
       });
 
       if (!testerData) {
@@ -243,18 +384,18 @@ export class TesterService {
         }),
       };
 
-      const testers = await this.prisma.tester.findMany({
-        where,
-        skip,
-        take: perPage,
-        orderBy: {
-          name: 'asc',
-        },
-      });
-
-      const total = await this.prisma.tester.count({
-        where,
-      });
+      const [testers, total] = await Promise.all([
+        this.prisma.tester.findMany({
+          where,
+          skip,
+          take: perPage,
+          orderBy: [{ name: 'asc' }, { createdAt: 'desc' }],
+          select: testerListSelect,
+        }),
+        this.prisma.tester.count({
+          where,
+        }),
+      ]);
 
       return {
         metadata: {
@@ -264,7 +405,7 @@ export class TesterService {
           totalPages: Math.ceil(total / perPage),
         },
         testers: testers.map((testerData) =>
-          this.mapTesterResponse(testerData),
+          this.mapTesterSummaryResponse(testerData),
         ),
       };
     } catch (error) {
@@ -286,15 +427,29 @@ export class TesterService {
    * @param testerData Prisma tester record.
    * @returns Tester response DTO.
    */
-  private mapTesterResponse(testerData: tester): TesterResponseDto {
-    const jarFile = testerData.jarFile
-      ? Buffer.from(testerData.jarFile).toString('base64')
-      : null;
+  private mapTesterResponse(
+    testerData: TesterResponseRecord | TesterResponseWithoutJarRecord,
+  ): TesterResponseDto {
+    const jarFile =
+      'jarFile' in testerData && testerData.jarFile
+        ? Buffer.from(testerData.jarFile).toString('base64')
+        : null;
 
     return {
       ...testerData,
       jarFile,
     };
+  }
+
+  /**
+   * Maps Prisma tester list records to lightweight API response DTOs.
+   * @param testerData Prisma tester list record without source or jar bytes.
+   * @returns Tester summary response DTO.
+   */
+  private mapTesterSummaryResponse(
+    testerData: TesterListRecord,
+  ): TesterSummaryResponseDto {
+    return testerData;
   }
 
   /**

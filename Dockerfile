@@ -2,7 +2,7 @@
 
 FROM node:22.13.1-alpine
 
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash maven openjdk17-jdk
 RUN apk update
 
 ARG RESET_DB_ARG=false
@@ -10,12 +10,13 @@ ENV RESET_DB=$RESET_DB_ARG
 ARG SEED_DATA_ARG=""
 ENV SEED_DATA=$SEED_DATA_ARG
 ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x
+ENV NODE_ENV=production
 
 WORKDIR /app
 COPY . .
-RUN npm install pnpm -g
-RUN pnpm install
+RUN npm install pnpm@9.15.9 -g
+RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm run lint
 RUN pnpm run build
 RUN chmod +x appStartUp.sh
-CMD ./appStartUp.sh
+CMD ["./appStartUp.sh"]

@@ -7,6 +7,7 @@ import { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import { JwtService, JwtUser } from '../modules/global/jwt.service';
 import { LoggerService } from '../modules/global/logger.service';
+import { isHealthCheckRequestUrl } from './healthCheckRequest';
 
 @Injectable()
 export class TokenValidatorMiddleware implements NestMiddleware {
@@ -22,35 +23,42 @@ export class TokenValidatorMiddleware implements NestMiddleware {
     next: (error?: any) => void,
   ) {
     const meta = this.buildRequestMeta(request);
+    const shouldLogRequest = !isHealthCheckRequestUrl(meta.url);
     const authHeader = request.headers.authorization;
     const normalizedAuthHeader = Array.isArray(authHeader)
       ? authHeader[0]
       : authHeader;
 
-    this.logger.log({
-      message: 'Token validator middleware invoked',
-      ...meta,
-      hasAuthHeader: Boolean(normalizedAuthHeader),
-      authHeaderArrayLength: Array.isArray(authHeader)
-        ? authHeader.length
-        : undefined,
-    });
+    if (shouldLogRequest) {
+      this.logger.log({
+        message: 'Token validator middleware invoked',
+        ...meta,
+        hasAuthHeader: Boolean(normalizedAuthHeader),
+        authHeaderArrayLength: Array.isArray(authHeader)
+          ? authHeader.length
+          : undefined,
+      });
+    }
 
     if (!normalizedAuthHeader) {
-      this.logger.log({
-        message: 'No authorization header found, skipping token validation',
-        ...meta,
-      });
+      if (shouldLogRequest) {
+        this.logger.log({
+          message: 'No authorization header found, skipping token validation',
+          ...meta,
+        });
+      }
       return next();
     }
 
     const [type, idToken] = normalizedAuthHeader.split(' ') ?? [];
 
     if (type !== 'Bearer') {
-      this.logger.log({
-        message: 'Authorization header present but not a Bearer token',
-        ...meta,
-      });
+      if (shouldLogRequest) {
+        this.logger.log({
+          message: 'Authorization header present but not a Bearer token',
+          ...meta,
+        });
+      }
       return next();
     }
 
@@ -61,11 +69,13 @@ export class TokenValidatorMiddleware implements NestMiddleware {
     let decoded: any;
     const tokenHash = this.anonymizeToken(idToken);
 
-    this.logger.log({
-      message: 'Validating bearer token',
-      ...meta,
-      tokenHash,
-    });
+    if (shouldLogRequest) {
+      this.logger.log({
+        message: 'Validating bearer token',
+        ...meta,
+        tokenHash,
+      });
+    }
 
     try {
       decoded = await this.jwtService.validateToken(idToken);
@@ -86,15 +96,17 @@ export class TokenValidatorMiddleware implements NestMiddleware {
     request['user'] = decoded;
     request.idTokenVerified = true;
 
-    this.logger.log({
-      message: 'Token successfully validated and attached to request',
-      ...meta,
-      tokenHash,
-      userId: decoded?.userId,
-      isMachine: Boolean(decoded?.isMachine),
-      hasRoles: Array.isArray(decoded?.roles),
-      hasScopes: Array.isArray(decoded?.scopes),
-    });
+    if (shouldLogRequest) {
+      this.logger.log({
+        message: 'Token successfully validated and attached to request',
+        ...meta,
+        tokenHash,
+        userId: decoded?.userId,
+        isMachine: Boolean(decoded?.isMachine),
+        hasRoles: Array.isArray(decoded?.roles),
+        hasScopes: Array.isArray(decoded?.scopes),
+      });
+    }
 
     return next();
   }

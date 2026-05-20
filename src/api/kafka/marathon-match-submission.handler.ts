@@ -5,9 +5,16 @@ import { firstValueFrom } from 'rxjs';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { EcsService } from 'src/shared/modules/global/ecs.service';
+import {
+  EcsService,
+  MarathonMatchScorerTaskLaunchResult,
+} from 'src/shared/modules/global/ecs.service';
 import { BaseEventHandler } from 'src/shared/modules/kafka/base-event.handler';
-import { MarathonMatchSubmissionEventPayload } from 'src/shared/modules/kafka/handlers/marathon-match-submission.handler';
+import {
+  MarathonMatchSubmissionEventEnvelope,
+  MarathonMatchSubmissionEventPayload,
+  MarathonMatchSubmissionKafkaMessage,
+} from 'src/shared/modules/kafka/handlers/marathon-match-submission.handler';
 import { KafkaHandlerRegistry } from 'src/shared/modules/kafka/kafka-handler.registry';
 
 interface ChallengePhaseResponse {
@@ -29,6 +36,11 @@ interface ChallengeResponse {
       phases?: ChallengePhaseResponse[];
     };
   };
+}
+
+interface OpenPhaseResolution {
+  phaseIds: string[];
+  phaseIdentifiers: string[];
 }
 
 /**
@@ -76,12 +88,13 @@ export class MarathonMatchSubmissionHandler
 
   /**
    * Processes a marathon match submission message.
-   * @param message Kafka payload parsed from the message body.
+   * @param message Kafka message parsed from the body. Supports both event-bus
+   * envelope (`{ topic, payload }`) and direct payload publish formats.
    * @returns Resolves when the message is fully handled.
    * @throws Error When required fields are missing, config is missing, challenge API
    * lookup fails, tester compilation is not successful, or ECS task launch fails.
    */
-  async handle(message: MarathonMatchSubmissionEventPayload): Promise<void> {
+  async handle(message: MarathonMatchSubmissionKafkaMessage): Promise<void> {
     try {
       this.logger.log({
         message: 'Processing marathon match submission event',
@@ -94,7 +107,9 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const { submissionId, challengeId } = message;
+      const submissionPayload = this.resolveSubmissionPayload(message);
+      const submissionId = (submissionPayload.submissionId ?? '').trim();
+      const challengeId = (submissionPayload.challengeId ?? '').trim();
       if (!submissionId || !challengeId) {
         throw new Error(
           'Missing required message fields: submissionId and challengeId are required.',
@@ -102,7 +117,7 @@ export class MarathonMatchSubmissionHandler
       }
 
       const config = await this.prisma.marathonMatchConfig.findUnique({
-        where: { id: challengeId },
+        where: { challengeId },
         include: { phaseConfigs: true, tester: true },
       });
 
@@ -119,24 +134,27 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
-      const activePhaseId = await this.getActivePhaseId(challengeId);
-      if (!activePhaseId) {
+      const openPhaseResolution =
+        await this.getOpenPhaseResolution(challengeId);
+      if (openPhaseResolution.phaseIdentifiers.length === 0) {
         this.logger.log(
-          `Challenge ${challengeId} has no active phase. Skipping submission ${submissionId}.`,
+          `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
         );
         return;
       }
 
-      const matchingPhaseConfig = config.phaseConfigs.find(
-        (phaseConfig) => phaseConfig.phaseId === activePhaseId,
+      const matchingPhaseConfigs = this.findMatchingPhaseConfigs(
+        config.phaseConfigs,
+        openPhaseResolution.phaseIdentifiers,
       );
-      if (!matchingPhaseConfig) {
+      if (matchingPhaseConfigs.length === 0) {
         this.logger.log({
           message:
-            'No configured marathon match phase for active challenge phase',
+            'No configured marathon match phase for open challenge phases',
           challengeId,
           submissionId,
-          activePhaseId,
+          openPhaseIds: openPhaseResolution.phaseIds,
+          openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
         });
         return;
       }
@@ -147,22 +165,57 @@ export class MarathonMatchSubmissionHandler
         );
       }
 
-      const taskArn = await this.ecsService.launchScorerTask(
-        config.id,
-        submissionId,
-        {
-          taskDefinitionName: config.taskDefinitionName,
-          taskDefinitionVersion: config.taskDefinitionVersion,
-        },
-      );
+      const launchedPhaseTasks: Array<Record<string, unknown>> = [];
+      for (const matchingPhaseConfig of matchingPhaseConfigs) {
+        const launchResult = await this.ecsService.launchScorerTask(
+          config.challengeId,
+          submissionId,
+          {
+            taskDefinitionName: config.taskDefinitionName,
+            taskDefinitionVersion: config.taskDefinitionVersion,
+          },
+          {
+            configType: matchingPhaseConfig.configType,
+            startSeed: matchingPhaseConfig.startSeed,
+            numberOfTests: matchingPhaseConfig.numberOfTests,
+          },
+        );
+        this.logSubmissionRunnerMapping(
+          challengeId,
+          submissionId,
+          matchingPhaseConfig.configType,
+          launchResult,
+        );
+        launchedPhaseTasks.push({
+          configType: matchingPhaseConfig.configType,
+          phaseId: matchingPhaseConfig.phaseId,
+          phaseConfigId: matchingPhaseConfig.id,
+          taskArn: launchResult.taskArn,
+          taskId: launchResult.taskId,
+          logGroup: launchResult.logGroup ?? null,
+          logStreamPrefix: launchResult.logStreamPrefix ?? null,
+          logStreamName: launchResult.logStreamName ?? null,
+          cloudWatchLogsConsoleUrl:
+            launchResult.cloudWatchLogsConsoleUrl ?? null,
+        });
+      }
 
       this.logger.log({
         message: 'Marathon match submission event processed successfully',
         challengeId,
         submissionId,
-        activePhaseId,
-        matchedPhaseConfigId: matchingPhaseConfig.id,
-        taskArn,
+        openPhaseIds: openPhaseResolution.phaseIds,
+        openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
+        matchedPhaseIds: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.phaseId,
+        ),
+        matchedPhaseConfigIds: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.id,
+        ),
+        matchedPhaseConfigTypes: matchingPhaseConfigs.map(
+          (matchingPhaseConfig) => matchingPhaseConfig.configType,
+        ),
+        launchedPhaseTasks,
       });
     } catch (error) {
       const resolvedError =
@@ -180,12 +233,14 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Calls challenge-api-v6 and returns the ID of the active phase.
+   * Calls challenge-api-v6 and returns currently open phase identifiers.
    * @param challengeId Challenge identifier to fetch.
-   * @returns Active phase ID or null when not present.
+   * @returns Canonical open phase IDs plus backward-compatible identifiers.
    * @throws Error When token retrieval or HTTP request fails.
    */
-  private async getActivePhaseId(challengeId: string): Promise<string | null> {
+  private async getOpenPhaseResolution(
+    challengeId: string,
+  ): Promise<OpenPhaseResolution> {
     const token = await this.m2mService.getM2MToken();
     if (!token) {
       throw new Error('Unable to get M2M token for challenge API call.');
@@ -200,68 +255,218 @@ export class MarathonMatchSubmissionHandler
       }),
     );
 
-    return this.extractActivePhaseId(response.data);
+    return this.extractOpenPhaseResolution(response.data);
   }
 
   /**
-   * Extracts active phase ID from challenge-api response payload.
+   * Extracts ordered open phase identifiers from challenge-api response payload.
    * @param responseBody HTTP response body from challenge-api.
-   * @returns Active phase ID when found, otherwise null.
+   * @returns Canonical open phase IDs and backward-compatible identifiers.
    */
-  private extractActivePhaseId(responseBody: ChallengeResponse): string | null {
+  private extractOpenPhaseResolution(
+    responseBody: ChallengeResponse,
+  ): OpenPhaseResolution {
     const challengeData = this.resolveChallengePayload(responseBody);
-    if (challengeData.currentPhase) {
-      const currentPhaseId = this.extractPhaseId(challengeData.currentPhase);
-      if (currentPhaseId) {
-        return currentPhaseId;
-      }
+    const openPhases = this.resolveOpenPhases(challengeData.phases);
+    const openPhaseIds = this.resolveOpenPhaseIds(openPhases);
+    const openPhaseIdentifiers = this.resolveOpenPhaseIdentifiers(openPhases);
+    if (openPhaseIdentifiers.length > 0) {
+      return {
+        phaseIds: openPhaseIds,
+        phaseIdentifiers: openPhaseIdentifiers,
+      };
     }
 
-    const activePhase = this.resolveLatestStartedOpenPhase(
-      challengeData.phases,
+    const currentPhaseId = this.extractCanonicalPhaseId(
+      challengeData.currentPhase,
     );
-    return this.extractPhaseId(activePhase);
+    return {
+      phaseIds: currentPhaseId ? [currentPhaseId] : [],
+      phaseIdentifiers: this.extractPhaseIdentifiers(
+        challengeData.currentPhase,
+      ),
+    };
   }
 
   /**
-   * Selects the latest-started open phase using actual/scheduled start timestamps.
+   * Resolves open phases ordered by latest start, then timeline order.
    * @param phases Challenge phases.
-   * @returns Latest-started open phase or null when no open phase exists.
+   * @returns Ordered open phase payloads.
    */
-  private resolveLatestStartedOpenPhase(
+  private resolveOpenPhases(
     phases?: ChallengePhaseResponse[],
-  ): ChallengePhaseResponse | null {
+  ): ChallengePhaseResponse[] {
     if (!Array.isArray(phases) || phases.length === 0) {
-      return null;
+      return [];
     }
 
-    const openPhases = phases.filter((phase) => phase?.isOpen === true);
+    const openPhases = phases
+      .map((phase, index) => ({ phase, index }))
+      .filter(({ phase }) => phase?.isOpen === true);
     if (openPhases.length === 0) {
-      return null;
+      return [];
     }
 
-    return openPhases.reduce((latestOpenPhase, phase) => {
-      const latestStartTimestamp = this.toTimestamp(
-        latestOpenPhase.actualStartDate ?? latestOpenPhase.scheduledStartDate,
-      );
-      const phaseStartTimestamp = this.toTimestamp(
-        phase.actualStartDate ?? phase.scheduledStartDate,
-      );
+    const orderedOpenPhases = openPhases
+      .sort((left, right) => {
+        const leftStartTimestamp = this.toTimestamp(
+          left.phase.actualStartDate ?? left.phase.scheduledStartDate,
+        );
+        const rightStartTimestamp = this.toTimestamp(
+          right.phase.actualStartDate ?? right.phase.scheduledStartDate,
+        );
 
-      if (phaseStartTimestamp > latestStartTimestamp) {
-        return phase;
-      }
-
-      if (phaseStartTimestamp === latestStartTimestamp) {
-        const latestPhaseId = this.extractPhaseId(latestOpenPhase) ?? '';
-        const phaseId = this.extractPhaseId(phase) ?? '';
-        if (phaseId > latestPhaseId) {
-          return phase;
+        if (leftStartTimestamp !== rightStartTimestamp) {
+          return rightStartTimestamp - leftStartTimestamp;
         }
-      }
 
-      return latestOpenPhase;
+        return right.index - left.index;
+      })
+      .map(({ phase }) => phase);
+
+    return orderedOpenPhases;
+  }
+
+  /**
+   * Resolves canonical open challenge phase IDs ordered by priority.
+   * @param phases Ordered open challenge phases.
+   * @returns Ordered canonical phase IDs.
+   */
+  private resolveOpenPhaseIds(phases: ChallengePhaseResponse[]): string[] {
+    const orderedPhaseIds = phases
+      .map((phase) => this.extractCanonicalPhaseId(phase))
+      .filter((phaseId): phaseId is string => Boolean(phaseId));
+
+    return [...new Set(orderedPhaseIds)];
+  }
+
+  /**
+   * Resolves open challenge phase identifiers ordered by priority.
+   * Includes both canonical `phaseId` and legacy challenge-phase `id`.
+   * @param phases Ordered open challenge phases.
+   * @returns Ordered identifiers accepted for matching phase config rows.
+   */
+  private resolveOpenPhaseIdentifiers(
+    phases: ChallengePhaseResponse[],
+  ): string[] {
+    return [
+      ...new Set(
+        phases.flatMap((phase) => this.extractPhaseIdentifiers(phase)),
+      ),
+    ];
+  }
+
+  /**
+   * Logs the submission-to-runner-log mapping emitted at ECS launch time.
+   * @param challengeId Challenge ID.
+   * @param submissionId Submission ID.
+   * @param launchResult ECS launch metadata with task/log fields.
+   */
+  private logSubmissionRunnerMapping(
+    challengeId: string,
+    submissionId: string,
+    phaseConfigType: string,
+    launchResult: MarathonMatchScorerTaskLaunchResult,
+  ): void {
+    this.logger.log({
+      message: 'Submission runner log mapping ready',
+      challengeId,
+      submissionId,
+      phaseConfigType,
+      taskArn: launchResult.taskArn,
+      taskId: launchResult.taskId,
+      cluster: launchResult.cluster,
+      containerName: launchResult.containerName,
+      taskDefinition: launchResult.taskDefinition,
+      logGroup: launchResult.logGroup ?? null,
+      logStreamPrefix: launchResult.logStreamPrefix ?? null,
+      logStreamName: launchResult.logStreamName ?? null,
+      cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl ?? null,
     });
+  }
+
+  /**
+   * Finds all configured phase mappings for the ordered open challenge phases.
+   * @param phaseConfigs Stored phase configuration rows for a challenge.
+   * @param openPhaseIdentifiers Open challenge phase identifiers ordered by priority.
+   * @returns Matching phase configs in launch order.
+   */
+  private findMatchingPhaseConfigs<
+    TPhaseConfig extends { phaseId: string; configType: string },
+  >(
+    phaseConfigs: TPhaseConfig[],
+    openPhaseIdentifiers: string[],
+  ): TPhaseConfig[] {
+    const matchingPhaseConfigs: TPhaseConfig[] = [];
+    const seenPhaseConfigs = new Set<string>();
+
+    for (const openPhaseIdentifier of openPhaseIdentifiers) {
+      const phaseConfigsForIdentifier = phaseConfigs
+        .filter((phaseConfig) => phaseConfig.phaseId === openPhaseIdentifier)
+        .sort((left, right) =>
+          this.comparePhaseConfigLaunchPriority(
+            left.configType,
+            right.configType,
+          ),
+        );
+
+      for (const matchingPhaseConfig of phaseConfigsForIdentifier) {
+        const phaseConfigKey = [
+          matchingPhaseConfig.phaseId,
+          matchingPhaseConfig.configType.trim().toUpperCase(),
+        ].join('::');
+        if (seenPhaseConfigs.has(phaseConfigKey)) {
+          continue;
+        }
+
+        seenPhaseConfigs.add(phaseConfigKey);
+        matchingPhaseConfigs.push(matchingPhaseConfig);
+      }
+    }
+
+    return matchingPhaseConfigs;
+  }
+
+  /**
+   * Orders phase config launches deterministically when multiple configs share one open phase.
+   * @param leftConfigType Left config type.
+   * @param rightConfigType Right config type.
+   * @returns Sort value for launch order.
+   */
+  private comparePhaseConfigLaunchPriority(
+    leftConfigType: string,
+    rightConfigType: string,
+  ): number {
+    const leftPriority = this.resolvePhaseConfigLaunchPriority(leftConfigType);
+    const rightPriority =
+      this.resolvePhaseConfigLaunchPriority(rightConfigType);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return leftConfigType
+      .trim()
+      .localeCompare(rightConfigType.trim(), 'en', { sensitivity: 'base' });
+  }
+
+  /**
+   * Assigns a stable launch priority to known scorer phase config types.
+   * @param configType Phase config type.
+   * @returns Numeric priority where lower values launch first.
+   */
+  private resolvePhaseConfigLaunchPriority(configType: string): number {
+    const normalizedConfigType = configType.trim().toUpperCase();
+    if (normalizedConfigType === 'EXAMPLE') {
+      return 0;
+    }
+    if (normalizedConfigType === 'PROVISIONAL') {
+      return 1;
+    }
+    if (normalizedConfigType === 'SYSTEM') {
+      return 2;
+    }
+
+    return 99;
   }
 
   /**
@@ -285,13 +490,31 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Extracts normalized phase identifier from phase payload.
+   * Extracts normalized canonical phase identifier from phase payload.
    * @param phase Phase payload.
-   * @returns Trimmed phase ID when available, otherwise null.
+   * @returns Trimmed canonical phase ID when available, otherwise null.
    */
-  private extractPhaseId(phase?: ChallengePhaseResponse | null): string | null {
+  private extractCanonicalPhaseId(
+    phase?: ChallengePhaseResponse | null,
+  ): string | null {
     const phaseId = (phase?.phaseId ?? phase?.id ?? '').trim();
     return phaseId.length > 0 ? phaseId : null;
+  }
+
+  /**
+   * Extracts accepted identifiers from phase payload for backwards-compatible matching.
+   * @param phase Phase payload.
+   * @returns Unique identifiers including canonical `phaseId` and legacy `id`.
+   */
+  private extractPhaseIdentifiers(
+    phase?: ChallengePhaseResponse | null,
+  ): string[] {
+    const phaseIds = [
+      (phase?.phaseId ?? '').trim(),
+      (phase?.id ?? '').trim(),
+    ].filter((phaseId): phaseId is string => phaseId.length > 0);
+
+    return [...new Set(phaseIds)];
   }
 
   /**
@@ -311,5 +534,41 @@ export class MarathonMatchSubmissionHandler
     }
 
     return responseBody;
+  }
+
+  /**
+   * Normalizes marathon match Kafka messages to direct submission payload.
+   * @param message Raw parsed Kafka message.
+   * @returns Submission payload consumed by scorer orchestration logic.
+   */
+  private resolveSubmissionPayload(
+    message: MarathonMatchSubmissionKafkaMessage,
+  ): MarathonMatchSubmissionEventPayload {
+    if (this.isEventEnvelope(message)) {
+      const emptyPayload: MarathonMatchSubmissionEventPayload = {
+        submissionId: '',
+        challengeId: '',
+        submissionUrl: '',
+        memberHandle: '',
+        memberId: '',
+        submittedDate: '',
+      };
+      return message.payload ?? emptyPayload;
+    }
+
+    return message;
+  }
+
+  /**
+   * Detects event-bus envelopes that wrap submission data in `payload`.
+   * @param message Parsed Kafka message.
+   * @returns True when the message has an envelope structure.
+   */
+  private isEventEnvelope(
+    message: MarathonMatchSubmissionKafkaMessage,
+  ): message is MarathonMatchSubmissionEventEnvelope {
+    return (
+      typeof message === 'object' && message !== null && 'payload' in message
+    );
   }
 }

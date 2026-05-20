@@ -23,11 +23,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import {
+  CreateTesterVersionDto,
   CreateTesterDto,
   SearchTesterQueryDto,
   TesterPaginatedResponseDto,
+  TesterResponseQueryDto,
   TesterResponseDto,
-  UpdateTesterDto,
 } from 'src/dto/tester.dto';
 import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
 import { Scopes } from 'src/shared/decorators/scopes.decorator';
@@ -39,7 +40,8 @@ import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { TesterService, UpdateTesterResult } from './tester.service';
 
 /**
- * Exposes secured tester CRUD endpoints for marathon match admin workflows.
+ * Exposes secured tester CRUD endpoints for marathon match admin and copilot
+ * workflows.
  */
 @ApiTags('Testers')
 @ApiBearerAuth()
@@ -54,13 +56,17 @@ export class TesterController {
    * @returns The created tester.
    */
   @Post()
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.CreateMarathonMatchTester)
   @ApiOperation({
     summary: 'Create a tester',
-    description: 'Roles: Admin | Scopes: create:marathon-match-tester',
+    description: 'Roles: Admin, Copilot | Scopes: create:marathon-match-tester',
   })
-  @ApiBody({ description: 'Tester data', type: CreateTesterDto })
+  @ApiBody({
+    description:
+      'Tester-family data for the first version of a scorer. Use PUT /testers/:id for later versions of the same tester name.',
+    type: CreateTesterDto,
+  })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiResponse({
     status: 202,
@@ -69,6 +75,11 @@ export class TesterController {
     type: TesterResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Conflict. Returned when the tester name already exists and the request should use PUT /testers/:id to create a higher version.',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   async createTester(
     @Body() body: CreateTesterDto,
@@ -78,53 +89,67 @@ export class TesterController {
   }
 
   /**
-   * Updates a tester by ID.
-   * @param id Tester ID.
-   * @param body Partial tester update payload.
+   * Creates a new version of an existing tester family.
+   * @param id Existing tester ID used to resolve the tester family.
+   * @param body New tester-version payload.
+   * @param query Response shaping query parameters.
    * @param user Authenticated user for audit fields.
-   * @returns The updated tester.
+   * @returns The accepted tester version.
    */
   @Put('/:id')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.UpdateMarathonMatchTester)
   @ApiOperation({
-    summary: 'Update a tester',
-    description: 'Roles: Admin | Scopes: update:marathon-match-tester',
+    summary: 'Create a tester version',
+    description: 'Roles: Admin, Copilot | Scopes: update:marathon-match-tester',
   })
   @ApiParam({
     name: 'id',
-    description: 'The ID of the tester',
+    description:
+      'The ID of an existing tester record whose family name will be reused for the new version',
     example: 'V1StGXR8_Z5jdH',
   })
-  @ApiBody({ description: 'Updated tester data', type: UpdateTesterDto })
-  @ApiResponse({
-    status: 200,
+  @ApiBody({
     description:
-      'Tester updated successfully when sourceCode is unchanged or omitted.',
-    type: TesterResponseDto,
+      'New tester-version data. The tester name is inherited from the referenced tester.',
+    type: CreateTesterVersionDto,
+  })
+  @ApiQuery({
+    name: 'includeJarFile',
+    description:
+      'Include compiled jar content in the response. Disabled by default to avoid large payloads. New versions return null until compilation succeeds.',
+    required: false,
+    type: Boolean,
+    example: false,
   })
   @ApiResponse({
     status: 202,
-    description: 'Compilation triggered asynchronously.',
+    description:
+      'New tester version accepted; compilation triggered asynchronously. Previous versions remain available for lookup.',
     type: TesterResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Bad Request. Returned when the submitted version is not higher than the current max version for that tester family.',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Tester not found.' })
-  async updateTester(
+  async createTesterVersion(
     @Param('id') id: string,
-    @Body() body: UpdateTesterDto,
+    @Body() body: CreateTesterVersionDto,
+    @Query() query: TesterResponseQueryDto,
     @Res({ passthrough: true }) res: Response,
     @User() user: JwtUser,
   ): Promise<TesterResponseDto> {
-    const result: UpdateTesterResult = await this.testerService.updateTester(
-      id,
-      body,
-      user,
-    );
-    res.status(
-      result.compilationTriggered ? HttpStatus.ACCEPTED : HttpStatus.OK,
-    );
+    const result: UpdateTesterResult =
+      await this.testerService.createTesterVersion(
+        id,
+        body,
+        user,
+        query.includeJarFile,
+      );
+    res.status(HttpStatus.ACCEPTED);
     return result.tester;
   }
 
@@ -163,29 +188,42 @@ export class TesterController {
   /**
    * Retrieves a tester by ID.
    * @param id Tester ID.
+   * @param query Response shaping query parameters.
    * @returns Tester details.
    */
   @Get('/:id')
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatchTester)
   @ApiOperation({
     summary: 'Get a tester',
-    description: 'Roles: Admin | Scopes: read:marathon-match-tester',
+    description: 'Roles: Admin, Copilot | Scopes: read:marathon-match-tester',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the tester',
     example: 'V1StGXR8_Z5jdH',
   })
+  @ApiQuery({
+    name: 'includeJarFile',
+    description:
+      'Include compiled jar content in the response. Disabled by default to avoid large payloads.',
+    required: false,
+    type: Boolean,
+    example: false,
+  })
   @ApiResponse({
     status: 200,
-    description: 'Tester retrieved successfully.',
+    description:
+      'Tester retrieved successfully. jarFile is omitted unless includeJarFile=true.',
     type: TesterResponseDto,
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Tester not found.' })
-  async getTester(@Param('id') id: string): Promise<TesterResponseDto> {
-    return await this.testerService.getTester(id);
+  async getTester(
+    @Param('id') id: string,
+    @Query() query: TesterResponseQueryDto,
+  ): Promise<TesterResponseDto> {
+    return await this.testerService.getTester(id, query.includeJarFile);
   }
 
   /**
@@ -194,12 +232,12 @@ export class TesterController {
    * @returns Paginated tester list.
    */
   @Get()
-  @Roles(UserRole.Admin)
+  @Roles(UserRole.Admin, UserRole.Copilot)
   @Scopes(Scope.ReadMarathonMatchTester)
   @ApiOperation({
     summary: 'List testers',
     description:
-      'Roles: Admin | Scopes: read:marathon-match-tester | Supports pagination and optional name filtering.',
+      'Roles: Admin, Copilot | Scopes: read:marathon-match-tester | Supports pagination and optional name filtering.',
   })
   @ApiQuery({
     name: 'name',
@@ -223,7 +261,8 @@ export class TesterController {
   })
   @ApiResponse({
     status: 200,
-    description: 'List of matching testers.',
+    description:
+      'List of matching testers without sourceCode or jarFile payloads.',
     type: TesterPaginatedResponseDto,
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })

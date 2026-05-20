@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PhaseConfigType } from '@prisma/client';
+import { PhaseConfigType, ScoreDirection } from '@prisma/client';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -9,10 +9,75 @@ import {
   IsOptional,
   IsString,
   IsUrl,
-  Max,
   Min,
+  registerDecorator,
   ValidateNested,
+  ValidationOptions,
 } from 'class-validator';
+
+const MAX_START_SEED = BigInt('9223372036854775807');
+const START_SEED_PATTERN = /^(0|[1-9]\d*)$/;
+
+/**
+ * Converts supported start seed inputs into a trimmed decimal string for validation.
+ * @param value Raw request value from JSON or a programmatic service call.
+ * @returns Decimal string for safe inputs, or the original value when it should fail validation.
+ */
+function transformStartSeed(value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? String(value) : value;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return value;
+}
+
+/**
+ * Checks whether a value is a non-negative PostgreSQL BIGINT and Java long seed.
+ * @param value Candidate transformed start seed.
+ * @returns True when the value is a decimal integer string in the supported range.
+ */
+function isStartSeed(value: unknown): value is string {
+  if (typeof value !== 'string' || !START_SEED_PATTERN.test(value)) {
+    return false;
+  }
+
+  try {
+    return BigInt(value) <= MAX_START_SEED;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Registers validation for Marathon Match start seed request fields.
+ * @param validationOptions Optional class-validator message and grouping options.
+ * @returns Property decorator that validates decimal string BIGINT seed values.
+ */
+function IsStartSeed(validationOptions?: ValidationOptions): PropertyDecorator {
+  return (object: object, propertyName: string | symbol) => {
+    registerDecorator({
+      name: 'isStartSeed',
+      target: object.constructor,
+      propertyName: String(propertyName),
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          return isStartSeed(value);
+        },
+        defaultMessage: () =>
+          'startSeed must be a non-negative 64-bit integer string between 0 and 9223372036854775807.',
+      },
+    });
+  };
+}
 
 /**
  * Base payload for phase-specific marathon match execution settings.
@@ -29,13 +94,14 @@ export class PhaseConfigDto {
 
   @ApiProperty({
     description:
-      'Starting seed for test generation. Maximum is 2147483647 to stay within PostgreSQL Int range. Service runtime also enforces Number.isSafeInteger before persistence.',
-    example: 12345,
+      'Starting seed for test generation as a decimal string. Values are stored as PostgreSQL BIGINT and passed to the Java runner as a long. Existing numeric JSON input is accepted only when it is a safe integer; send large 64-bit seeds as strings.',
+    type: String,
+    format: 'int64',
+    example: '12345',
   })
-  @IsInt()
-  @Min(0)
-  @Max(2147483647)
-  startSeed: number;
+  @Transform(({ value }: TransformFnParams) => transformStartSeed(value))
+  @IsStartSeed()
+  startSeed: string;
 
   @ApiProperty({
     description: 'Number of tests to execute for this phase',
@@ -46,7 +112,8 @@ export class PhaseConfigDto {
   numberOfTests: number;
 
   @ApiProperty({
-    description: 'Challenge API phase ID used for this configuration',
+    description:
+      'Canonical challenge-api phase definition ID from `phases[].phaseId` (not the challenge-phase row `id`).',
     example: '12345678-abcd-1234-abcd-1234567890ab',
   })
   @IsString()
@@ -78,6 +145,29 @@ export class CreateMarathonMatchConfigDto {
   active?: boolean;
 
   @ApiProperty({
+    description:
+      'Whether review scores should be recomputed relative to the latest submission from each competitor.',
+    required: false,
+    default: true,
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  relativeScoringEnabled?: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    required: false,
+    enum: ScoreDirection,
+    default: ScoreDirection.MAXIMIZE,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  @IsOptional()
+  @IsEnum(ScoreDirection)
+  scoreDirection?: ScoreDirection;
+
+  @ApiProperty({
     description: 'Submission API base URL',
     required: false,
     default: 'https://api.topcoder-dev.com/v6',
@@ -88,7 +178,8 @@ export class CreateMarathonMatchConfigDto {
   submissionApiUrl?: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID used for provisional/system review flow',
+    description:
+      'Review scorecard identifier used for provisional/system review flow. Supports review-api scorecard id or legacy id.',
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
   @IsString()
@@ -191,6 +282,27 @@ export class UpdateMarathonMatchConfigDto {
   active?: boolean;
 
   @ApiProperty({
+    description:
+      'Whether review scores should be recomputed relative to the latest submission from each competitor.',
+    required: false,
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  relativeScoringEnabled?: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    required: false,
+    enum: ScoreDirection,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  @IsOptional()
+  @IsEnum(ScoreDirection)
+  scoreDirection?: ScoreDirection;
+
+  @ApiProperty({
     description: 'Submission API base URL',
     required: false,
     example: 'https://api.topcoder-dev.com/v6',
@@ -200,7 +312,8 @@ export class UpdateMarathonMatchConfigDto {
   submissionApiUrl?: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID used for provisional/system review flow',
+    description:
+      'Review scorecard identifier used for provisional/system review flow. Supports review-api scorecard id or legacy id.',
     required: false,
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
@@ -291,6 +404,44 @@ export class UpdateMarathonMatchConfigDto {
 }
 
 /**
+ * Response representation of configurable default values for new marathon match configs.
+ * Returned by GET /challenge/defaults for UI pre-population.
+ */
+export class MarathonMatchDefaultsResponseDto {
+  @ApiProperty({
+    description: 'Default review scorecard ID',
+    example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
+  })
+  reviewScorecardId: string;
+
+  @ApiProperty({
+    description: 'Default test timeout in ms',
+    example: 90000,
+  })
+  testTimeout: number;
+
+  @ApiProperty({
+    description: 'Default compile timeout in ms',
+    example: 120000,
+  })
+  compileTimeout: number;
+
+  @ApiProperty({
+    description:
+      'Default ECS task definition name used to pre-fill new configs. Empty string when not configured.',
+    example: 'mm-submission-runner',
+  })
+  taskDefinitionName: string;
+
+  @ApiProperty({
+    description:
+      'Default ECS task definition version used to pre-fill new configs. Empty string when not configured.',
+    example: '42',
+  })
+  taskDefinitionVersion: string;
+}
+
+/**
  * Response representation for persisted phase configuration records.
  * Returned as nested properties in marathon match config responses.
  */
@@ -300,12 +451,6 @@ export class PhaseConfigResponseDto extends PhaseConfigDto {
     example: 'V1StGXR8_Z5jdH',
   })
   id: string;
-
-  @ApiProperty({
-    description: 'Parent marathon match configuration ID',
-    example: '30000123',
-  })
-  marathonMatchConfigId: string;
 
   @ApiProperty({
     description: 'Creation timestamp',
@@ -326,10 +471,16 @@ export class PhaseConfigResponseDto extends PhaseConfigDto {
  */
 export class MarathonMatchConfigResponseDto {
   @ApiProperty({
+    description: 'Unique marathon match configuration ID',
+    example: 'V1StGXR8_Z5jdH',
+  })
+  id: string;
+
+  @ApiProperty({
     description: 'Challenge ID',
     example: '30000123',
   })
-  id: string;
+  challengeId: string;
 
   @ApiProperty({
     description: 'Display name of the marathon match configuration',
@@ -344,13 +495,28 @@ export class MarathonMatchConfigResponseDto {
   active: boolean;
 
   @ApiProperty({
+    description:
+      'Whether review scores are recomputed relative to the latest submission from each competitor.',
+    example: true,
+  })
+  relativeScoringEnabled: boolean;
+
+  @ApiProperty({
+    description:
+      'Defines whether larger raw testcase scores are better or smaller raw testcase scores are better when relative scoring is enabled.',
+    enum: ScoreDirection,
+    example: ScoreDirection.MAXIMIZE,
+  })
+  scoreDirection: ScoreDirection;
+
+  @ApiProperty({
     description: 'Submission API base URL',
     example: 'https://api.topcoder-dev.com/v6',
   })
   submissionApiUrl: string;
 
   @ApiProperty({
-    description: 'Review scorecard ID',
+    description: 'Resolved review scorecard id configured for this challenge',
     example: 'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
   })
   reviewScorecardId: string;
@@ -434,6 +600,68 @@ export class MarathonMatchConfigResponseDto {
     example: '40166514',
   })
   updatedBy: string | null;
+}
+
+/**
+ * Response payload for a rerun request across the latest challenge submissions.
+ * Returned by POST /challenge/:challengeId/rerun after ECS tasks are dispatched.
+ */
+export class RerunResponseDto {
+  @ApiProperty({
+    description: 'Challenge ID for the rerun request',
+    example: '30000123',
+  })
+  challengeId: string;
+
+  @ApiProperty({
+    description: 'Number of latest submissions selected for rerun dispatch',
+    example: 12,
+  })
+  submissionsQueued: number;
+
+  @ApiProperty({
+    description:
+      'Per-submission launch results for the rerun request, including any dispatch errors.',
+    type: 'array',
+    items: {
+      type: 'object',
+      required: ['submissionId'],
+      properties: {
+        submissionId: {
+          type: 'string',
+          description: 'Submission identifier that was selected for rerun',
+          example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
+        },
+        taskArn: {
+          type: 'string',
+          description: 'AWS ECS task ARN when the scorer task launch succeeded',
+          example:
+            'arn:aws:ecs:us-east-1:123456789012:task/cluster/0123456789abcdef',
+          nullable: true,
+        },
+        taskId: {
+          type: 'string',
+          description:
+            'Short ECS task identifier when the scorer task launch succeeded',
+          example: '0123456789abcdef',
+          nullable: true,
+        },
+        error: {
+          type: 'string',
+          description:
+            'Launch error message when dispatch failed for that submission',
+          example: 'Failed to get M2M token for ECS task launch.',
+          nullable: true,
+        },
+      },
+    },
+  })
+  results: Array<{
+    submissionId: string;
+    taskArn?: string;
+    taskId?: string;
+    error?: string;
+  }>;
 }
 
 /**
