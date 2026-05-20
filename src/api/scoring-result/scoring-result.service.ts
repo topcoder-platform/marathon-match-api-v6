@@ -858,6 +858,7 @@ export class ScoringResultService {
 
   /**
    * Converts one raw testcase score into its 0..100 relative score.
+   * Zero raw or best scores receive no relative credit, including a 0-to-0 tie.
    */
   private calculateRelativeScore(
     rawScore: number,
@@ -867,12 +868,12 @@ export class ScoringResultService {
       return 0;
     }
 
-    if (Math.abs(bestScore - rawScore) < 1e-9) {
-      return 100;
-    }
-
     if (bestScore === 0 || rawScore === 0) {
       return 0;
+    }
+
+    if (Math.abs(bestScore - rawScore) < 1e-9) {
+      return 100;
     }
 
     const normalized =

@@ -186,7 +186,7 @@ Relative scoring applies when:
 - `Relative Scoring` is enabled on the scorer config.
 - The ECS runner callback metadata includes `testScores`.
 
-For each testcase, the API finds the best raw score among the latest scored submission for each member. `scoreDirection` controls whether the best raw score is the maximum or minimum value. The stored relative testcase score is normalized to `0..100`, and the aggregate review score is the average of those relative testcase scores.
+For each testcase, the API finds the best raw score among the latest scored submission for each member. `scoreDirection` controls whether the best raw score is the maximum or minimum value. The stored relative testcase score is normalized to `0..100`, with zero raw or zero best scores counted as `0`, and the aggregate review score is the average of those relative testcase scores.
 
 Implications:
 

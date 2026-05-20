@@ -8,7 +8,11 @@
 /prisma/Scorecards
 
 # Test files
-/scripts/fixtures
+/scripts/fixtures/*
+!/scripts/fixtures/BridgeRunners/
+!/scripts/fixtures/BridgeRunners/**
+!/scripts/fixtures/Blocks/
+!/scripts/fixtures/Blocks/**
 
 # Logs
 logs

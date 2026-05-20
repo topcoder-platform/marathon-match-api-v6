@@ -65,6 +65,7 @@ public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
+    private static final int CHILD_OUTPUT_TAIL_LIMIT = 4000;
     private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
     private static final String ISOLATED_TESTER_RESULT_MARKER =
         "__MM_ISOLATED_TESTER_RESULT__:";
@@ -124,6 +125,7 @@ public class EcsRunnerMain {
         String marathonMatchBaseUrl = null;
         String reviewTypeId = null;
         String scorecardId = null;
+        String submissionApiUrl = null;
 
         try {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
@@ -177,6 +179,7 @@ public class EcsRunnerMain {
                     accessToken,
                     MarathonMatchConfigResponse.class
                 );
+                submissionApiUrl = config.getSubmissionApiUrl();
                 logInfo(
                     "api.fetch-config",
                     "Loaded challenge config id="
@@ -399,6 +402,14 @@ public class EcsRunnerMain {
                 "Runner failed with error: " + error.getMessage(),
                 error
             );
+            writeFailureArtifactLog(submissionDir, submissionId, error);
+            uploadFailureArtifactsSafely(
+                submissionApiUrl,
+                accessToken,
+                submissionId,
+                testPhase,
+                submissionDir
+            );
             postFailureProgressSafely(
                 challengeId,
                 submissionId,
@@ -557,11 +568,21 @@ public class EcsRunnerMain {
                 "Launching isolated tester JVM: " + renderCommandForLog(command)
             );
 
+            Path artifactsDir = ensureArtifactsDir(submissionDir);
+            Path executionLogPath = artifactsDir.resolve(
+                "execution-" + submissionId + ".log"
+            );
+            appendText(
+                executionLogPath,
+                "Launching isolated tester JVM: " + renderCommandForLog(command) + "\n"
+            );
+
             ProcessBuilder processBuilder = new ProcessBuilder(command);
-            processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
+            processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
             String encodedResult = null;
+            StringBuilder childOutputTail = new StringBuilder();
             try (
                 BufferedReader reader = new BufferedReader(
                     new InputStreamReader(
@@ -603,20 +624,42 @@ public class EcsRunnerMain {
                         }
                     } else {
                         System.out.println(line);
+                        appendText(executionLogPath, line + "\n");
+                        appendBounded(childOutputTail, line + "\n", CHILD_OUTPUT_TAIL_LIMIT);
                     }
                 }
             }
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
+                String message = "Isolated tester JVM exited with code " + exitCode + ".";
+                String outputTail = childOutputTail.toString().trim();
+                if (!outputTail.isEmpty()) {
+                    message += " Child output tail: "
+                        + truncate(outputTail, CHILD_OUTPUT_TAIL_LIMIT);
+                }
+                appendText(
+                    artifactsDir.resolve("error-" + submissionId + ".log"),
+                    message + "\n"
+                );
                 throw new RuntimeException(
-                    "Isolated tester JVM exited with code " + exitCode + "."
+                    message
                 );
             }
 
             if (encodedResult == null || encodedResult.trim().isEmpty()) {
+                String message = "Isolated tester JVM did not return a structured result.";
+                String outputTail = childOutputTail.toString().trim();
+                if (!outputTail.isEmpty()) {
+                    message += " Child output tail: "
+                        + truncate(outputTail, CHILD_OUTPUT_TAIL_LIMIT);
+                }
+                appendText(
+                    artifactsDir.resolve("error-" + submissionId + ".log"),
+                    message + "\n"
+                );
                 throw new RuntimeException(
-                    "Isolated tester JVM did not return a structured result."
+                    message
                 );
             }
 
@@ -637,6 +680,163 @@ public class EcsRunnerMain {
         } finally {
             deletePathRecursively(scorerConfigPath);
         }
+    }
+
+    /**
+     * Ensures the runner artifact directory exists for the current submission.
+     *
+     * <p>The isolated child normally creates this directory inside the selected
+     * workspace, but parent-side failure handling also needs a deterministic
+     * place to write diagnostics when the child exits early.
+     *
+     * @param submissionDir Extracted submission directory.
+     * @return Path to the `artifacts` directory.
+     * @throws Exception When the diagnostics directory cannot be created or ownership cannot be adjusted.
+     */
+    private static Path ensureArtifactsDir(Path submissionDir) throws Exception {
+        if (submissionDir == null) {
+            throw new IOException("submissionDir is not available for artifact logging.");
+        }
+
+        Path artifactBaseDir = resolveArtifactBaseDir(submissionDir);
+        if (artifactBaseDir == null) {
+            artifactBaseDir = resolveWorkspaceRoot(submissionDir);
+        }
+
+        Path artifactsDir = artifactBaseDir.resolve("artifacts");
+        Files.createDirectories(artifactsDir.resolve("public"));
+        Files.createDirectories(artifactsDir.resolve("private"));
+        if ("root".equals(System.getProperty("user.name", ""))) {
+            setPathOwnerRecursively(
+                artifactsDir,
+                ISOLATED_EXECUTION_USER,
+                ISOLATED_EXECUTION_GROUP
+            );
+        }
+        return artifactsDir;
+    }
+
+    /**
+     * Appends text to a bounded StringBuilder, retaining only the most recent
+     * characters. This keeps failure progress messages concise while preserving
+     * the full child output in artifact logs.
+     *
+     * @param target Buffer holding the current tail.
+     * @param text Text to append.
+     * @param maxChars Maximum retained character count.
+     */
+    private static void appendBounded(StringBuilder target, String text, int maxChars) {
+        if (target == null || text == null || maxChars <= 0) {
+            return;
+        }
+
+        target.append(text);
+        if (target.length() > maxChars) {
+            target.delete(0, target.length() - maxChars);
+        }
+    }
+
+    /**
+     * Writes parent-side failure diagnostics into the public artifact log area.
+     *
+     * @param submissionDir Extracted submission directory.
+     * @param submissionId Submission ID used in artifact filenames.
+     * @param error Failure to record.
+     */
+    private static void writeFailureArtifactLog(
+        Path submissionDir,
+        String submissionId,
+        Throwable error
+    ) {
+        if (submissionDir == null || isBlank(submissionId) || "<missing>".equals(submissionId)) {
+            return;
+        }
+
+        try {
+            Path artifactsDir = ensureArtifactsDir(submissionDir);
+            Path errorLog = artifactsDir.resolve("error-" + submissionId + ".log");
+            String message = error == null
+                ? "Runner failed with an unknown error."
+                : error.getMessage();
+            appendText(
+                errorLog,
+                "["
+                    + Instant.now().toString()
+                    + "] Runner failure: "
+                    + safeLogValue(message)
+                    + "\n"
+                    + stackTraceToString(error)
+                    + "\n"
+            );
+        } catch (Exception logError) {
+            logWarn(
+                "artifacts.failure-log",
+                "Unable to write failure artifact log: " + logError.getMessage()
+            );
+        }
+    }
+
+    /**
+     * Uploads any artifacts produced before a runner failure.
+     *
+     * @param submissionApiUrl Submission API base URL used for artifact uploads.
+     * @param accessToken Bearer token.
+     * @param submissionId Submission ID.
+     * @param testPhase Scoring phase.
+     * @param submissionDir Extracted submission directory.
+     */
+    private static void uploadFailureArtifactsSafely(
+        String submissionApiUrl,
+        String accessToken,
+        String submissionId,
+        String testPhase,
+        Path submissionDir
+    ) {
+        if (
+            isBlank(submissionApiUrl)
+                || isBlank(accessToken)
+                || isBlank(submissionId)
+                || "<missing>".equals(submissionId)
+                || submissionDir == null
+        ) {
+            return;
+        }
+
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            logInfo("artifacts.upload", "Uploading failure artifacts");
+            uploadArtifacts(
+                httpClient,
+                submissionApiUrl,
+                accessToken,
+                submissionId,
+                testPhase,
+                submissionDir
+            );
+            logInfo("artifacts.upload", "Failure artifact upload completed");
+        } catch (Exception uploadError) {
+            logWarn(
+                "artifacts.upload",
+                "Unable to upload failure artifacts: " + uploadError.getMessage()
+            );
+        }
+    }
+
+    /**
+     * Renders a Throwable stack trace for artifact logs.
+     *
+     * @param error Throwable to render.
+     * @return Stack trace text, or an empty string when no Throwable is supplied.
+     */
+    private static String stackTraceToString(Throwable error) {
+        if (error == null) {
+            return "";
+        }
+
+        java.io.StringWriter stringWriter = new java.io.StringWriter();
+        java.io.PrintWriter printWriter = new java.io.PrintWriter(stringWriter);
+        error.printStackTrace(printWriter);
+        printWriter.flush();
+        return stringWriter.toString();
     }
 
     /**

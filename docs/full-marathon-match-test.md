@@ -76,6 +76,8 @@ The tester source can be a standard Topcoder Marathon tester with a `main(...)` 
 
 For advanced create payload fields, add `challenge.createPayload` with any valid `POST /v6/challenges` body fields. The script still applies the configured Registration and Submission duration overrides.
 
+This repo includes a `scripts/fixtures/Blocks` example fixture for the TCO22 Blocks Marathon Match. Its manifest includes all sample submissions from the fixture set, including `submission-winner.zip`.
+
 ## Create Fixtures from Production
 
 `scripts/create-mm-fixture-from-production.mjs` builds a fixture folder from a production Marathon Match. It searches source submissions by challenge ID, downloads each submission through `GET /v6/submissions/:submissionId/download`, reads review summations for expected provisional/system scores, and writes a `marathon-match-test.json` manifest.
@@ -85,7 +87,7 @@ export TOKEN="<production-m2m-token>"
 
 pnpm fixtures:mm:from-prod -- \
   --source-challenge-id "<production_challenge_id>" \
-  --fixture-name "BridgeRunners"
+  --fixture-name "Blocks"
 ```
 
 The default output is `scripts/fixtures/<fixture-name>/`. Use `--fixture-dir` to choose an exact directory, `--overwrite` to replace an existing manifest/files, `--latest-only` to keep one source submission per production member, or `--max-submissions <n>` for a smaller baseline. If an individual submission download fails, the script logs the failure, skips that submission, and continues with the rest.
@@ -117,7 +119,7 @@ export SUBMISSION_UPLOAD_PREFIX="mm-full-test"
 export SUBMITTER_ROLE_ID="<submitter-resource-role-id>"
 
 pnpm test:mm:full -- \
-  --fixture-dir ./fixtures/my-mm \
+  --fixture-dir scripts/fixtures/Blocks \
   --challenge-type-id "<marathon_match_type_id>" \
   --challenge-track-id "<data_science_track_id>" \
   --timeline-template-id "<marathon_match_timeline_template_id>" \

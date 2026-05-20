@@ -1,0 +1,144 @@
+{
+  "challenge": {
+    "name": "Blocks Full Test Challenge",
+    "typeId": "929bc408-9cf2-4b3e-ba71-adfbf693046c",
+    "trackId": "c0f5d461-8219-4c14-878a-c3a3f356466d",
+    "timelineTemplateId": "6969125a-a12f-4b89-8de6-e66b0056f36b",
+    "projectId": "100575",
+    "phaseDurations": {
+      "registration": 360,
+      "submission": 360
+    },
+    "phaseIds": {
+      "registration": "a93544bc-c165-4af4-b55e-18f3593b457a",
+      "submission": "6950164f-3c5e-4bdc-abc8-22aaf5a1bd49"
+    },
+    "source": {
+      "challengeName": "TCO22 Blocks"
+    }
+  },
+  "tester": {
+    "name": "BlocksTester",
+    "version": "1.0.0",
+    "className": "BlockGameTester"
+  },
+  "config": {
+    "name": "Blocks Full Test Config",
+    "reviewScorecardId": "xD-a3IqyTpzJmj",
+    "taskDefinitionName": "mm-ecs-runner",
+    "taskDefinitionVersion": "1",
+    "relativeScoringEnabled": true,
+    "scoreDirection": "MAXIMIZE",
+    "example": {
+      "startSeed": "1",
+      "numberOfTests": "10"
+    },
+    "provisional": {
+      "startSeed": "43620318174362",
+      "numberOfTests": "50"
+    },
+    "system": {
+      "startSeed": "85347878932952",
+      "numberOfTests": "5000"
+    }
+  },
+  "submissions": [
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-3G9RNcDiRX4ioW.zip",
+      "source": {
+        "fileName": "submission-3G9RNcDiRX4ioW.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-B-7z0m074qy7du.zip",
+      "source": {
+        "fileName": "submission-B-7z0m074qy7du.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-J_I8ujYTQaMBV1.zip",
+      "source": {
+        "fileName": "submission-J_I8ujYTQaMBV1.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-K4HSEK5UFQH7Ld.zip",
+      "source": {
+        "fileName": "submission-K4HSEK5UFQH7Ld.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-N60931se7rvjmN.zip",
+      "source": {
+        "fileName": "submission-N60931se7rvjmN.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-U1AHKtjQnUiyNc.zip",
+      "source": {
+        "fileName": "submission-U1AHKtjQnUiyNc.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-hxxdm6PbAxYgmM.zip",
+      "source": {
+        "fileName": "submission-hxxdm6PbAxYgmM.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-ifplYQwB4WnHRe.zip",
+      "source": {
+        "fileName": "submission-ifplYQwB4WnHRe.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-ka5CGSoa9jhAqE.zip",
+      "source": {
+        "fileName": "submission-ka5CGSoa9jhAqE.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-y4f2XRnKdY0b-D.zip",
+      "source": {
+        "fileName": "submission-y4f2XRnKdY0b-D.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-yWPGlX5UpDX75P.zip",
+      "source": {
+        "fileName": "submission-yWPGlX5UpDX75P.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-winner.zip",
+      "source": {
+        "fileName": "submission-winner.zip",
+        "winner": true
+      }
+    }
+  ]
+}

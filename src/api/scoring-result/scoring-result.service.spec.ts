@@ -248,4 +248,16 @@ describe('ScoringResultService', () => {
       }),
     );
   });
+
+  it('does not award relative scoring credit for zero-score ties', () => {
+    const { service } = createService();
+    const calculateRelativeScore = (service as any).calculateRelativeScore.bind(
+      service,
+    ) as (rawScore: number, bestScore?: number) => number;
+
+    expect(calculateRelativeScore(0, 0)).toBe(0);
+    expect(calculateRelativeScore(0, 50)).toBe(0);
+    expect(calculateRelativeScore(50, 0)).toBe(0);
+    expect(calculateRelativeScore(50, 50)).toBe(100);
+  });
 });
