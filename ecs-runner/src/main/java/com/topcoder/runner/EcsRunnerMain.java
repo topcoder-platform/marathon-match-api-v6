@@ -337,6 +337,22 @@ public class EcsRunnerMain {
                     "tester error output"
                 );
 
+                Map<String, Object> callbackMetadata = buildCallbackMetadata(
+                    testerExecution.getMetadata(),
+                    testPhase,
+                    reviewTypeId
+                );
+                logMap("callback.metadata", callbackMetadata);
+                writeInternalReviewArtifact(
+                    submissionDir,
+                    submissionId,
+                    testPhase,
+                    reviewTypeId,
+                    scorerConfig.getScoreCardId(),
+                    testerExecution,
+                    callbackMetadata
+                );
+
                 logInfo("artifacts.upload", "Uploading submission artifacts");
                 uploadArtifacts(
                     httpClient,
@@ -347,13 +363,6 @@ public class EcsRunnerMain {
                     submissionDir
                 );
                 logInfo("artifacts.upload", "Artifact upload completed");
-
-                Map<String, Object> callbackMetadata = buildCallbackMetadata(
-                    testerExecution.getMetadata(),
-                    testPhase,
-                    reviewTypeId
-                );
-                logMap("callback.metadata", callbackMetadata);
 
                 ScoringCallbackRequest callbackRequest = new ScoringCallbackRequest(
                     challengeId,
@@ -2032,7 +2041,188 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Writes the private review payload consumed by internal Marathon Match tooling.
+     * Existing non-empty tester-provided {@code reviews.json} files are preserved.
+     *
+     * @param submissionDir Extracted submission directory or workspace root.
+     * @param submissionId Submission whose review payload is being archived.
+     * @param testPhase Scoring phase represented by the review.
+     * @param reviewTypeId Review API review type identifier.
+     * @param scorecardId Review API scorecard identifier.
+     * @param testerExecution Structured tester result used for callback creation.
+     * @param callbackMetadata Metadata exactly as sent to the scoring callback.
+     * @throws IOException when the private artifact directory or JSON file cannot be written.
+     */
+    private static void writeInternalReviewArtifact(
+        Path submissionDir,
+        String submissionId,
+        String testPhase,
+        String reviewTypeId,
+        String scorecardId,
+        TesterExecutionResult testerExecution,
+        Map<String, Object> callbackMetadata
+    ) throws IOException {
+        Path privateArtifactsDir = ensurePrivateArtifactsDir(submissionDir);
+        Path reviewsJsonPath = privateArtifactsDir.resolve("reviews.json");
+        if (Files.isRegularFile(reviewsJsonPath) && Files.size(reviewsJsonPath) > 0L) {
+            logInfo(
+                "artifacts.internal-review",
+                "Preserving tester-provided internal reviews artifact " + reviewsJsonPath
+            );
+            return;
+        }
+
+        Map<String, Object> payload = buildInternalReviewArtifactPayload(
+            submissionId,
+            testPhase,
+            reviewTypeId,
+            scorecardId,
+            testerExecution,
+            callbackMetadata
+        );
+
+        OBJECT_MAPPER
+            .writerWithDefaultPrettyPrinter()
+            .writeValue(reviewsJsonPath.toFile(), payload);
+        logInfo(
+            "artifacts.internal-review",
+            "Wrote internal reviews artifact " + reviewsJsonPath
+        );
+    }
+
+    /**
+     * Ensures the private artifact directory exists for the runner workspace.
+     *
+     * @param submissionDir Extracted submission directory or workspace root.
+     * @return Path to {@code artifacts/private}.
+     * @throws IOException when directories cannot be created.
+     */
+    private static Path ensurePrivateArtifactsDir(Path submissionDir) throws IOException {
+        if (submissionDir == null) {
+            throw new IOException("submissionDir is required for internal artifacts.");
+        }
+
+        Path artifactBaseDir = resolveArtifactBaseDir(submissionDir);
+        if (artifactBaseDir == null) {
+            artifactBaseDir = resolveWorkspaceRoot(submissionDir);
+        }
+
+        Path privateArtifactsDir = artifactBaseDir.resolve("artifacts").resolve("private");
+        Files.createDirectories(privateArtifactsDir);
+        return privateArtifactsDir;
+    }
+
+    /**
+     * Builds the JSON payload stored in the internal {@code reviews.json} artifact.
+     *
+     * @param submissionId Submission whose review payload is archived.
+     * @param testPhase Scoring phase represented by the payload.
+     * @param reviewTypeId Review API review type identifier.
+     * @param scorecardId Review API scorecard identifier.
+     * @param testerExecution Structured tester result.
+     * @param callbackMetadata Metadata exactly as sent to the scoring callback.
+     * @return JSON-serializable map for the internal review artifact.
+     */
+    private static Map<String, Object> buildInternalReviewArtifactPayload(
+        String submissionId,
+        String testPhase,
+        String reviewTypeId,
+        String scorecardId,
+        TesterExecutionResult testerExecution,
+        Map<String, Object> callbackMetadata
+    ) {
+        Map<String, Object> currentReview = withDefaultReviewFields(
+            testerExecution.getCurrentReview(),
+            submissionId,
+            testerExecution.getScore(),
+            reviewTypeId,
+            scorecardId,
+            callbackMetadata
+        );
+        List<Map<String, Object>> impactedReviews = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> impactedReview : testerExecution.getImpactedReviews()) {
+            impactedReviews.add(new LinkedHashMap<String, Object>(impactedReview));
+        }
+
+        List<Map<String, Object>> reviews = new ArrayList<Map<String, Object>>();
+        reviews.add(currentReview);
+        reviews.addAll(impactedReviews);
+
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("version", 1);
+        payload.put("generatedAt", Instant.now().toString());
+        payload.put("submissionId", submissionId);
+        payload.put("testPhase", normalizeTestPhase(testPhase));
+        payload.put("reviewTypeId", reviewTypeId);
+        payload.put("scorecardId", scorecardId);
+        payload.put("score", testerExecution.getScore());
+        payload.put("metadata", callbackMetadata);
+        payload.put("currentReview", currentReview);
+        payload.put("impactedReviews", impactedReviews);
+        payload.put("reviews", reviews);
+        return payload;
+    }
+
+    /**
+     * Adds the runner's callback defaults to a tester-supplied current review payload.
+     *
+     * @param sourceReview Current review returned by tester code, possibly empty.
+     * @param submissionId Submission identifier for the review.
+     * @param score Aggregate score for the review.
+     * @param reviewTypeId Review API review type identifier.
+     * @param scorecardId Review API scorecard identifier.
+     * @param metadata Callback metadata for this phase.
+     * @return Review map containing the fields needed to interpret the artifact later.
+     */
+    private static Map<String, Object> withDefaultReviewFields(
+        Map<String, Object> sourceReview,
+        String submissionId,
+        double score,
+        String reviewTypeId,
+        String scorecardId,
+        Map<String, Object> metadata
+    ) {
+        Map<String, Object> review = sourceReview == null
+            ? new LinkedHashMap<String, Object>()
+            : new LinkedHashMap<String, Object>(sourceReview);
+
+        putIfMissing(review, "submissionId", submissionId);
+        putIfMissing(review, "score", score);
+        putIfMissing(review, "aggregateScore", score);
+        putIfMissing(review, "typeId", reviewTypeId);
+        putIfMissing(review, "reviewTypeId", reviewTypeId);
+        putIfMissing(review, "scorecardId", scorecardId);
+        putIfMissing(review, "metadata", metadata);
+        return review;
+    }
+
+    /**
+     * Adds a field to a map when the key is absent or currently null.
+     *
+     * @param target Mutable map to update.
+     * @param key Field name to populate.
+     * @param value Field value.
+     */
+    private static void putIfMissing(
+        Map<String, Object> target,
+        String key,
+        Object value
+    ) {
+        if (!target.containsKey(key) || target.get(key) == null) {
+            target.put(key, value);
+        }
+    }
+
+    /**
      * Uploads public and private submission artifacts when present.
+     *
+     * @param httpClient HTTP client used for multipart artifact upload.
+     * @param submissionApiUrl Submission API base URL.
+     * @param accessToken Bearer token with artifact upload permission.
+     * @param submissionId Submission whose artifacts are uploaded.
+     * @param testPhase Scoring phase represented by the artifacts.
+     * @param submissionDir Extracted submission directory or workspace root.
+     * @throws Exception when zip creation or upload fails.
      */
     private static void uploadArtifacts(
         CloseableHttpClient httpClient,
@@ -2111,6 +2301,12 @@ public class EcsRunnerMain {
 
     /**
      * Creates public artifact archive with execution/error logs and public artifacts.
+     *
+     * @param artifactsDir Root artifacts directory containing public files and logs.
+     * @param submissionId Submission ID used to locate execution/error logs.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when no public files exist.
+     * @throws Exception when walking or archiving public artifacts fails.
      */
     private static Path createPublicArtifactZip(
         Path artifactsDir,
@@ -2124,7 +2320,7 @@ public class EcsRunnerMain {
         boolean hasPublicArtifacts =
             Files.isRegularFile(executionLog)
                 || Files.isRegularFile(errorLog)
-                || Files.isDirectory(publicDir);
+                || directoryHasRegularFiles(publicDir);
 
         if (!hasPublicArtifacts) {
             logInfo(
@@ -2151,7 +2347,12 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Creates a zip archive from a directory. Returns null when directory is missing.
+     * Creates a zip archive from a directory with at least one regular file.
+     *
+     * @param directoryPath Directory to archive.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when the directory is missing or empty.
+     * @throws Exception when walking or archiving the directory fails.
      */
     private static Path createDirectoryZip(Path directoryPath, String artifactName)
         throws Exception {
@@ -2159,6 +2360,14 @@ public class EcsRunnerMain {
             logInfo(
                 "artifacts.zip.private",
                 "Directory does not exist, skipping zip: " + directoryPath
+            );
+            return null;
+        }
+
+        if (!directoryHasRegularFiles(directoryPath)) {
+            logInfo(
+                "artifacts.zip.private",
+                "No files found, skipping zip: " + directoryPath
             );
             return null;
         }
@@ -2175,6 +2384,23 @@ public class EcsRunnerMain {
         );
 
         return zipPath;
+    }
+
+    /**
+     * Checks whether a directory contains at least one regular file.
+     *
+     * @param directoryPath Directory to inspect.
+     * @return {@code true} when the directory exists and contains a regular file.
+     * @throws IOException when walking the directory fails.
+     */
+    private static boolean directoryHasRegularFiles(Path directoryPath) throws IOException {
+        if (!Files.isDirectory(directoryPath)) {
+            return false;
+        }
+
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            return stream.anyMatch(Files::isRegularFile);
+        }
     }
 
     /**

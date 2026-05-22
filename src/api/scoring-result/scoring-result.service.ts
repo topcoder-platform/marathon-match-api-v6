@@ -438,13 +438,9 @@ export class ScoringResultService {
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
       const reviewId = this.asString(reviewPayload.reviewObject.id);
+      const isCurrentReview = index === relativeReviewPayloads.length - 1;
 
-      if (index === relativeReviewPayloads.length - 1 && !reviewId) {
-        await this.createReviewSummation(token, reviewPayload.payload);
-        continue;
-      }
-
-      if (!reviewId) {
+      if (!reviewId && !isCurrentReview) {
         this.logger.warn({
           message:
             'Skipping impacted relative review update because reviewSummation id is missing.',
@@ -454,7 +450,12 @@ export class ScoringResultService {
         continue;
       }
 
-      await this.updateReviewSummation(token, reviewId, reviewPayload.payload);
+      await this.upsertReviewSummation(
+        token,
+        testPhase,
+        reviewPayload.payload,
+        reviewId,
+      );
     }
 
     return currentReviewPayload?.payload.aggregateScore;
@@ -1246,25 +1247,44 @@ export class ScoringResultService {
   }
 
   /**
-   * Creates or updates one phase review summation for a submission.
+   * Creates a phase review summation or updates every matching existing row.
    * @param token M2M token for review-api.
    * @param testPhase Normalized or raw phase value.
    * @param payload Review summation payload to persist.
+   * @param preferredReviewSummationId Optional known row ID to update alongside
+   * any phase matches returned by review-api.
    */
   private async upsertReviewSummation(
     token: string,
     testPhase: string,
     payload: ReviewSummationPayload,
+    preferredReviewSummationId?: string,
   ): Promise<void> {
-    const existingReview = await this.findExistingReviewSummation(
+    const existingReviews = await this.findExistingReviewSummations(
       token,
       payload.submissionId,
       testPhase,
     );
-    const reviewSummationId = this.asString(existingReview?.id);
+    const reviewSummationIds = new Set<string>();
+    const normalizedPreferredReviewSummationId = this.asString(
+      preferredReviewSummationId,
+    );
 
-    if (reviewSummationId) {
-      await this.updateReviewSummation(token, reviewSummationId, payload);
+    if (normalizedPreferredReviewSummationId) {
+      reviewSummationIds.add(normalizedPreferredReviewSummationId);
+    }
+
+    for (const existingReview of existingReviews) {
+      const reviewSummationId = this.asString(existingReview.id);
+      if (reviewSummationId) {
+        reviewSummationIds.add(reviewSummationId);
+      }
+    }
+
+    if (reviewSummationIds.size > 0) {
+      for (const reviewSummationId of reviewSummationIds) {
+        await this.updateReviewSummation(token, reviewSummationId, payload);
+      }
       return;
     }
 
@@ -1272,17 +1292,21 @@ export class ScoringResultService {
   }
 
   /**
-   * Looks up an existing review summation for one submission and scoring phase.
+   * Looks up existing review summations for one submission and scoring phase.
+   * Duplicate phase summations can happen when review-api creates a SYSTEM
+   * summation near the same time runner progress creates its placeholder.
+   * Returning every matching row lets final callbacks keep stale progress rows
+   * in sync with the completed score/status.
    * @param token M2M token for review-api.
    * @param submissionId Submission ID.
    * @param testPhase Example, provisional, or system scoring phase.
-   * @returns The matching review summation record, or null when none exists.
+   * @returns Matching review summation records, or the API-filtered fallback row.
    */
-  private async findExistingReviewSummation(
+  private async findExistingReviewSummations(
     token: string,
     submissionId: string,
     testPhase: string,
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<Record<string, unknown>[]> {
     const params: Record<string, string> = {
       metadata: 'true',
       submissionId,
@@ -1306,14 +1330,15 @@ export class ScoringResultService {
       }),
     );
     const reviewSummations = this.extractReviewSummationArray(response.data);
-
-    return (
-      reviewSummations.find((review) =>
-        this.matchesPhaseReview(review, normalizedPhase),
-      ) ??
-      reviewSummations[0] ??
-      null
+    const matchingReviews = reviewSummations.filter((review) =>
+      this.matchesPhaseReview(review, normalizedPhase),
     );
+
+    if (matchingReviews.length > 0) {
+      return matchingReviews;
+    }
+
+    return reviewSummations[0] ? [reviewSummations[0]] : [];
   }
 
   /**

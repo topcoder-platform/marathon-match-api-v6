@@ -109,9 +109,9 @@ describe('ScoringResultService', () => {
     const createReviewSummationSpy = jest
       .spyOn(service as any, 'createReviewSummation')
       .mockResolvedValue(undefined);
-    const findExistingReviewSummationSpy = jest
-      .spyOn(service as any, 'findExistingReviewSummation')
-      .mockResolvedValue(null);
+    const findExistingReviewSummationsSpy = jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
     const completeSystemReviewIfNeededSpy = jest
       .spyOn(service as any, 'completeSystemReviewIfNeeded')
       .mockResolvedValue(undefined);
@@ -138,7 +138,7 @@ describe('ScoringResultService', () => {
         }),
       }),
     );
-    expect(findExistingReviewSummationSpy).toHaveBeenCalledWith(
+    expect(findExistingReviewSummationsSpy).toHaveBeenCalledWith(
       'm2m-token',
       basePayload.submissionId,
       'provisional',
@@ -148,6 +148,88 @@ describe('ScoringResultService', () => {
       undefined,
       basePayload.score,
       'provisional',
+    );
+  });
+
+  it('updates every matching phase review summation so stale progress rows are completed', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: 100,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'progress-summation',
+          isFinal: true,
+          metadata: {
+            testStatus: ScoringTestStatus.InProgress,
+            testType: 'system',
+          },
+        },
+        {
+          id: 'final-summation',
+          isFinal: true,
+          metadata: {
+            testStatus: ScoringTestStatus.Success,
+            testType: 'system',
+          },
+        },
+      ]);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    await expect(service.processScoringResult(systemPayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(updateReviewSummationSpy).toHaveBeenCalledTimes(2);
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'progress-summation',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        isPassing: true,
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+          testProcess: 'system',
+          testType: 'system',
+        }),
+      }),
+    );
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'final-summation',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        isPassing: true,
+        metadata: expect.objectContaining({
+          testStatus: ScoringTestStatus.Success,
+        }),
+      }),
     );
   });
 
@@ -162,8 +244,8 @@ describe('ScoringResultService', () => {
     });
     m2mService.getM2MToken.mockResolvedValue('m2m-token');
     jest
-      .spyOn(service as any, 'findExistingReviewSummation')
-      .mockResolvedValue(null);
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
     httpService.post.mockReturnValue(
       throwError(() => ({
         response: {
@@ -203,14 +285,16 @@ describe('ScoringResultService', () => {
       .spyOn(service as any, 'updateReviewSummation')
       .mockResolvedValue(undefined);
     jest
-      .spyOn(service as any, 'findExistingReviewSummation')
-      .mockResolvedValue({
-        id: 'summation-1',
-        metadata: {
-          testProcess: 'provisional',
-          testType: 'provisional',
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-1',
+          metadata: {
+            testProcess: 'provisional',
+            testType: 'provisional',
+          },
         },
-      });
+      ]);
 
     await expect(
       service.processScoringProgress({
