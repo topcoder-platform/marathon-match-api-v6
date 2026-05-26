@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ScoreDirection } from '@prisma/client';
-import { throwError } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 jest.mock('src/shared/modules/global/ecs.service', () => ({
   EcsService: class EcsService {},
@@ -148,6 +148,11 @@ describe('ScoringResultService', () => {
       undefined,
       basePayload.score,
       'provisional',
+      {
+        challengeId: basePayload.challengeId,
+        scorecardId: undefined,
+        submissionId: basePayload.submissionId,
+      },
     );
   });
 
@@ -229,6 +234,82 @@ describe('ScoringResultService', () => {
         metadata: expect.objectContaining({
           testStatus: ScoringTestStatus.Success,
         }),
+      }),
+    );
+  });
+
+  it('completes a pending system review found by submission when the callback has no reviewId', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: 100,
+      scorecardId: 'scorecard-1',
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [
+            {
+              id: 'review-1',
+              scorecardId: 'scorecard-1',
+              status: 'PENDING',
+              submissionId: basePayload.submissionId,
+            },
+          ],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(of({ data: { id: 'review-1' } }));
+
+    await expect(service.processScoringResult(systemPayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+        params: {
+          challengeId: basePayload.challengeId,
+          perPage: '100',
+          submissionId: basePayload.submissionId,
+          thin: 'true',
+        },
+      }),
+    );
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
       }),
     );
   });
