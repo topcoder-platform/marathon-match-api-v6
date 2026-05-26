@@ -100,6 +100,12 @@ interface RelativeReviewRecord {
   rawTestScores: RelativeTestScoreEntry[];
 }
 
+interface SystemReviewCompletionContext {
+  challengeId: string;
+  submissionId: string;
+  scorecardId?: string;
+}
+
 /**
  * Applies marathon-match review summation updates based on scorer callback data.
  * Relative-score propagation is handled here to keep ECS runner logic lightweight.
@@ -164,6 +170,11 @@ export class ScoringResultService {
           payload.reviewId,
           currentRelativeScore,
           normalizedPhase,
+          {
+            challengeId: payload.challengeId,
+            scorecardId: fallbackScorecardId,
+            submissionId: payload.submissionId,
+          },
         );
         return;
       }
@@ -201,6 +212,11 @@ export class ScoringResultService {
         payload.reviewId,
         currentReviewScore,
         normalizedPhase,
+        {
+          challengeId: payload.challengeId,
+          scorecardId: fallbackScorecardId,
+          submissionId: payload.submissionId,
+        },
       );
       return;
     }
@@ -219,6 +235,11 @@ export class ScoringResultService {
       payload.reviewId,
       reviewPayload.aggregateScore,
       normalizedPhase,
+      {
+        challengeId: payload.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: payload.submissionId,
+      },
     );
   }
 
@@ -1428,46 +1449,147 @@ export class ScoringResultService {
     reviewId: string | undefined,
     finalScore: number,
     testPhase: string,
+    context?: SystemReviewCompletionContext,
   ): Promise<void> {
     if (this.normalizeTestPhase(testPhase) !== 'system') {
       return;
     }
 
     const normalizedReviewId = reviewId?.trim();
-    if (!normalizedReviewId) {
+    const reviewIds = new Set<string>();
+    if (normalizedReviewId) {
+      reviewIds.add(normalizedReviewId);
+    }
+
+    for (const fallbackReviewId of await this.findPendingSystemReviewIds(
+      token,
+      context,
+    )) {
+      reviewIds.add(fallbackReviewId);
+    }
+
+    if (reviewIds.size === 0) {
       return;
     }
 
-    const url = this.buildReviewUrl(normalizedReviewId);
     const payload = {
       status: 'COMPLETED',
       reviewDate: new Date().toISOString(),
       finalScore,
     };
 
+    for (const reviewIdToComplete of reviewIds) {
+      const url = this.buildReviewUrl(reviewIdToComplete);
+      try {
+        await firstValueFrom(
+          this.httpService.patch(url, payload, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        );
+      } catch (error) {
+        const errorDetails = this.extractHttpError(error);
+        this.logger.error({
+          message: 'Failed to mark system review as completed',
+          url,
+          payload,
+          reviewId: reviewIdToComplete,
+          statusCode: errorDetails.statusCode ?? null,
+          responseBody: errorDetails.responseBody ?? null,
+          error: errorDetails.message,
+        });
+        throw new Error(
+          `Failed to mark review ${reviewIdToComplete} as COMPLETED: ${errorDetails.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Finds pending review-api SYSTEM review records for a completed scorer callback
+   * when the runner did not include a review ID. Matching by submission and
+   * configured scorecard lets Marathon Match review phases close after scoring.
+   * @param token M2M token for review-api.
+   * @param context Challenge/submission context from the scorer callback.
+   * @returns Review IDs that are still pending or in progress.
+   */
+  private async findPendingSystemReviewIds(
+    token: string,
+    context?: SystemReviewCompletionContext,
+  ): Promise<string[]> {
+    const challengeId = this.asString(context?.challengeId);
+    const submissionId = this.asString(context?.submissionId);
+    if (!challengeId || !submissionId) {
+      return [];
+    }
+
+    const params: Record<string, string> = {
+      challengeId,
+      perPage: '100',
+      submissionId,
+      thin: 'true',
+    };
+    const url = this.buildReviewsUrl();
+    const expectedScorecardId = this.asString(context?.scorecardId);
+
     try {
-      await firstValueFrom(
-        this.httpService.patch(url, payload, {
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          params,
         }),
       );
+
+      return this.extractReviewArray(response.data)
+        .filter((review) =>
+          this.matchesPendingSystemReview(review, expectedScorecardId),
+        )
+        .map((review) => this.asString(review.id))
+        .filter((id): id is string => Boolean(id));
     } catch (error) {
       const errorDetails = this.extractHttpError(error);
-      this.logger.error({
-        message: 'Failed to mark system review as completed',
+      this.logger.warn({
+        message:
+          'Unable to look up pending system reviews for scorer completion fallback.',
         url,
-        payload,
-        reviewId: normalizedReviewId,
+        params,
         statusCode: errorDetails.statusCode ?? null,
         responseBody: errorDetails.responseBody ?? null,
         error: errorDetails.message,
       });
-      throw new Error(
-        `Failed to mark review ${normalizedReviewId} as COMPLETED: ${errorDetails.message}`,
-      );
+      return [];
     }
+  }
+
+  /**
+   * Checks whether a review-api record is a pending system review candidate.
+   * @param review Review object returned by review-api.
+   * @param expectedScorecardId Optional scorecard ID configured for MM review.
+   * @returns True when the review can be completed by the system scorer fallback.
+   */
+  private matchesPendingSystemReview(
+    review: Record<string, unknown>,
+    expectedScorecardId?: string,
+  ): boolean {
+    const reviewId = this.asString(review.id);
+    if (!reviewId) {
+      return false;
+    }
+
+    const normalizedStatus = this.asString(review.status)?.toUpperCase();
+    if (normalizedStatus !== 'PENDING' && normalizedStatus !== 'IN_PROGRESS') {
+      return false;
+    }
+
+    const scorecardId = this.coalesceString(
+      this.asString(review.scorecardId),
+      this.asString(review.scoreCardId),
+    );
+
+    return !expectedScorecardId || scorecardId === expectedScorecardId;
   }
 
   /**
@@ -1535,6 +1657,13 @@ export class ScoringResultService {
    */
   private buildReviewSummationUrl(): string {
     return `${this.buildReviewApiBaseUrl()}/reviewSummations`;
+  }
+
+  /**
+   * Builds the review-api reviews endpoint URL.
+   */
+  private buildReviewsUrl(): string {
+    return `${this.buildReviewApiBaseUrl()}/reviews`;
   }
 
   /**
@@ -1805,6 +1934,31 @@ export class ScoringResultService {
   private extractReviewSummationArray(
     data: unknown,
   ): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const wrapper = this.asRecord(data);
+    if (Array.isArray(wrapper.data)) {
+      return wrapper.data.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(wrapper.result);
+    if (Array.isArray(resultRecord.content)) {
+      return resultRecord.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(resultRecord.data)) {
+      return resultRecord.data.map((entry) => this.asRecord(entry));
+    }
+
+    return [];
+  }
+
+  /**
+   * Extracts review-api review arrays from paginated and wrapped responses.
+   */
+  private extractReviewArray(data: unknown): Record<string, unknown>[] {
     if (Array.isArray(data)) {
       return data.map((entry) => this.asRecord(entry));
     }
