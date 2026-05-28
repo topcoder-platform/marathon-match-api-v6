@@ -1,0 +1,2307 @@
+{
+  "challenge": {
+    "name": "TastyPizza Full Test Challenge",
+    "typeId": "929bc408-9cf2-4b3e-ba71-adfbf693046c",
+    "trackId": "c0f5d461-8219-4c14-878a-c3a3f356466d",
+    "timelineTemplateId": "6969125a-a12f-4b89-8de6-e66b0056f36b",
+    "projectId": "100575",
+    "phaseDurations": {
+      "registration": 360,
+      "submission": 360
+    },
+    "phaseIds": {
+      "registration": "a93544bc-c165-4af4-b55e-18f3593b457a",
+      "submission": "6950164f-3c5e-4bdc-abc8-22aaf5a1bd49"
+    },
+    "source": {
+      "challengeId": "30145294",
+      "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb"
+    }
+  },
+  "tester": {
+    "name": "TastyPizzaTester",
+    "version": "1.0.0",
+    "className": "TastyPizzaTester"
+  },
+  "config": {
+    "name": "TastyPizza Full Test Config",
+    "reviewScorecardId": "xD-a3IqyTpzJmj",
+    "taskDefinitionName": "mm-ecs-runner",
+    "taskDefinitionVersion": "1",
+    "relativeScoringEnabled": true,
+    "scoreDirection": "MAXIMIZE",
+    "example": {
+      "startSeed": "1",
+      "numberOfTests": "10"
+    },
+    "provisional": {
+      "startSeed": "48644470292808",
+      "numberOfTests": "50"
+    },
+    "system": {
+      "startSeed": "70534425818278",
+      "numberOfTests": "5000"
+    }
+  },
+  "submissions": [
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/001-wleite-5cf003e2-444.zip",
+      "source": {
+        "submissionId": "5cf003e2-4443-45ba-807c-637dc4b91b8a",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "5cf003e2-4443-45ba-807c-637dc4b91b8a.zip_",
+        "submittedDate": "2020-11-15T03:45:44.790Z",
+        "createdAt": "2020-11-15T03:45:44.790Z",
+        "updatedAt": "2020-11-15T03:45:48.556Z",
+        "legacySubmissionId": "414802",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/5cf003e2-4443-45ba-807c-637dc4b91b8a.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/002-sullyper-36fa426c-8d9.zip",
+      "source": {
+        "submissionId": "36fa426c-8d9e-4a18-9461-6625e920de33",
+        "memberId": "22751029",
+        "memberHandle": "sullyper",
+        "originalFileName": "36fa426c-8d9e-4a18-9461-6625e920de33.zip_",
+        "submittedDate": "2020-11-15T04:05:27.837Z",
+        "createdAt": "2020-11-15T04:05:27.837Z",
+        "updatedAt": "2020-11-15T04:05:31.397Z",
+        "legacySubmissionId": "414803",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions-dmz/bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb-22751029-SUBMISSION_ZIP-1605413122626.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/003-wleite-27da59c2-b43.zip",
+      "source": {
+        "submissionId": "27da59c2-b43c-4a8b-b9ed-780edaf2fb08",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "27da59c2-b43c-4a8b-b9ed-780edaf2fb08.zip_",
+        "submittedDate": "2020-11-15T04:12:26.817Z",
+        "createdAt": "2020-11-15T04:12:26.817Z",
+        "updatedAt": "2020-11-15T04:12:30.313Z",
+        "legacySubmissionId": "414804",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/27da59c2-b43c-4a8b-b9ed-780edaf2fb08.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/004-nika-43fac4b5-80b.zip",
+      "source": {
+        "submissionId": "43fac4b5-80b7-4fb1-bf09-8471a1eac161",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "43fac4b5-80b7-4fb1-bf09-8471a1eac161.zip_",
+        "submittedDate": "2020-11-15T04:17:47.116Z",
+        "createdAt": "2020-11-15T04:17:47.116Z",
+        "updatedAt": "2020-11-15T04:17:50.559Z",
+        "legacySubmissionId": "414805",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/43fac4b5-80b7-4fb1-bf09-8471a1eac161.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/005-tomerun-26de4cfe-199.zip",
+      "source": {
+        "submissionId": "26de4cfe-1992-4951-9092-a0f8e1df2128",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "26de4cfe-1992-4951-9092-a0f8e1df2128.zip_",
+        "submittedDate": "2020-11-15T04:40:21.459Z",
+        "createdAt": "2020-11-15T04:40:21.459Z",
+        "updatedAt": "2020-11-15T04:40:26.144Z",
+        "legacySubmissionId": "414807",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/26de4cfe-1992-4951-9092-a0f8e1df2128.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/006-tourist-9bc3626d-989.zip",
+      "source": {
+        "submissionId": "9bc3626d-9897-42c6-89fb-6104c65e4b30",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "9bc3626d-9897-42c6-89fb-6104c65e4b30.zip_",
+        "submittedDate": "2020-11-15T04:59:00.672Z",
+        "createdAt": "2020-11-15T04:59:00.672Z",
+        "updatedAt": "2020-11-15T04:59:04.609Z",
+        "legacySubmissionId": "414808",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/9bc3626d-9897-42c6-89fb-6104c65e4b30.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/007-wleite-74a66b28-5ca.zip",
+      "source": {
+        "submissionId": "74a66b28-5ca4-4891-a431-f790f184bf09",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "74a66b28-5ca4-4891-a431-f790f184bf09.zip_",
+        "submittedDate": "2020-11-15T05:06:51.271Z",
+        "createdAt": "2020-11-15T05:06:51.271Z",
+        "updatedAt": "2020-11-15T05:06:54.661Z",
+        "legacySubmissionId": "414809",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/74a66b28-5ca4-4891-a431-f790f184bf09.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/008-Psyho-e666ae23-43c.zip",
+      "source": {
+        "submissionId": "e666ae23-43cf-4aa8-b5a7-f3dc23788a99",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "e666ae23-43cf-4aa8-b5a7-f3dc23788a99.zip_",
+        "submittedDate": "2020-11-15T05:27:02.016Z",
+        "createdAt": "2020-11-15T05:27:02.016Z",
+        "updatedAt": "2020-11-15T05:27:05.579Z",
+        "legacySubmissionId": "414824",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/e666ae23-43cf-4aa8-b5a7-f3dc23788a99.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/009-tourist-7babad3b-7cd.zip",
+      "source": {
+        "submissionId": "7babad3b-7cdb-4b04-a9ea-d0d089f78225",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "7babad3b-7cdb-4b04-a9ea-d0d089f78225.zip_",
+        "submittedDate": "2020-11-15T05:32:17.510Z",
+        "createdAt": "2020-11-15T05:32:17.510Z",
+        "updatedAt": "2020-11-15T05:32:21.290Z",
+        "legacySubmissionId": "414825",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/7babad3b-7cdb-4b04-a9ea-d0d089f78225.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/010-nika-eaf07f9d-d63.zip",
+      "source": {
+        "submissionId": "eaf07f9d-d63b-43b7-9d79-71b99dad220e",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "eaf07f9d-d63b-43b7-9d79-71b99dad220e.zip_",
+        "submittedDate": "2020-11-15T05:39:56.513Z",
+        "createdAt": "2020-11-15T05:39:56.513Z",
+        "updatedAt": "2020-11-15T05:39:59.623Z",
+        "legacySubmissionId": "414827",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/eaf07f9d-d63b-43b7-9d79-71b99dad220e.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/011-CatalinT-55f0794f-bcc.zip",
+      "source": {
+        "submissionId": "55f0794f-bcc7-4d26-9710-f04f1ca81196",
+        "memberId": "10544397",
+        "memberHandle": "CatalinT",
+        "originalFileName": "55f0794f-bcc7-4d26-9710-f04f1ca81196.zip_",
+        "submittedDate": "2020-11-15T05:40:13.559Z",
+        "createdAt": "2020-11-15T05:40:13.559Z",
+        "updatedAt": "2020-11-15T05:40:16.343Z",
+        "legacySubmissionId": "414828",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/55f0794f-bcc7-4d26-9710-f04f1ca81196.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/012-tourist-7a73552f-b86.zip",
+      "source": {
+        "submissionId": "7a73552f-b86b-482f-9688-cc69628ad9a2",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "7a73552f-b86b-482f-9688-cc69628ad9a2.zip_",
+        "submittedDate": "2020-11-15T05:41:01.863Z",
+        "createdAt": "2020-11-15T05:41:01.863Z",
+        "updatedAt": "2020-11-15T05:41:05.347Z",
+        "legacySubmissionId": "414829",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/7a73552f-b86b-482f-9688-cc69628ad9a2.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/013-blackmath-be5a5834-543.zip",
+      "source": {
+        "submissionId": "be5a5834-5432-4e0d-8ab3-1cb433e16c4a",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "be5a5834-5432-4e0d-8ab3-1cb433e16c4a.zip_",
+        "submittedDate": "2020-11-15T05:51:59.947Z",
+        "createdAt": "2020-11-15T05:51:59.947Z",
+        "updatedAt": "2020-11-15T05:52:03.516Z",
+        "legacySubmissionId": "414840",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/be5a5834-5432-4e0d-8ab3-1cb433e16c4a.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/014-blackmath-44762c3f-df0.zip",
+      "source": {
+        "submissionId": "44762c3f-df00-4a3c-85d0-4c4b3095f29b",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "44762c3f-df00-4a3c-85d0-4c4b3095f29b.zip_",
+        "submittedDate": "2020-11-15T06:06:38.323Z",
+        "createdAt": "2020-11-15T06:06:38.323Z",
+        "updatedAt": "2020-11-15T06:06:41.781Z",
+        "legacySubmissionId": "414841",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/44762c3f-df00-4a3c-85d0-4c4b3095f29b.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/015-wleite-da5d1201-def.zip",
+      "source": {
+        "submissionId": "da5d1201-defe-4b62-ae68-4dc5f725aa39",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "da5d1201-defe-4b62-ae68-4dc5f725aa39.zip_",
+        "submittedDate": "2020-11-15T06:10:43.573Z",
+        "createdAt": "2020-11-15T06:10:43.573Z",
+        "updatedAt": "2020-11-15T06:10:47.428Z",
+        "legacySubmissionId": "414842",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/da5d1201-defe-4b62-ae68-4dc5f725aa39.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/016-Daiver19-c8016281-b22.zip",
+      "source": {
+        "submissionId": "c8016281-b221-4f0f-9d6c-8f92af97d300",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "c8016281-b221-4f0f-9d6c-8f92af97d300.zip_",
+        "submittedDate": "2020-11-15T06:12:26.293Z",
+        "createdAt": "2020-11-15T06:12:26.293Z",
+        "updatedAt": "2020-11-15T06:12:30.020Z",
+        "legacySubmissionId": "414846",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c8016281-b221-4f0f-9d6c-8f92af97d300.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/017-Daiver19-cd13927c-415.zip",
+      "source": {
+        "submissionId": "cd13927c-415f-4b98-b9fb-ff6472526f80",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "cd13927c-415f-4b98-b9fb-ff6472526f80.zip_",
+        "submittedDate": "2020-11-15T06:19:39.543Z",
+        "createdAt": "2020-11-15T06:19:39.543Z",
+        "updatedAt": "2020-11-15T06:19:44.381Z",
+        "legacySubmissionId": "414847",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/cd13927c-415f-4b98-b9fb-ff6472526f80.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/018-iehn-72692f6e-bed.zip",
+      "source": {
+        "submissionId": "72692f6e-bed1-491e-a498-22986d80b7a2",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "72692f6e-bed1-491e-a498-22986d80b7a2.zip_",
+        "submittedDate": "2020-11-15T06:31:14.222Z",
+        "createdAt": "2020-11-15T06:31:14.222Z",
+        "updatedAt": "2020-11-15T06:31:17.314Z",
+        "legacySubmissionId": "414848",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/72692f6e-bed1-491e-a498-22986d80b7a2.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/019-CatalinT-490b5c8b-e91.zip",
+      "source": {
+        "submissionId": "490b5c8b-e910-408f-90a8-664a94a80328",
+        "memberId": "10544397",
+        "memberHandle": "CatalinT",
+        "originalFileName": "490b5c8b-e910-408f-90a8-664a94a80328.zip_",
+        "submittedDate": "2020-11-15T06:40:11.708Z",
+        "createdAt": "2020-11-15T06:40:11.708Z",
+        "updatedAt": "2020-11-15T06:40:14.559Z",
+        "legacySubmissionId": "414851",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/490b5c8b-e910-408f-90a8-664a94a80328.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/020-Psyho-fefb5ff8-205.zip",
+      "source": {
+        "submissionId": "fefb5ff8-205f-4017-9a58-9e4a919d23bc",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "fefb5ff8-205f-4017-9a58-9e4a919d23bc.zip_",
+        "submittedDate": "2020-11-15T06:43:25.162Z",
+        "createdAt": "2020-11-15T06:43:25.162Z",
+        "updatedAt": "2020-11-15T06:43:28.387Z",
+        "legacySubmissionId": "414852",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/fefb5ff8-205f-4017-9a58-9e4a919d23bc.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/021-CatalinT-5650f246-203.zip",
+      "source": {
+        "submissionId": "5650f246-2036-4328-951d-554281144ef2",
+        "memberId": "10544397",
+        "memberHandle": "CatalinT",
+        "originalFileName": "5650f246-2036-4328-951d-554281144ef2.zip_",
+        "submittedDate": "2020-11-15T07:00:28.812Z",
+        "createdAt": "2020-11-15T07:00:28.812Z",
+        "updatedAt": "2020-11-15T07:00:31.684Z",
+        "legacySubmissionId": "414855",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/5650f246-2036-4328-951d-554281144ef2.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/022-Daiver19-87b4f638-aba.zip",
+      "source": {
+        "submissionId": "87b4f638-aba9-4796-b9cc-d861ba5388c5",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "87b4f638-aba9-4796-b9cc-d861ba5388c5.zip_",
+        "submittedDate": "2020-11-15T07:11:25.184Z",
+        "createdAt": "2020-11-15T07:11:25.184Z",
+        "updatedAt": "2020-11-15T07:11:28.366Z",
+        "legacySubmissionId": "414857",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/87b4f638-aba9-4796-b9cc-d861ba5388c5.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/023-iehn-a4bf0bbb-4b5.zip",
+      "source": {
+        "submissionId": "a4bf0bbb-4b51-48d5-a9dd-ec7959321fed",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "a4bf0bbb-4b51-48d5-a9dd-ec7959321fed.zip_",
+        "submittedDate": "2020-11-15T07:12:16.776Z",
+        "createdAt": "2020-11-15T07:12:16.776Z",
+        "updatedAt": "2020-11-15T07:12:20.477Z",
+        "legacySubmissionId": "414858",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/a4bf0bbb-4b51-48d5-a9dd-ec7959321fed.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/024-iehn-595fa7bd-dff.zip",
+      "source": {
+        "submissionId": "595fa7bd-dff0-4ad2-be37-7dd7a38c62ba",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "595fa7bd-dff0-4ad2-be37-7dd7a38c62ba.zip_",
+        "submittedDate": "2020-11-15T07:14:31.695Z",
+        "createdAt": "2020-11-15T07:14:31.695Z",
+        "updatedAt": "2020-11-15T07:14:34.550Z",
+        "legacySubmissionId": "414859",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/595fa7bd-dff0-4ad2-be37-7dd7a38c62ba.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/025-tomerun-8169ec02-489.zip",
+      "source": {
+        "submissionId": "8169ec02-4892-4591-95aa-65dd81a258c7",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "8169ec02-4892-4591-95aa-65dd81a258c7.zip_",
+        "submittedDate": "2020-11-15T07:16:07.413Z",
+        "createdAt": "2020-11-15T07:16:07.413Z",
+        "updatedAt": "2020-11-15T07:16:10.954Z",
+        "legacySubmissionId": "414860",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8169ec02-4892-4591-95aa-65dd81a258c7.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/026-Daiver19-521aadaa-1ed.zip",
+      "source": {
+        "submissionId": "521aadaa-1ed4-4dbd-9976-791b6046574b",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "521aadaa-1ed4-4dbd-9976-791b6046574b.zip_",
+        "submittedDate": "2020-11-15T07:20:23.369Z",
+        "createdAt": "2020-11-15T07:20:23.369Z",
+        "updatedAt": "2020-11-15T07:20:27.054Z",
+        "legacySubmissionId": "414862",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/521aadaa-1ed4-4dbd-9976-791b6046574b.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/027-tomerun-065bced1-71c.zip",
+      "source": {
+        "submissionId": "065bced1-71ce-4b57-ac0a-05b21dab4715",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "065bced1-71ce-4b57-ac0a-05b21dab4715.zip_",
+        "submittedDate": "2020-11-15T07:25:11.115Z",
+        "createdAt": "2020-11-15T07:25:11.115Z",
+        "updatedAt": "2020-11-15T07:25:14.435Z",
+        "legacySubmissionId": "414865",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/065bced1-71ce-4b57-ac0a-05b21dab4715.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/028-nika-cf1b793f-928.zip",
+      "source": {
+        "submissionId": "cf1b793f-928a-4fc0-9045-04323806d1f7",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "cf1b793f-928a-4fc0-9045-04323806d1f7.zip_",
+        "submittedDate": "2020-11-15T07:26:54.966Z",
+        "createdAt": "2020-11-15T07:26:54.966Z",
+        "updatedAt": "2020-11-15T07:26:58.832Z",
+        "legacySubmissionId": "414866",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/cf1b793f-928a-4fc0-9045-04323806d1f7.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/029-nika-0719bf51-20c.zip",
+      "source": {
+        "submissionId": "0719bf51-20ca-40d0-8029-1deb4a84f84b",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "0719bf51-20ca-40d0-8029-1deb4a84f84b.zip_",
+        "submittedDate": "2020-11-15T07:30:54.165Z",
+        "createdAt": "2020-11-15T07:30:54.165Z",
+        "updatedAt": "2020-11-15T07:30:58.099Z",
+        "legacySubmissionId": "414867",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0719bf51-20ca-40d0-8029-1deb4a84f84b.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/030-tourist-ce18a01f-513.zip",
+      "source": {
+        "submissionId": "ce18a01f-513f-4713-ba09-63499abcf833",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "ce18a01f-513f-4713-ba09-63499abcf833.zip_",
+        "submittedDate": "2020-11-15T07:33:53.978Z",
+        "createdAt": "2020-11-15T07:33:53.978Z",
+        "updatedAt": "2020-11-15T07:33:57.619Z",
+        "legacySubmissionId": "414869",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/ce18a01f-513f-4713-ba09-63499abcf833.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/031-wleite-69bad20b-e33.zip",
+      "source": {
+        "submissionId": "69bad20b-e33e-4168-9b66-65efd60aa255",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "69bad20b-e33e-4168-9b66-65efd60aa255.zip_",
+        "submittedDate": "2020-11-15T07:41:22.837Z",
+        "createdAt": "2020-11-15T07:41:22.837Z",
+        "updatedAt": "2020-11-15T07:41:26.541Z",
+        "legacySubmissionId": "414870",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/69bad20b-e33e-4168-9b66-65efd60aa255.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/032-tomerun-830e4248-e85.zip",
+      "source": {
+        "submissionId": "830e4248-e851-405d-8592-0ded762ff6a0",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "830e4248-e851-405d-8592-0ded762ff6a0.zip_",
+        "submittedDate": "2020-11-15T08:01:32.440Z",
+        "createdAt": "2020-11-15T08:01:32.440Z",
+        "updatedAt": "2020-11-15T08:01:35.994Z",
+        "legacySubmissionId": "414873",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/830e4248-e851-405d-8592-0ded762ff6a0.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/033-Daiver19-4946195f-6c3.zip",
+      "source": {
+        "submissionId": "4946195f-6c32-4726-a07f-351bd62b2951",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "4946195f-6c32-4726-a07f-351bd62b2951.zip_",
+        "submittedDate": "2020-11-15T08:08:42.600Z",
+        "createdAt": "2020-11-15T08:08:42.600Z",
+        "updatedAt": "2020-11-15T08:08:45.649Z",
+        "legacySubmissionId": "414875",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/4946195f-6c32-4726-a07f-351bd62b2951.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/034-iehn-fe7f8227-a7d.zip",
+      "source": {
+        "submissionId": "fe7f8227-a7d8-4299-9256-8b92758c5313",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "fe7f8227-a7d8-4299-9256-8b92758c5313.zip_",
+        "submittedDate": "2020-11-15T08:15:19.299Z",
+        "createdAt": "2020-11-15T08:15:19.299Z",
+        "updatedAt": "2020-11-15T08:15:22.385Z",
+        "legacySubmissionId": "414876",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/fe7f8227-a7d8-4299-9256-8b92758c5313.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/035-nika-d19cb3e3-65a.zip",
+      "source": {
+        "submissionId": "d19cb3e3-65a4-4dde-aad1-f841c03ad842",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "d19cb3e3-65a4-4dde-aad1-f841c03ad842.zip_",
+        "submittedDate": "2020-11-15T08:17:54.571Z",
+        "createdAt": "2020-11-15T08:17:54.571Z",
+        "updatedAt": "2020-11-15T08:17:57.982Z",
+        "legacySubmissionId": "414878",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/d19cb3e3-65a4-4dde-aad1-f841c03ad842.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/036-Psyho-d5578b0d-b77.zip",
+      "source": {
+        "submissionId": "d5578b0d-b770-4103-b446-0625ba819c90",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "d5578b0d-b770-4103-b446-0625ba819c90.zip_",
+        "submittedDate": "2020-11-15T08:24:10.035Z",
+        "createdAt": "2020-11-15T08:24:10.035Z",
+        "updatedAt": "2020-11-15T08:24:15.286Z",
+        "legacySubmissionId": "414879",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/d5578b0d-b770-4103-b446-0625ba819c90.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/037-tomerun-3526d5a1-eb9.zip",
+      "source": {
+        "submissionId": "3526d5a1-eb94-4706-b5a8-9bcfbe7847e5",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "3526d5a1-eb94-4706-b5a8-9bcfbe7847e5.zip_",
+        "submittedDate": "2020-11-15T08:50:37.369Z",
+        "createdAt": "2020-11-15T08:50:37.369Z",
+        "updatedAt": "2020-11-15T08:50:41.318Z",
+        "legacySubmissionId": "414881",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3526d5a1-eb94-4706-b5a8-9bcfbe7847e5.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/038-sullyper-79a4fcd0-222.zip",
+      "source": {
+        "submissionId": "79a4fcd0-2227-462e-b841-30e6bda60240",
+        "memberId": "22751029",
+        "memberHandle": "sullyper",
+        "originalFileName": "79a4fcd0-2227-462e-b841-30e6bda60240.zip_",
+        "submittedDate": "2020-11-15T08:52:22.127Z",
+        "createdAt": "2020-11-15T08:52:22.127Z",
+        "updatedAt": "2020-11-15T08:52:25.452Z",
+        "legacySubmissionId": "414882",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/79a4fcd0-2227-462e-b841-30e6bda60240.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/039-Milanin-c60051b4-93b.zip",
+      "source": {
+        "submissionId": "c60051b4-93b4-4577-adcf-9cdeda6ef55e",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "c60051b4-93b4-4577-adcf-9cdeda6ef55e.zip_",
+        "submittedDate": "2020-11-15T09:21:46.480Z",
+        "createdAt": "2020-11-15T09:21:46.480Z",
+        "updatedAt": "2020-11-15T09:21:49.827Z",
+        "legacySubmissionId": "414885",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c60051b4-93b4-4577-adcf-9cdeda6ef55e.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/040-Daiver19-1a27ce8a-ef1.zip",
+      "source": {
+        "submissionId": "1a27ce8a-ef11-4a95-aa2d-872d496b30b7",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "1a27ce8a-ef11-4a95-aa2d-872d496b30b7.zip_",
+        "submittedDate": "2020-11-15T09:42:12.710Z",
+        "createdAt": "2020-11-15T09:42:12.710Z",
+        "updatedAt": "2020-11-15T09:42:16.145Z",
+        "legacySubmissionId": "414887",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/1a27ce8a-ef11-4a95-aa2d-872d496b30b7.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/041-iehn-3a175842-b0b.zip",
+      "source": {
+        "submissionId": "3a175842-b0ba-4679-853d-549ca6df336d",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "3a175842-b0ba-4679-853d-549ca6df336d.zip_",
+        "submittedDate": "2020-11-15T09:50:34.394Z",
+        "createdAt": "2020-11-15T09:50:34.394Z",
+        "updatedAt": "2020-11-15T09:50:37.579Z",
+        "legacySubmissionId": "414888",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions-dmz/bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb-23016887-SUBMISSION_ZIP-1605433825740.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/042-vdave-a7753372-002.zip",
+      "source": {
+        "submissionId": "a7753372-0025-45c5-873d-7ebcfb86cb16",
+        "memberId": "14991227",
+        "memberHandle": "vdave",
+        "originalFileName": "a7753372-0025-45c5-873d-7ebcfb86cb16.zip_",
+        "submittedDate": "2020-11-15T09:50:41.986Z",
+        "createdAt": "2020-11-15T09:50:41.986Z",
+        "updatedAt": "2020-11-15T09:50:45.411Z",
+        "legacySubmissionId": "414889",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/a7753372-0025-45c5-873d-7ebcfb86cb16.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/043-Daiver19-0976d7d3-c55.zip",
+      "source": {
+        "submissionId": "0976d7d3-c552-4d61-9496-a7059612536d",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "0976d7d3-c552-4d61-9496-a7059612536d.zip_",
+        "submittedDate": "2020-11-15T09:52:47.334Z",
+        "createdAt": "2020-11-15T09:52:47.334Z",
+        "updatedAt": "2020-11-15T09:52:50.471Z",
+        "legacySubmissionId": "414890",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0976d7d3-c552-4d61-9496-a7059612536d.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/044-wleite-2620c40c-181.zip",
+      "source": {
+        "submissionId": "2620c40c-1819-49ae-8783-9df7c4855aa3",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "2620c40c-1819-49ae-8783-9df7c4855aa3.zip_",
+        "submittedDate": "2020-11-15T10:07:25.878Z",
+        "createdAt": "2020-11-15T10:07:25.878Z",
+        "updatedAt": "2020-11-15T10:07:29.102Z",
+        "legacySubmissionId": "414891",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/2620c40c-1819-49ae-8783-9df7c4855aa3.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/045-tourist-2d437f64-89d.zip",
+      "source": {
+        "submissionId": "2d437f64-89d4-4678-be35-c6b49c727222",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "2d437f64-89d4-4678-be35-c6b49c727222.zip_",
+        "submittedDate": "2020-11-15T10:09:07.875Z",
+        "createdAt": "2020-11-15T10:09:07.875Z",
+        "updatedAt": "2020-11-15T10:09:10.865Z",
+        "legacySubmissionId": "414892",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/2d437f64-89d4-4678-be35-c6b49c727222.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/046-vdave-79b64416-6b5.zip",
+      "source": {
+        "submissionId": "79b64416-6b51-4e85-b31e-165801fc299a",
+        "memberId": "14991227",
+        "memberHandle": "vdave",
+        "originalFileName": "79b64416-6b51-4e85-b31e-165801fc299a.zip_",
+        "submittedDate": "2020-11-15T11:05:39.957Z",
+        "createdAt": "2020-11-15T11:05:39.957Z",
+        "updatedAt": "2020-11-15T11:07:53.527Z",
+        "legacySubmissionId": "414898",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions-dmz/bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb-14991227-SUBMISSION_ZIP-1605438329237.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/047-tomerun-c0dea79b-69b.zip",
+      "source": {
+        "submissionId": "c0dea79b-69ba-4965-a68b-6fd1cc2933e9",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "c0dea79b-69ba-4965-a68b-6fd1cc2933e9.zip_",
+        "submittedDate": "2020-11-15T11:26:05.591Z",
+        "createdAt": "2020-11-15T11:26:05.591Z",
+        "updatedAt": "2020-11-15T11:26:08.672Z",
+        "legacySubmissionId": "414900",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c0dea79b-69ba-4965-a68b-6fd1cc2933e9.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/048-blackmath-b49b39d3-aaa.zip",
+      "source": {
+        "submissionId": "b49b39d3-aaa5-4bc8-b58e-eaf0c07f8c12",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "b49b39d3-aaa5-4bc8-b58e-eaf0c07f8c12.zip_",
+        "submittedDate": "2020-11-15T11:38:27.471Z",
+        "createdAt": "2020-11-15T11:38:27.471Z",
+        "updatedAt": "2020-11-15T11:38:30.541Z",
+        "legacySubmissionId": "414901",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/b49b39d3-aaa5-4bc8-b58e-eaf0c07f8c12.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/049-iehn-87d5f224-c29.zip",
+      "source": {
+        "submissionId": "87d5f224-c29f-43b7-a9a3-188e697191ed",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "87d5f224-c29f-43b7-a9a3-188e697191ed.zip_",
+        "submittedDate": "2020-11-15T11:49:51.438Z",
+        "createdAt": "2020-11-15T11:49:51.438Z",
+        "updatedAt": "2020-11-15T11:49:54.598Z",
+        "legacySubmissionId": "414902",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions-dmz/bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb-23016887-SUBMISSION_ZIP-1605440987504.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/050-nika-6e34244c-67f.zip",
+      "source": {
+        "submissionId": "6e34244c-67fd-4858-9fd5-d1134c2cbbd3",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "6e34244c-67fd-4858-9fd5-d1134c2cbbd3.zip_",
+        "submittedDate": "2020-11-15T12:14:39.014Z",
+        "createdAt": "2020-11-15T12:14:39.014Z",
+        "updatedAt": "2020-11-15T12:14:42.466Z",
+        "legacySubmissionId": "414904",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/6e34244c-67fd-4858-9fd5-d1134c2cbbd3.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/051-nika-c84d9a90-1fb.zip",
+      "source": {
+        "submissionId": "c84d9a90-1fbd-47a0-b536-f9c46222e4bf",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "c84d9a90-1fbd-47a0-b536-f9c46222e4bf.zip_",
+        "submittedDate": "2020-11-15T12:23:20.310Z",
+        "createdAt": "2020-11-15T12:23:20.310Z",
+        "updatedAt": "2020-11-15T12:23:23.987Z",
+        "legacySubmissionId": "414907",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c84d9a90-1fbd-47a0-b536-f9c46222e4bf.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/052-iehn-87450e05-34e.zip",
+      "source": {
+        "submissionId": "87450e05-34ed-4492-a6be-9ae1ec9356a9",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "87450e05-34ed-4492-a6be-9ae1ec9356a9.zip_",
+        "submittedDate": "2020-11-15T12:28:36.661Z",
+        "createdAt": "2020-11-15T12:28:36.661Z",
+        "updatedAt": "2020-11-15T12:28:39.872Z",
+        "legacySubmissionId": "414909",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/87450e05-34ed-4492-a6be-9ae1ec9356a9.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/053-tomerun-d9928702-f57.zip",
+      "source": {
+        "submissionId": "d9928702-f576-4a67-950b-e93911aa6a11",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "d9928702-f576-4a67-950b-e93911aa6a11.zip_",
+        "submittedDate": "2020-11-15T12:45:05.844Z",
+        "createdAt": "2020-11-15T12:45:05.844Z",
+        "updatedAt": "2020-11-15T12:45:09.143Z",
+        "legacySubmissionId": "414912",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/d9928702-f576-4a67-950b-e93911aa6a11.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/054-tourist-13677392-897.zip",
+      "source": {
+        "submissionId": "13677392-897c-4473-9199-2311eadd162d",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "13677392-897c-4473-9199-2311eadd162d.zip_",
+        "submittedDate": "2020-11-15T13:16:31.778Z",
+        "createdAt": "2020-11-15T13:16:31.778Z",
+        "updatedAt": "2020-11-15T13:16:34.885Z",
+        "legacySubmissionId": "414916",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/13677392-897c-4473-9199-2311eadd162d.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/055-tomerun-eff8f92f-f16.zip",
+      "source": {
+        "submissionId": "eff8f92f-f163-4321-aed7-88dd5ec53c1d",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "eff8f92f-f163-4321-aed7-88dd5ec53c1d.zip_",
+        "submittedDate": "2020-11-15T14:02:13.914Z",
+        "createdAt": "2020-11-15T14:02:13.914Z",
+        "updatedAt": "2020-11-15T14:02:17.180Z",
+        "legacySubmissionId": "414918",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/eff8f92f-f163-4321-aed7-88dd5ec53c1d.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/056-iehn-c98c3909-211.zip",
+      "source": {
+        "submissionId": "c98c3909-211e-4314-a28f-4d00cc5df420",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "c98c3909-211e-4314-a28f-4d00cc5df420.zip_",
+        "submittedDate": "2020-11-15T14:10:30.431Z",
+        "createdAt": "2020-11-15T14:10:30.431Z",
+        "updatedAt": "2020-11-15T14:10:34.209Z",
+        "legacySubmissionId": "414919",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c98c3909-211e-4314-a28f-4d00cc5df420.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/057-nika-c0bfd7f3-eca.zip",
+      "source": {
+        "submissionId": "c0bfd7f3-eca2-479c-aabc-bf33f69c0f82",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "c0bfd7f3-eca2-479c-aabc-bf33f69c0f82.zip_",
+        "submittedDate": "2020-11-15T14:57:11.366Z",
+        "createdAt": "2020-11-15T14:57:11.366Z",
+        "updatedAt": "2020-11-15T14:57:14.417Z",
+        "legacySubmissionId": "414953",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c0bfd7f3-eca2-479c-aabc-bf33f69c0f82.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/058-nika-aa05f519-f91.zip",
+      "source": {
+        "submissionId": "aa05f519-f91e-4e56-9b9a-e814d5a4c977",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "aa05f519-f91e-4e56-9b9a-e814d5a4c977.zip_",
+        "submittedDate": "2020-11-15T15:00:51.339Z",
+        "createdAt": "2020-11-15T15:00:51.339Z",
+        "updatedAt": "2020-11-15T15:00:55.124Z",
+        "legacySubmissionId": "414954",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/aa05f519-f91e-4e56-9b9a-e814d5a4c977.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/059-tomerun-d67d21f1-c1f.zip",
+      "source": {
+        "submissionId": "d67d21f1-c1f8-4627-b7eb-6cbb352dd4c2",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "d67d21f1-c1f8-4627-b7eb-6cbb352dd4c2.zip_",
+        "submittedDate": "2020-11-15T15:02:51.962Z",
+        "createdAt": "2020-11-15T15:02:51.962Z",
+        "updatedAt": "2020-11-15T15:02:59.126Z",
+        "legacySubmissionId": "414955",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/d67d21f1-c1f8-4627-b7eb-6cbb352dd4c2.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/060-wleite-4ee2f47e-2a4.zip",
+      "source": {
+        "submissionId": "4ee2f47e-2a46-4f19-bbd2-d5800db51095",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "4ee2f47e-2a46-4f19-bbd2-d5800db51095.zip_",
+        "submittedDate": "2020-11-15T15:16:52.321Z",
+        "createdAt": "2020-11-15T15:16:52.321Z",
+        "updatedAt": "2020-11-15T15:16:55.770Z",
+        "legacySubmissionId": "414957",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/4ee2f47e-2a46-4f19-bbd2-d5800db51095.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/061-iehn-8ede0522-62d.zip",
+      "source": {
+        "submissionId": "8ede0522-62d0-4777-bdb2-d65c6d93a6cd",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "8ede0522-62d0-4777-bdb2-d65c6d93a6cd.zip_",
+        "submittedDate": "2020-11-15T15:51:03.451Z",
+        "createdAt": "2020-11-15T15:51:03.451Z",
+        "updatedAt": "2020-11-15T15:51:06.667Z",
+        "legacySubmissionId": "414959",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8ede0522-62d0-4777-bdb2-d65c6d93a6cd.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/062-Psyho-c1f41809-827.zip",
+      "source": {
+        "submissionId": "c1f41809-8273-40ae-9adf-3f04fc7d1c93",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "c1f41809-8273-40ae-9adf-3f04fc7d1c93.zip_",
+        "submittedDate": "2020-11-15T16:20:10.831Z",
+        "createdAt": "2020-11-15T16:20:10.831Z",
+        "updatedAt": "2020-11-15T16:20:14.293Z",
+        "legacySubmissionId": "414993",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c1f41809-8273-40ae-9adf-3f04fc7d1c93.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/063-tomerun-c862f6dd-c50.zip",
+      "source": {
+        "submissionId": "c862f6dd-c503-4393-b011-b08c18af8bba",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "c862f6dd-c503-4393-b011-b08c18af8bba.zip_",
+        "submittedDate": "2020-11-15T16:23:52.408Z",
+        "createdAt": "2020-11-15T16:23:52.408Z",
+        "updatedAt": "2020-11-15T16:23:55.780Z",
+        "legacySubmissionId": "414994",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c862f6dd-c503-4393-b011-b08c18af8bba.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/064-iehn-6ae44541-724.zip",
+      "source": {
+        "submissionId": "6ae44541-724f-4b8b-8ac7-5e6911c9fec7",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "6ae44541-724f-4b8b-8ac7-5e6911c9fec7.zip_",
+        "submittedDate": "2020-11-15T17:10:27.746Z",
+        "createdAt": "2020-11-15T17:10:27.746Z",
+        "updatedAt": "2020-11-15T17:10:30.730Z",
+        "legacySubmissionId": "414999",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/6ae44541-724f-4b8b-8ac7-5e6911c9fec7.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/065-nika-30fbe959-f30.zip",
+      "source": {
+        "submissionId": "30fbe959-f304-45aa-8c6c-d756299cef91",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "30fbe959-f304-45aa-8c6c-d756299cef91.zip_",
+        "submittedDate": "2020-11-15T17:29:44.155Z",
+        "createdAt": "2020-11-15T17:29:44.155Z",
+        "updatedAt": "2020-11-15T17:29:47.893Z",
+        "legacySubmissionId": "415012",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/30fbe959-f304-45aa-8c6c-d756299cef91.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/066-Psyho-f1681c20-b6b.zip",
+      "source": {
+        "submissionId": "f1681c20-b6bc-4f26-9571-b6810badcbc3",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "f1681c20-b6bc-4f26-9571-b6810badcbc3.zip_",
+        "submittedDate": "2020-11-15T17:43:50.138Z",
+        "createdAt": "2020-11-15T17:43:50.138Z",
+        "updatedAt": "2020-11-15T17:43:53.907Z",
+        "legacySubmissionId": "415013",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/f1681c20-b6bc-4f26-9571-b6810badcbc3.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/067-iehn-c0388f2b-557.zip",
+      "source": {
+        "submissionId": "c0388f2b-557e-4260-8221-7f248bf654dd",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "c0388f2b-557e-4260-8221-7f248bf654dd.zip_",
+        "submittedDate": "2020-11-15T17:53:38.063Z",
+        "createdAt": "2020-11-15T17:53:38.063Z",
+        "updatedAt": "2020-11-15T17:53:41.360Z",
+        "legacySubmissionId": "415014",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c0388f2b-557e-4260-8221-7f248bf654dd.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/068-blackmath-8bed0c4e-d68.zip",
+      "source": {
+        "submissionId": "8bed0c4e-d683-49d6-81e8-36b93dbcaf66",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "8bed0c4e-d683-49d6-81e8-36b93dbcaf66.zip_",
+        "submittedDate": "2020-11-15T18:00:47.768Z",
+        "createdAt": "2020-11-15T18:00:47.768Z",
+        "updatedAt": "2020-11-15T18:00:50.923Z",
+        "legacySubmissionId": "415015",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8bed0c4e-d683-49d6-81e8-36b93dbcaf66.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/069-vdave-b81e7b00-127.zip",
+      "source": {
+        "submissionId": "b81e7b00-1277-4ef0-9a1c-4e05ddd39cda",
+        "memberId": "14991227",
+        "memberHandle": "vdave",
+        "originalFileName": "b81e7b00-1277-4ef0-9a1c-4e05ddd39cda.zip_",
+        "submittedDate": "2020-11-15T18:17:28.324Z",
+        "createdAt": "2020-11-15T18:17:28.324Z",
+        "updatedAt": "2020-11-15T18:17:32.418Z",
+        "legacySubmissionId": "415017",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/b81e7b00-1277-4ef0-9a1c-4e05ddd39cda.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/070-wleite-6b7ffaef-f9b.zip",
+      "source": {
+        "submissionId": "6b7ffaef-f9bf-4d17-a51b-22169c65bfe5",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "6b7ffaef-f9bf-4d17-a51b-22169c65bfe5.zip_",
+        "submittedDate": "2020-11-15T19:13:11.917Z",
+        "createdAt": "2020-11-15T19:13:11.917Z",
+        "updatedAt": "2020-11-15T19:13:15.300Z",
+        "legacySubmissionId": "415041",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/6b7ffaef-f9bf-4d17-a51b-22169c65bfe5.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/071-blackmath-aa11f314-756.zip",
+      "source": {
+        "submissionId": "aa11f314-7568-414d-8f4d-8dfd86cb46a8",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "aa11f314-7568-414d-8f4d-8dfd86cb46a8.zip_",
+        "submittedDate": "2020-11-15T19:39:13.837Z",
+        "createdAt": "2020-11-15T19:39:13.837Z",
+        "updatedAt": "2020-11-15T19:39:16.882Z",
+        "legacySubmissionId": "415043",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/aa11f314-7568-414d-8f4d-8dfd86cb46a8.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/072-Psyho-ddff4d12-bf3.zip",
+      "source": {
+        "submissionId": "ddff4d12-bf37-4889-b294-23e614161c57",
+        "memberId": "10597114",
+        "memberHandle": "Psyho",
+        "originalFileName": "ddff4d12-bf37-4889-b294-23e614161c57.zip_",
+        "submittedDate": "2020-11-15T19:41:15.515Z",
+        "createdAt": "2020-11-15T19:41:15.515Z",
+        "updatedAt": "2020-11-15T19:41:18.978Z",
+        "legacySubmissionId": "415044",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/ddff4d12-bf37-4889-b294-23e614161c57.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/073-Milanin-cdafcd82-b9d.zip",
+      "source": {
+        "submissionId": "cdafcd82-b9d3-4a9a-b641-81eb63a308df",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "cdafcd82-b9d3-4a9a-b641-81eb63a308df.zip_",
+        "submittedDate": "2020-11-15T19:43:07.038Z",
+        "createdAt": "2020-11-15T19:43:07.038Z",
+        "updatedAt": "2020-11-15T19:43:09.831Z",
+        "legacySubmissionId": "415045",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/cdafcd82-b9d3-4a9a-b641-81eb63a308df.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/074-Milanin-636ed4b1-9d0.zip",
+      "source": {
+        "submissionId": "636ed4b1-9d08-4611-b6c4-43b9033b6882",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "636ed4b1-9d08-4611-b6c4-43b9033b6882.zip_",
+        "submittedDate": "2020-11-15T19:53:22.463Z",
+        "createdAt": "2020-11-15T19:53:22.463Z",
+        "updatedAt": "2020-11-15T19:53:26.384Z",
+        "legacySubmissionId": "415046",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/636ed4b1-9d08-4611-b6c4-43b9033b6882.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/075-iehn-b70c1c00-96c.zip",
+      "source": {
+        "submissionId": "b70c1c00-96c8-4a95-82ed-189d3d40ffc9",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "b70c1c00-96c8-4a95-82ed-189d3d40ffc9.zip_",
+        "submittedDate": "2020-11-15T20:04:29.181Z",
+        "createdAt": "2020-11-15T20:04:29.181Z",
+        "updatedAt": "2020-11-15T20:04:32.605Z",
+        "legacySubmissionId": "415048",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/b70c1c00-96c8-4a95-82ed-189d3d40ffc9.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/076-iehn-733878c1-6f9.zip",
+      "source": {
+        "submissionId": "733878c1-6f91-4036-8105-06f4e92f40f9",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "733878c1-6f91-4036-8105-06f4e92f40f9.zip_",
+        "submittedDate": "2020-11-15T20:20:44.254Z",
+        "createdAt": "2020-11-15T20:20:44.254Z",
+        "updatedAt": "2020-11-15T20:20:48.174Z",
+        "legacySubmissionId": "415050",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/733878c1-6f91-4036-8105-06f4e92f40f9.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/077-Daiver19-0bd6ab77-ede.zip",
+      "source": {
+        "submissionId": "0bd6ab77-ede8-4f4b-af32-7a80729225f1",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "0bd6ab77-ede8-4f4b-af32-7a80729225f1.zip_",
+        "submittedDate": "2020-11-15T20:23:52.206Z",
+        "createdAt": "2020-11-15T20:23:52.206Z",
+        "updatedAt": "2020-11-15T20:23:55.451Z",
+        "legacySubmissionId": "415051",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0bd6ab77-ede8-4f4b-af32-7a80729225f1.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/078-iehn-3c20dc2e-a56.zip",
+      "source": {
+        "submissionId": "3c20dc2e-a56f-4df4-bc4c-1bb3a032f7bd",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "3c20dc2e-a56f-4df4-bc4c-1bb3a032f7bd.zip_",
+        "submittedDate": "2020-11-15T20:29:21.432Z",
+        "createdAt": "2020-11-15T20:29:21.432Z",
+        "updatedAt": "2020-11-15T20:29:24.276Z",
+        "legacySubmissionId": "415052",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3c20dc2e-a56f-4df4-bc4c-1bb3a032f7bd.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/079-Daiver19-21948b84-a4e.zip",
+      "source": {
+        "submissionId": "21948b84-a4e7-43ba-9f21-a646cecc0943",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "21948b84-a4e7-43ba-9f21-a646cecc0943.zip_",
+        "submittedDate": "2020-11-15T20:36:28.835Z",
+        "createdAt": "2020-11-15T20:36:28.835Z",
+        "updatedAt": "2020-11-15T20:36:33.012Z",
+        "legacySubmissionId": "415053",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/21948b84-a4e7-43ba-9f21-a646cecc0943.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/080-blackmath-3028dcdd-631.zip",
+      "source": {
+        "submissionId": "3028dcdd-6312-4ae8-9d27-4b6074232725",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "3028dcdd-6312-4ae8-9d27-4b6074232725.zip_",
+        "submittedDate": "2020-11-15T20:47:08.915Z",
+        "createdAt": "2020-11-15T20:47:08.915Z",
+        "updatedAt": "2020-11-15T20:47:11.764Z",
+        "legacySubmissionId": "415055",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3028dcdd-6312-4ae8-9d27-4b6074232725.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/081-Daiver19-8024cc18-8a5.zip",
+      "source": {
+        "submissionId": "8024cc18-8a54-4c76-940a-453e6308adb1",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "8024cc18-8a54-4c76-940a-453e6308adb1.zip_",
+        "submittedDate": "2020-11-15T20:52:33.536Z",
+        "createdAt": "2020-11-15T20:52:33.536Z",
+        "updatedAt": "2020-11-15T20:52:36.485Z",
+        "legacySubmissionId": "415058",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8024cc18-8a54-4c76-940a-453e6308adb1.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/082-wleite-8b196328-473.zip",
+      "source": {
+        "submissionId": "8b196328-4736-4cd9-949f-d141f2e940fe",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "8b196328-4736-4cd9-949f-d141f2e940fe.zip_",
+        "submittedDate": "2020-11-15T21:04:12.539Z",
+        "createdAt": "2020-11-15T21:04:12.539Z",
+        "updatedAt": "2020-11-15T21:04:16.679Z",
+        "legacySubmissionId": "415061",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8b196328-4736-4cd9-949f-d141f2e940fe.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/083-iehn-8b167384-644.zip",
+      "source": {
+        "submissionId": "8b167384-644b-480a-960a-df7a8f23dc57",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "8b167384-644b-480a-960a-df7a8f23dc57.zip_",
+        "submittedDate": "2020-11-15T21:25:26.099Z",
+        "createdAt": "2020-11-15T21:25:26.099Z",
+        "updatedAt": "2020-11-15T21:25:29.330Z",
+        "legacySubmissionId": "415067",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8b167384-644b-480a-960a-df7a8f23dc57.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/084-Milanin-494fce30-835.zip",
+      "source": {
+        "submissionId": "494fce30-835f-42ad-9f6b-16aec72bbd31",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "494fce30-835f-42ad-9f6b-16aec72bbd31.zip_",
+        "submittedDate": "2020-11-15T21:32:15.714Z",
+        "createdAt": "2020-11-15T21:32:15.714Z",
+        "updatedAt": "2020-11-15T21:32:19.287Z",
+        "legacySubmissionId": "415069",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/494fce30-835f-42ad-9f6b-16aec72bbd31.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/085-Daiver19-2fd60f53-58f.zip",
+      "source": {
+        "submissionId": "2fd60f53-58f0-4852-94c5-5ce6eeee9343",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "2fd60f53-58f0-4852-94c5-5ce6eeee9343.zip_",
+        "submittedDate": "2020-11-15T21:43:26.564Z",
+        "createdAt": "2020-11-15T21:43:26.564Z",
+        "updatedAt": "2020-11-15T21:43:30.110Z",
+        "legacySubmissionId": "415071",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/2fd60f53-58f0-4852-94c5-5ce6eeee9343.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/086-Milanin-b826bfea-5c1.zip",
+      "source": {
+        "submissionId": "b826bfea-5c12-4020-9d31-7ff179bb47c4",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "b826bfea-5c12-4020-9d31-7ff179bb47c4.zip_",
+        "submittedDate": "2020-11-15T21:43:31.848Z",
+        "createdAt": "2020-11-15T21:43:31.848Z",
+        "updatedAt": "2020-11-15T21:43:34.746Z",
+        "legacySubmissionId": "415072",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/b826bfea-5c12-4020-9d31-7ff179bb47c4.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/087-Milanin-891a4dc3-780.zip",
+      "source": {
+        "submissionId": "891a4dc3-7806-471c-969e-8026ce58571a",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "891a4dc3-7806-471c-969e-8026ce58571a.zip_",
+        "submittedDate": "2020-11-15T22:03:32.512Z",
+        "createdAt": "2020-11-15T22:03:32.512Z",
+        "updatedAt": "2020-11-15T22:03:35.951Z",
+        "legacySubmissionId": "415074",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/891a4dc3-7806-471c-969e-8026ce58571a.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/088-Milanin-1670b9e8-55e.zip",
+      "source": {
+        "submissionId": "1670b9e8-55ee-416a-b870-67581ececb51",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "1670b9e8-55ee-416a-b870-67581ececb51.zip_",
+        "submittedDate": "2020-11-15T22:07:43.308Z",
+        "createdAt": "2020-11-15T22:07:43.308Z",
+        "updatedAt": "2020-11-15T22:07:47.193Z",
+        "legacySubmissionId": "415075",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/1670b9e8-55ee-416a-b870-67581ececb51.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/089-Daiver19-39124419-f44.zip",
+      "source": {
+        "submissionId": "39124419-f441-43ae-8ccc-0683800fa686",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "39124419-f441-43ae-8ccc-0683800fa686.zip_",
+        "submittedDate": "2020-11-15T22:43:05.519Z",
+        "createdAt": "2020-11-15T22:43:05.519Z",
+        "updatedAt": "2020-11-15T22:43:08.461Z",
+        "legacySubmissionId": "415078",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/39124419-f441-43ae-8ccc-0683800fa686.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/090-sullyper-a5c9debb-c47.zip",
+      "source": {
+        "submissionId": "a5c9debb-c478-43c2-838f-b8aca432c534",
+        "memberId": "22751029",
+        "memberHandle": "sullyper",
+        "originalFileName": "a5c9debb-c478-43c2-838f-b8aca432c534.zip_",
+        "submittedDate": "2020-11-15T22:43:45.099Z",
+        "createdAt": "2020-11-15T22:43:45.099Z",
+        "updatedAt": "2020-11-15T22:43:48.483Z",
+        "legacySubmissionId": "415079",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/a5c9debb-c478-43c2-838f-b8aca432c534.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/091-nika-3744d8c7-a6e.zip",
+      "source": {
+        "submissionId": "3744d8c7-a6e2-4718-873a-b907894f8120",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "3744d8c7-a6e2-4718-873a-b907894f8120.zip_",
+        "submittedDate": "2020-11-15T22:47:15.255Z",
+        "createdAt": "2020-11-15T22:47:15.255Z",
+        "updatedAt": "2020-11-15T22:47:18.878Z",
+        "legacySubmissionId": "415080",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3744d8c7-a6e2-4718-873a-b907894f8120.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/092-iehn-af7599c7-3f9.zip",
+      "source": {
+        "submissionId": "af7599c7-3f9d-4ee8-8a36-2d6817d86fdc",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "af7599c7-3f9d-4ee8-8a36-2d6817d86fdc.zip_",
+        "submittedDate": "2020-11-15T23:14:08.947Z",
+        "createdAt": "2020-11-15T23:14:08.947Z",
+        "updatedAt": "2020-11-15T23:14:12.327Z",
+        "legacySubmissionId": "415085",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/af7599c7-3f9d-4ee8-8a36-2d6817d86fdc.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/093-Daiver19-4ec3de0b-59a.zip",
+      "source": {
+        "submissionId": "4ec3de0b-59a0-46ff-a6aa-cc27be430fc6",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "4ec3de0b-59a0-46ff-a6aa-cc27be430fc6.zip_",
+        "submittedDate": "2020-11-15T23:15:56.737Z",
+        "createdAt": "2020-11-15T23:15:56.737Z",
+        "updatedAt": "2020-11-15T23:16:01.330Z",
+        "legacySubmissionId": "415086",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/4ec3de0b-59a0-46ff-a6aa-cc27be430fc6.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/094-iehn-43516bff-0e1.zip",
+      "source": {
+        "submissionId": "43516bff-0e19-4713-a27b-258da897bd0e",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "43516bff-0e19-4713-a27b-258da897bd0e.zip_",
+        "submittedDate": "2020-11-16T00:11:44.533Z",
+        "createdAt": "2020-11-16T00:11:44.533Z",
+        "updatedAt": "2020-11-16T00:11:48.215Z",
+        "legacySubmissionId": "415088",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/43516bff-0e19-4713-a27b-258da897bd0e.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/095-Milanin-8958973f-b9b.zip",
+      "source": {
+        "submissionId": "8958973f-b9be-4bd3-bf92-5a8f61b28ed9",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "8958973f-b9be-4bd3-bf92-5a8f61b28ed9.zip_",
+        "submittedDate": "2020-11-16T00:31:04.953Z",
+        "createdAt": "2020-11-16T00:31:04.953Z",
+        "updatedAt": "2020-11-16T00:31:08.427Z",
+        "legacySubmissionId": "415100",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/8958973f-b9be-4bd3-bf92-5a8f61b28ed9.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/096-CatalinT-3a887779-602.zip",
+      "source": {
+        "submissionId": "3a887779-6021-4b2f-bb67-e0fd54d13d88",
+        "memberId": "10544397",
+        "memberHandle": "CatalinT",
+        "originalFileName": "3a887779-6021-4b2f-bb67-e0fd54d13d88.zip_",
+        "submittedDate": "2020-11-16T00:47:52.974Z",
+        "createdAt": "2020-11-16T00:47:52.974Z",
+        "updatedAt": "2020-11-16T00:47:57.938Z",
+        "legacySubmissionId": "415101",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3a887779-6021-4b2f-bb67-e0fd54d13d88.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/097-Milanin-4a1362b9-61c.zip",
+      "source": {
+        "submissionId": "4a1362b9-61c9-4e9f-b935-fdf1ce0c6ec2",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "4a1362b9-61c9-4e9f-b935-fdf1ce0c6ec2.zip_",
+        "submittedDate": "2020-11-16T00:49:37.524Z",
+        "createdAt": "2020-11-16T00:49:37.524Z",
+        "updatedAt": "2020-11-16T00:49:42.403Z",
+        "legacySubmissionId": "415102",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/4a1362b9-61c9-4e9f-b935-fdf1ce0c6ec2.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/098-Milanin-0d21aabf-1b8.zip",
+      "source": {
+        "submissionId": "0d21aabf-1b8a-49eb-b5a8-514a23c1548d",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "0d21aabf-1b8a-49eb-b5a8-514a23c1548d.zip_",
+        "submittedDate": "2020-11-16T01:09:58.131Z",
+        "createdAt": "2020-11-16T01:09:58.131Z",
+        "updatedAt": "2020-11-16T01:10:01.833Z",
+        "legacySubmissionId": "415103",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0d21aabf-1b8a-49eb-b5a8-514a23c1548d.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/099-nika-aebacf03-aa8.zip",
+      "source": {
+        "submissionId": "aebacf03-aa8a-4714-97cf-ba4a18819702",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "aebacf03-aa8a-4714-97cf-ba4a18819702.zip_",
+        "submittedDate": "2020-11-16T01:10:03.903Z",
+        "createdAt": "2020-11-16T01:10:03.903Z",
+        "updatedAt": "2020-11-16T01:10:07.729Z",
+        "legacySubmissionId": "415104",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/aebacf03-aa8a-4714-97cf-ba4a18819702.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/100-Milanin-3f6dfcce-935.zip",
+      "source": {
+        "submissionId": "3f6dfcce-935d-4aa7-b39d-f32aff807e61",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "3f6dfcce-935d-4aa7-b39d-f32aff807e61.zip_",
+        "submittedDate": "2020-11-16T01:25:29.842Z",
+        "createdAt": "2020-11-16T01:25:29.842Z",
+        "updatedAt": "2020-11-16T01:25:33.732Z",
+        "legacySubmissionId": "415106",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3f6dfcce-935d-4aa7-b39d-f32aff807e61.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/101-tourist-93dbde8c-bc2.zip",
+      "source": {
+        "submissionId": "93dbde8c-bc24-4e22-b022-395b750e1331",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "93dbde8c-bc24-4e22-b022-395b750e1331.zip_",
+        "submittedDate": "2020-11-16T01:30:10.857Z",
+        "createdAt": "2020-11-16T01:30:10.857Z",
+        "updatedAt": "2020-11-16T01:30:14.671Z",
+        "legacySubmissionId": "415107",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/93dbde8c-bc24-4e22-b022-395b750e1331.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/102-Milanin-e56005b5-175.zip",
+      "source": {
+        "submissionId": "e56005b5-1756-4339-9b09-fc350284a73a",
+        "memberId": "22705227",
+        "memberHandle": "Milanin",
+        "originalFileName": "e56005b5-1756-4339-9b09-fc350284a73a.zip_",
+        "submittedDate": "2020-11-16T01:38:32.462Z",
+        "createdAt": "2020-11-16T01:38:32.462Z",
+        "updatedAt": "2020-11-16T01:38:36.567Z",
+        "legacySubmissionId": "415108",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/e56005b5-1756-4339-9b09-fc350284a73a.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/103-sullyper-3ae930ec-19c.zip",
+      "source": {
+        "submissionId": "3ae930ec-19cd-402f-a8dd-456b7c43e374",
+        "memberId": "22751029",
+        "memberHandle": "sullyper",
+        "originalFileName": "3ae930ec-19cd-402f-a8dd-456b7c43e374.zip_",
+        "submittedDate": "2020-11-16T01:49:22.987Z",
+        "createdAt": "2020-11-16T01:49:22.987Z",
+        "updatedAt": "2020-11-16T01:49:26.300Z",
+        "legacySubmissionId": "415109",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/3ae930ec-19cd-402f-a8dd-456b7c43e374.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/104-Daiver19-95a6d07f-70f.zip",
+      "source": {
+        "submissionId": "95a6d07f-70f4-4d80-966e-747e77ab1341",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "95a6d07f-70f4-4d80-966e-747e77ab1341.zip_",
+        "submittedDate": "2020-11-16T01:53:00.378Z",
+        "createdAt": "2020-11-16T01:53:00.378Z",
+        "updatedAt": "2020-11-16T01:53:03.708Z",
+        "legacySubmissionId": "415110",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/95a6d07f-70f4-4d80-966e-747e77ab1341.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/105-tourist-c4108c9b-9ea.zip",
+      "source": {
+        "submissionId": "c4108c9b-9ead-4e60-84f8-202ffe9dddf8",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "c4108c9b-9ead-4e60-84f8-202ffe9dddf8.zip_",
+        "submittedDate": "2020-11-16T01:58:29.686Z",
+        "createdAt": "2020-11-16T01:58:29.686Z",
+        "updatedAt": "2020-11-16T01:58:32.442Z",
+        "legacySubmissionId": "415111",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/c4108c9b-9ead-4e60-84f8-202ffe9dddf8.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/106-iehn-a289ae17-d30.zip",
+      "source": {
+        "submissionId": "a289ae17-d303-4bda-8f3a-9427a8b59c48",
+        "memberId": "23016887",
+        "memberHandle": "iehn",
+        "originalFileName": "a289ae17-d303-4bda-8f3a-9427a8b59c48.zip_",
+        "submittedDate": "2020-11-16T02:03:07.954Z",
+        "createdAt": "2020-11-16T02:03:07.954Z",
+        "updatedAt": "2020-11-16T02:03:11.765Z",
+        "legacySubmissionId": "415113",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/a289ae17-d303-4bda-8f3a-9427a8b59c48.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/107-sullyper-b4777346-c57.zip",
+      "source": {
+        "submissionId": "b4777346-c57f-4840-8fe2-8ac5a6741278",
+        "memberId": "22751029",
+        "memberHandle": "sullyper",
+        "originalFileName": "b4777346-c57f-4840-8fe2-8ac5a6741278.zip_",
+        "submittedDate": "2020-11-16T02:03:39.474Z",
+        "createdAt": "2020-11-16T02:03:39.474Z",
+        "updatedAt": "2020-11-16T02:03:42.943Z",
+        "legacySubmissionId": "415114",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/b4777346-c57f-4840-8fe2-8ac5a6741278.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/108-tomerun-6cbcbbf7-622.zip",
+      "source": {
+        "submissionId": "6cbcbbf7-6229-461e-906c-3262099b61e6",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "6cbcbbf7-6229-461e-906c-3262099b61e6.zip_",
+        "submittedDate": "2020-11-16T02:18:36.976Z",
+        "createdAt": "2020-11-16T02:18:36.976Z",
+        "updatedAt": "2020-11-16T02:18:40.281Z",
+        "legacySubmissionId": "415116",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/6cbcbbf7-6229-461e-906c-3262099b61e6.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/109-vdave-87ce2e56-a60.zip",
+      "source": {
+        "submissionId": "87ce2e56-a60d-4164-9740-4039fe5f7590",
+        "memberId": "14991227",
+        "memberHandle": "vdave",
+        "originalFileName": "87ce2e56-a60d-4164-9740-4039fe5f7590.zip_",
+        "submittedDate": "2020-11-16T02:34:06.121Z",
+        "createdAt": "2020-11-16T02:34:06.121Z",
+        "updatedAt": "2020-11-16T02:34:09.817Z",
+        "legacySubmissionId": "415117",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/87ce2e56-a60d-4164-9740-4039fe5f7590.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/110-tourist-2248cc04-7ca.zip",
+      "source": {
+        "submissionId": "2248cc04-7cad-4119-a855-b5332e1a55be",
+        "memberId": "22263204",
+        "memberHandle": "tourist",
+        "originalFileName": "2248cc04-7cad-4119-a855-b5332e1a55be.zip_",
+        "submittedDate": "2020-11-16T02:41:19.121Z",
+        "createdAt": "2020-11-16T02:41:19.121Z",
+        "updatedAt": "2020-11-16T02:41:23.487Z",
+        "legacySubmissionId": "415118",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/2248cc04-7cad-4119-a855-b5332e1a55be.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/111-blackmath-73b6bea9-cd5.zip",
+      "source": {
+        "submissionId": "73b6bea9-cd58-48ec-9bf2-22a09a4b8e69",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "73b6bea9-cd58-48ec-9bf2-22a09a4b8e69.zip_",
+        "submittedDate": "2020-11-16T02:41:48.193Z",
+        "createdAt": "2020-11-16T02:41:48.193Z",
+        "updatedAt": "2020-11-16T02:41:52.437Z",
+        "legacySubmissionId": "415119",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/73b6bea9-cd58-48ec-9bf2-22a09a4b8e69.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/112-wleite-0bad6a31-9ad.zip",
+      "source": {
+        "submissionId": "0bad6a31-9ad6-40b2-bb74-b511405bd170",
+        "memberId": "7213681",
+        "memberHandle": "wleite",
+        "originalFileName": "0bad6a31-9ad6-40b2-bb74-b511405bd170.zip_",
+        "submittedDate": "2020-11-16T02:44:24.757Z",
+        "createdAt": "2020-11-16T02:44:24.757Z",
+        "updatedAt": "2020-11-16T02:44:28.071Z",
+        "legacySubmissionId": "415131",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0bad6a31-9ad6-40b2-bb74-b511405bd170.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/113-tomerun-da469617-4ec.zip",
+      "source": {
+        "submissionId": "da469617-4ecb-4d4d-9c0e-3190eee2567c",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "da469617-4ecb-4d4d-9c0e-3190eee2567c.zip_",
+        "submittedDate": "2020-11-16T02:51:00.593Z",
+        "createdAt": "2020-11-16T02:51:00.593Z",
+        "updatedAt": "2020-11-16T02:51:04.479Z",
+        "legacySubmissionId": "415133",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/da469617-4ecb-4d4d-9c0e-3190eee2567c.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/114-blackmath-afa0ec56-ae1.zip",
+      "source": {
+        "submissionId": "afa0ec56-ae1d-448a-a3db-26b8eda12452",
+        "memberId": "14927744",
+        "memberHandle": "blackmath",
+        "originalFileName": "afa0ec56-ae1d-448a-a3db-26b8eda12452.zip_",
+        "submittedDate": "2020-11-16T02:52:16.610Z",
+        "createdAt": "2020-11-16T02:52:16.610Z",
+        "updatedAt": "2020-11-16T02:52:19.779Z",
+        "legacySubmissionId": "415134",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/afa0ec56-ae1d-448a-a3db-26b8eda12452.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/115-nika-84458970-990.zip",
+      "source": {
+        "submissionId": "84458970-9907-4a84-a7df-e24590e8ce52",
+        "memberId": "20315020",
+        "memberHandle": "nika",
+        "originalFileName": "84458970-9907-4a84-a7df-e24590e8ce52.zip_",
+        "submittedDate": "2020-11-16T02:52:45.522Z",
+        "createdAt": "2020-11-16T02:52:45.522Z",
+        "updatedAt": "2020-11-16T02:52:48.689Z",
+        "legacySubmissionId": "415135",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/84458970-9907-4a84-a7df-e24590e8ce52.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/116-tomerun-91058d23-b7f.zip",
+      "source": {
+        "submissionId": "91058d23-b7f3-47d5-af82-1b3d339d9c61",
+        "memberId": "22744421",
+        "memberHandle": "tomerun",
+        "originalFileName": "91058d23-b7f3-47d5-af82-1b3d339d9c61.zip_",
+        "submittedDate": "2020-11-16T02:54:37.350Z",
+        "createdAt": "2020-11-16T02:54:37.350Z",
+        "updatedAt": "2020-11-16T02:54:41.753Z",
+        "legacySubmissionId": "415136",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/91058d23-b7f3-47d5-af82-1b3d339d9c61.zip"
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/117-Daiver19-0a43b6d8-aac.zip",
+      "source": {
+        "submissionId": "0a43b6d8-aac3-4647-85f4-30d276779358",
+        "memberId": "22768223",
+        "memberHandle": "Daiver19",
+        "originalFileName": "0a43b6d8-aac3-4647-85f4-30d276779358.zip_",
+        "submittedDate": "2020-11-16T02:59:37.447Z",
+        "createdAt": "2020-11-16T02:59:37.447Z",
+        "updatedAt": "2020-11-16T02:59:41.635Z",
+        "legacySubmissionId": "415137",
+        "legacyChallengeId": "30145294",
+        "challengeId": "30145294",
+        "v5ChallengeId": "bac87d23-90d8-4d8a-afc1-a6b8fee3c6bb",
+        "url": "https://s3.amazonaws.com/topcoder-submissions/0a43b6d8-aac3-4647-85f4-30d276779358.zip"
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/118-coder_10544397-5a7bb467-fc0.zip",
+      "source": {
+        "submissionId": "5a7bb467-fc03-4967-b5ed-48f9732d543a",
+        "memberId": "10544397",
+        "memberHandle": "10544397",
+        "originalFileName": "5a7bb467-fc03-4967-b5ed-48f9732d543a.zip_",
+        "metadataMissing": true
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/119-coder_10544397-6bb69091-693.zip",
+      "source": {
+        "submissionId": "6bb69091-6932-4a53-95e4-c0283102cded",
+        "memberId": "10544397",
+        "memberHandle": "10544397",
+        "originalFileName": "6bb69091-6932-4a53-95e4-c0283102cded.zip_",
+        "metadataMissing": true
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/120-coder_14991227-af498d49-224.zip",
+      "source": {
+        "submissionId": "af498d49-224d-4c8f-aead-a294cfe92c10",
+        "memberId": "14991227",
+        "memberHandle": "14991227",
+        "originalFileName": "af498d49-224d-4c8f-aead-a294cfe92c10.zip_",
+        "metadataMissing": true
+      }
+    }
+  ]
+}
