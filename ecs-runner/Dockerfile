@@ -9,7 +9,7 @@ COPY src/ /workspace/src/
 RUN mvn -B -ntp clean package -DskipTests
 
 # Runtime stage
-FROM eclipse-temurin:8-jre-jammy
+FROM eclipse-temurin:8-jdk-jammy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
