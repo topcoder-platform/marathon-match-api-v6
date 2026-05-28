@@ -9,29 +9,28 @@ COPY src/ /workspace/src/
 RUN mvn -B -ntp clean package -DskipTests
 
 # Runtime stage
-FROM eclipse-temurin:8-jdk-jammy
+FROM eclipse-temurin:8-jdk-noble
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         coreutils \
+        dotnet-sdk-10.0 \
         findutils \
-        g++ \
+        g++-14 \
+        gcc-14 \
         gzip \
-        libicu70 \
         mono-devel \
         procps \
         python3 \
         unzip \
         wget \
         zip \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && rm -rf /var/lib/apt/lists/* \
-    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 7.0 --install-dir /usr/share/dotnet \
-    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm -f /tmp/dotnet-install.sh
+    && dotnet --info >/dev/null
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin runner
 WORKDIR /app
@@ -41,7 +40,10 @@ COPY scripts/ /app/scripts/
 RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/mm-net-isolate /app/scripts/mm-net-isolate.c \
     && chmod +x /app/scripts/*.sh /usr/local/bin/mm-net-isolate
 
-ENV DOTNET_ROOT=/usr/share/dotnet
+ENV DOTNET_ROOT=/usr/lib/dotnet
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_NOLOGO=1
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.awt.headless=true -Dfile.encoding=UTF-8"
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

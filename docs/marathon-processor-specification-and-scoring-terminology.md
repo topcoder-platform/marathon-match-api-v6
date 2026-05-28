@@ -1,6 +1,6 @@
 # Marathon Processor Specification and Scoring Terminology
 
-Last verified: May 28, 2026
+Last verified: May 29, 2026
 
 This article describes how Topcoder Marathon Match submissions are compiled, executed, scored, and reported by the current Marathon Match processor.
 
@@ -28,18 +28,19 @@ Supported source extensions are:
 | --- | --- |
 | `.cpp` | C++ |
 | `.java` | Java |
-| `.py` | Python 3 |
+| `.py` | Python 3.12 |
 | `.cs` | C# using Mono |
-| `.cs_net7` | C# using .NET 7 |
+| `.cs_net10` | C# using .NET 10 / C# 14 |
+| `.cs_net7` | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
 ### C++
 
-C++ submissions are compiled with `g++` using GNU++17:
+C++ submissions are compiled with `g++` using GNU++23:
 
 ```bash
-g++ -std=gnu++17 -O3 Solution.cpp -o Solution
+g++ -std=gnu++23 -O3 Solution.cpp -o Solution
 ./Solution
 ```
 
@@ -56,7 +57,7 @@ The ECS runner image includes the Java 8 JDK, so Java source submissions can be 
 
 ### Python
 
-Python submissions are executed with Python 3:
+Python submissions are executed with Python 3.12:
 
 ```bash
 python3 Solution.py
@@ -71,9 +72,9 @@ mcs /r:System.Numerics.dll -out:Solution.exe Solution.cs
 mono Solution.exe
 ```
 
-### C# with .NET 7
+### C# with .NET 10
 
-.NET 7 C# submissions use the special `.cs_net7` extension. The runner creates a temporary `net7.0` project with unsafe blocks enabled, publishes it, and executes the published DLL:
+.NET C# submissions use the special `.cs_net10` extension. The older `.cs_net7` extension remains accepted for backward compatibility, but both extensions are compiled with the .NET 10 SDK and target `net10.0`. The runner creates a temporary project with unsafe blocks enabled, publishes it, and executes the published DLL:
 
 ```bash
 dotnet publish Solution.csproj -c Release -o Solution
@@ -98,30 +99,30 @@ The default values supplied by `marathon-match-api-v6` are environment-configura
 
 The current processor runs as an ECS/Fargate task using the configured task definition revision for the challenge scorer. CPU and memory are controlled by that ECS task definition, not by a fixed EC2 instance type.
 
-The current runner image is based on Ubuntu 22.04 Jammy and `eclipse-temurin:8-jdk-jammy`.
+The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:8-jdk-noble`.
 
 Tool versions verified from a local build of the current runner image:
 
 | Tool | Version |
 | --- | --- |
-| Operating system | Ubuntu 22.04.5 LTS |
+| Operating system | Ubuntu 24.04.4 LTS |
 | Java runtime | Temurin OpenJDK 8, `1.8.0_492-b09` |
 | Java compiler | `javac 1.8.0_492` |
-| GCC | `11.4.0` |
-| G++ | `11.4.0` |
-| Python | `3.10.12` |
+| GCC | `14.2.0` via `gcc-14` |
+| G++ | `14.2.0` via `g++-14` |
+| Python | `3.12.3` |
 | Mono runtime | `6.8.0.105` |
 | Mono C# compiler | `mcs 6.8.0.105` |
-| .NET SDK | `7.0.410` |
-| Bash | `5.1.16` |
+| .NET SDK | `10.0.108` |
+| Bash | `5.2.21` |
 
 The runner image includes:
 
 - Java 8 JDK/runtime for the runner, testers, and Java submissions
-- `g++` for C++ submissions
-- `python3` for Python submissions
+- `g++` backed by GCC 14 for C++23 submissions
+- `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
-- .NET 7 SDK for `.cs_net7` submissions
+- .NET 10 SDK for `.cs_net10` submissions and backward-compatible `.cs_net7` submissions
 - `zip` and `unzip` for artifact handling
 - a native isolation helper that runs untrusted tester/submission execution as a restricted user
 
@@ -138,31 +139,32 @@ The ECS runner itself expects Topcoder service environment variables and normall
 The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
-FROM eclipse-temurin:8-jdk-jammy
+FROM eclipse-temurin:8-jdk-noble
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         coreutils \
+        dotnet-sdk-10.0 \
         findutils \
-        g++ \
+        g++-14 \
+        gcc-14 \
         gzip \
-        libicu70 \
         mono-devel \
         procps \
         python3 \
         unzip \
         wget \
         zip \
-    && rm -rf /var/lib/apt/lists/* \
-    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 7.0 --install-dir /usr/share/dotnet \
-    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm -f /tmp/dotnet-install.sh
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV DOTNET_ROOT=/usr/share/dotnet
+ENV DOTNET_ROOT=/usr/lib/dotnet
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_NOLOGO=1
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.awt.headless=true -Dfile.encoding=UTF-8"
 WORKDIR /workdir
 ```

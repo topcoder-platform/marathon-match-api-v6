@@ -85,6 +85,7 @@ public class EcsRunnerMain {
         ".java",
         ".py",
         ".cs",
+        ".cs_net10",
         ".cs_net7"
     );
     private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
@@ -3099,7 +3100,7 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, or .NET 7 C# submissions.
+     * @return {@code true} for C++, Java, Python, Mono C#, or .NET 10 C# submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -3121,10 +3122,13 @@ public class EcsRunnerMain {
      * Extracts a supported source extension from a filename.
      *
      * @param fileName Source filename.
-     * @return Extension with leading dot, preserving the special {@code .cs_net7} extension.
+     * @return Extension with leading dot, preserving special .NET C# extensions.
      */
     private static String extensionOf(String fileName) {
         String lower = fileName.toLowerCase(Locale.US);
+        if (lower.endsWith(".cs_net10")) {
+            return ".cs_net10";
+        }
         if (lower.endsWith(".cs_net7")) {
             return ".cs_net7";
         }
@@ -3234,7 +3238,7 @@ public class EcsRunnerMain {
             runCommand(
                 Arrays.asList(
                     "g++",
-                    "-std=gnu++17",
+                    "-std=gnu++23",
                     "-O3",
                     normalizedSource.getFileName().toString(),
                     "-o",
@@ -3284,14 +3288,14 @@ public class EcsRunnerMain {
             );
         }
 
-        if (".cs_net7".equals(extension)) {
+        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
             Path csproj = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".csproj");
             Files.write(
                 csproj,
                 Arrays.asList(
                     "<Project Sdk=\"Microsoft.NET.Sdk\">",
                     "  <PropertyGroup>",
-                    "    <TargetFramework>net7.0</TargetFramework>",
+                    "    <TargetFramework>net10.0</TargetFramework>",
                     "    <OutputType>Exe</OutputType>",
                     "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
                     "  </PropertyGroup>",
@@ -3315,7 +3319,7 @@ public class EcsRunnerMain {
                 ),
                 workDir,
                 compileTimeoutMs,
-                "C# (.NET 7) compilation failed.",
+                "C# (.NET 10) compilation failed.",
                 compileLogPath
             );
             return new CompiledSubmission(
@@ -3350,8 +3354,8 @@ public class EcsRunnerMain {
         if (".cs".equals(extension)) {
             return "csharp-mono";
         }
-        if (".cs_net7".equals(extension)) {
-            return "csharp-net7";
+        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+            return "csharp-net10";
         }
         return "unknown";
     }
