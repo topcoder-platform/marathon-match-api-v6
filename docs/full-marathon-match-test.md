@@ -72,7 +72,7 @@ If `submissions` is omitted, submission files can be placed directly in the fixt
 
 Registration and Submission durations are seconds. They default to `3600` each and can be set with `--registration-duration-seconds`, `--submission-duration-seconds`, `REGISTRATION_DURATION_SECONDS`, `SUBMISSION_DURATION_SECONDS`, or `challenge.phaseDurations`.
 
-The tester source can be a standard Topcoder Marathon tester with a `main(...)` method. The ECS runner handles submission source discovery, compilation, seed execution, aggregate scoring, and `metadata.testScores` output. Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special cases.
+The tester source can be a standard Topcoder Marathon tester with a `main(...)` method. The ECS runner handles submission source discovery, compilation, seed execution, aggregate scoring, and `metadata.testScores` output with member-visible testcase ordinals. Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special cases.
 
 For advanced create payload fields, add `challenge.createPayload` with any valid `POST /v6/challenges` body fields. The script still applies the configured Registration and Submission duration overrides.
 

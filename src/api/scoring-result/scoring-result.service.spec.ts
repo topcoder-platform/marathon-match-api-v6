@@ -97,6 +97,25 @@ describe('ScoringResultService', () => {
 
   it('accepts scorer callbacks for configured challenges and persists the review summation', async () => {
     const { service, m2mService, prisma } = createService();
+    const payloadWithSeedMetadata: ScoringResultCallbackPayload = {
+      ...basePayload,
+      metadata: {
+        startSeed: '753388858',
+        testScores: [
+          {
+            testcase: '753388858',
+            score: 10,
+            runTimeMs: 1,
+            seed: '753388858',
+          },
+          {
+            testcase: '753388859',
+            score: 20,
+            runTimeMs: 2,
+          },
+        ],
+      },
+    };
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
@@ -116,21 +135,21 @@ describe('ScoringResultService', () => {
       .spyOn(service as any, 'completeSystemReviewIfNeeded')
       .mockResolvedValue(undefined);
 
-    await expect(service.processScoringResult(basePayload)).resolves.toBe(
-      undefined,
-    );
+    await expect(
+      service.processScoringResult(payloadWithSeedMetadata),
+    ).resolves.toBe(undefined);
 
     expect(prisma.marathonMatchConfig.findUnique).toHaveBeenCalledTimes(1);
     expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
     expect(createReviewSummationSpy).toHaveBeenCalledWith(
       'm2m-token',
       expect.objectContaining({
-        submissionId: basePayload.submissionId,
-        aggregateScore: basePayload.score,
+        submissionId: payloadWithSeedMetadata.submissionId,
+        aggregateScore: payloadWithSeedMetadata.score,
         isPassing: true,
         isProvisional: true,
         metadata: expect.objectContaining({
-          reviewTypeId: basePayload.reviewTypeId,
+          reviewTypeId: payloadWithSeedMetadata.reviewTypeId,
           testProgress: 1,
           testStatus: ScoringTestStatus.Success,
           testProcess: 'provisional',
@@ -138,20 +157,36 @@ describe('ScoringResultService', () => {
         }),
       }),
     );
+    const reviewPayload = createReviewSummationSpy.mock.calls[0][1] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(reviewPayload.metadata.startSeed).toBeUndefined();
+    expect(reviewPayload.metadata.testScores).toEqual([
+      {
+        score: 10,
+        runTimeMs: 1,
+        testcase: '1',
+      },
+      {
+        score: 20,
+        runTimeMs: 2,
+        testcase: '2',
+      },
+    ]);
     expect(findExistingReviewSummationsSpy).toHaveBeenCalledWith(
       'm2m-token',
-      basePayload.submissionId,
+      payloadWithSeedMetadata.submissionId,
       'provisional',
     );
     expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
       'm2m-token',
       undefined,
-      basePayload.score,
+      payloadWithSeedMetadata.score,
       'provisional',
       {
-        challengeId: basePayload.challengeId,
+        challengeId: payloadWithSeedMetadata.challengeId,
         scorecardId: undefined,
-        submissionId: basePayload.submissionId,
+        submissionId: payloadWithSeedMetadata.submissionId,
       },
     );
   });
@@ -385,6 +420,7 @@ describe('ScoringResultService', () => {
         progress: 0.2,
         reviewTypeId: basePayload.reviewTypeId,
         status: ScoringTestStatus.InProgress,
+        message: 'Completed seed 753388861',
         submissionId: basePayload.submissionId,
         testPhase: 'provisional',
         totalTests: 20,
@@ -405,6 +441,7 @@ describe('ScoringResultService', () => {
           testProgressDetails: expect.objectContaining({
             completedTests: 4,
             failedTests: 0,
+            message: 'Completed test 4 of 20',
             status: ScoringTestStatus.InProgress,
             testProcess: 'provisional',
             totalTests: 20,

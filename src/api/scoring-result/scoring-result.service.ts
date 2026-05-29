@@ -1176,7 +1176,107 @@ export class ScoringResultService {
       normalized.reviewTypeId = reviewTypeId;
     }
 
-    return normalized;
+    return this.sanitizeMemberVisibleMetadata(normalized);
+  }
+
+  /**
+   * Removes configured seed values from metadata persisted to review-api.
+   * Per-test score arrays keep stable 1-based test ordinals for relative scoring.
+   */
+  private sanitizeMemberVisibleMetadata(
+    metadata: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(metadata)) {
+      if (this.isSensitiveSeedMetadataKey(key)) {
+        continue;
+      }
+
+      if (
+        (key === 'testScores' || key === 'relativeScores') &&
+        Array.isArray(value)
+      ) {
+        sanitized[key] = this.sanitizeScoreEntries(value);
+        continue;
+      }
+
+      if (key === 'message' && typeof value === 'string') {
+        sanitized[key] = this.sanitizeProgressMessage(value);
+        continue;
+      }
+
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        sanitized[key] = this.sanitizeMemberVisibleMetadata(
+          this.asRecord(value),
+        );
+        continue;
+      }
+
+      sanitized[key] = value;
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Replaces raw seed-valued test identifiers with 1-based ordinals.
+   */
+  private sanitizeScoreEntries(entries: unknown[]): Record<string, unknown>[] {
+    return entries.map((rawEntry, index) => {
+      const entry = this.asRecord(rawEntry);
+      const sanitizedEntry: Record<string, unknown> = {};
+
+      for (const [key, value] of Object.entries(entry)) {
+        if (key === 'testcase' || this.isSensitiveSeedMetadataKey(key)) {
+          continue;
+        }
+        sanitizedEntry[key] = value;
+      }
+
+      sanitizedEntry.testcase = String(index + 1);
+      return sanitizedEntry;
+    });
+  }
+
+  /**
+   * Detects metadata keys that directly carry configured seed values.
+   */
+  private isSensitiveSeedMetadataKey(key: string): boolean {
+    const normalized = key.replace(/[_-]/g, '').toLowerCase();
+    return (
+      normalized === 'seed' ||
+      normalized === 'seeds' ||
+      normalized === 'startseed' ||
+      normalized === 'endseed' ||
+      normalized === 'phasestartseed' ||
+      normalized === 'phaseendseed'
+    );
+  }
+
+  /**
+   * Removes seed values from progress messages before they are stored.
+   */
+  private sanitizeProgressMessage(
+    message: string | undefined,
+    completedTests?: number,
+    totalTests?: number,
+  ): string | undefined {
+    if (!message) {
+      return undefined;
+    }
+
+    if (!/\b(?:seed|startSeed|endSeed|phaseStartSeed)\b/i.test(message)) {
+      return message;
+    }
+
+    if (completedTests !== undefined && totalTests !== undefined) {
+      return `Completed test ${completedTests} of ${totalTests}`;
+    }
+    if (completedTests !== undefined) {
+      return `Completed test ${completedTests}`;
+    }
+    return 'Test progress updated';
   }
 
   /**
@@ -1231,7 +1331,11 @@ export class ScoringResultService {
     );
     const totalTests = this.normalizeNonNegativeInteger(progress.totalTests);
     const failedTests = this.normalizeNonNegativeInteger(progress.failedTests);
-    const message = this.asString(progress.message);
+    const message = this.sanitizeProgressMessage(
+      this.asString(progress.message),
+      completedTests,
+      totalTests,
+    );
     const reviewId = this.asString(progress.reviewId);
     const testProcess = this.asString(metadata.testProcess);
     const details: Record<string, unknown> = {

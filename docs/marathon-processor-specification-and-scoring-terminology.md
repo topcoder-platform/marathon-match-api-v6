@@ -259,9 +259,10 @@ Example and Provisional scoring can both be mapped to the same open Submission p
 
 System scoring is dispatched during Review for the pending review and uses the configured System seed range.
 
-For each seed, the generic runner records:
+For each executed test, the generic runner records member-visible results with
+1-based testcase ordinals rather than configured seed values:
 
-- testcase seed
+- testcase ordinal
 - raw tester score
 - run time in milliseconds
 - tester or solution error text

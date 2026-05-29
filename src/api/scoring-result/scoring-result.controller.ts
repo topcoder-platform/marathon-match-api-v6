@@ -236,7 +236,7 @@ class ScoringProgressCallbackDto implements ScoringProgressCallbackPayload {
 
   @ApiPropertyOptional({
     description: 'Short runner progress or failure message',
-    example: 'Completed seed 753376366',
+    example: 'Completed test 9 of 20',
   })
   @IsOptional()
   @IsString()
