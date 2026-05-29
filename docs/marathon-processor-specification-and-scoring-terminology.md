@@ -306,7 +306,7 @@ Both email payloads include:
 
 - member handle
 - submission ID
-- challenge name and challenge ID
+- challenge name from challenge-api-v6 and challenge ID
 - challenge URL in the form `https://topcoder.com/challenges/{challengeId}`
 - overall scoring status, either `pass` or `fail`
 

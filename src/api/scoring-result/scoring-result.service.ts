@@ -149,6 +149,10 @@ interface SystemScoringCompletionCandidate {
 export class ScoringResultService {
   private readonly logger = LoggerService.forRoot('ScoringResultService');
   private readonly scorecardIdLookupCache = new Map<string, string | null>();
+  private readonly challengeNameLookupCache = new Map<string, string>();
+  private readonly challengeApiBaseUrl =
+    process.env.CHALLENGE_API_URL?.replace(/\/+$/, '') ||
+    'https://api.topcoder-dev.com';
 
   constructor(
     private readonly httpService: HttpService,
@@ -746,9 +750,11 @@ export class ScoringResultService {
       return undefined;
     }
 
+    const challengeName = await this.resolveChallengeName(token, config);
+
     return {
       challengeId: config.challengeId,
-      challengeName: config.name,
+      challengeName,
       submissionId,
       ...memberIdentity,
       scoringStatus:
@@ -835,9 +841,12 @@ export class ScoringResultService {
       });
     }
 
+    const challengeName = await this.resolveChallengeName(token, config);
+
     return this.buildRankedSystemScoringCompletionDetails(
       completedCandidates,
       config,
+      challengeName,
     );
   }
 
@@ -910,6 +919,7 @@ export class ScoringResultService {
   private buildRankedSystemScoringCompletionDetails(
     candidates: SystemScoringCompletionCandidate[],
     config: ScoringResultConfigSummary,
+    challengeName: string,
   ): SystemScoringCompletionEmailDetails[] {
     const rankedCandidates = [...candidates].sort((left, right) =>
       this.compareSystemScoringCandidates(left, right, config.scoreDirection),
@@ -934,7 +944,7 @@ export class ScoringResultService {
 
       return {
         challengeId: config.challengeId,
-        challengeName: config.name,
+        challengeName,
         submissionId: candidate.submissionId,
         memberHandle: candidate.memberHandle,
         memberId: candidate.memberId,
@@ -1233,6 +1243,49 @@ export class ScoringResultService {
     );
 
     return this.extractSubmissionRecord(response.data);
+  }
+
+  /**
+   * Resolves the public challenge name from challenge-api-v6 for email payloads.
+   * Falls back to the stored Marathon Match config name when challenge-api does
+   * not return a usable name.
+   * @param token M2M token for challenge-api-v6.
+   * @param config Marathon Match config summary for the challenge.
+   * @returns Challenge title to include in email template data.
+   */
+  private async resolveChallengeName(
+    token: string,
+    config: ScoringResultConfigSummary,
+  ): Promise<string> {
+    const cached = this.challengeNameLookupCache.get(config.challengeId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const url = `${this.challengeApiBaseUrl}/v6/challenges/${encodeURIComponent(config.challengeId)}`;
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+      const challengeName = this.extractChallengeName(response.data);
+      if (challengeName) {
+        this.challengeNameLookupCache.set(config.challengeId, challengeName);
+      }
+      return challengeName ?? config.name;
+    } catch (error) {
+      this.logger.warn({
+        message:
+          'Unable to resolve challenge name from challenge-api. Falling back to Marathon Match config name.',
+        challengeId: config.challengeId,
+        url,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return config.name;
+    }
   }
 
   /**
@@ -2703,6 +2756,44 @@ export class ScoringResultService {
     }
 
     return Object.keys(direct).length > 0 ? direct : undefined;
+  }
+
+  /**
+   * Extracts the challenge display name from direct and wrapped challenge-api responses.
+   */
+  private extractChallengeName(data: unknown): string | undefined {
+    const challenge = this.extractChallengeRecord(data);
+    return this.coalesceString(
+      this.asString(challenge.name),
+      this.asString(challenge.title),
+      this.asString(challenge.challengeName),
+    );
+  }
+
+  /**
+   * Extracts one challenge object from direct and wrapped challenge-api responses.
+   */
+  private extractChallengeRecord(data: unknown): Record<string, unknown> {
+    const direct = this.asRecord(data);
+    if (Object.keys(direct).length === 0) {
+      return {};
+    }
+
+    const result = this.asRecord(direct.result);
+    const resultContent = this.asRecord(result.content);
+    if (Object.keys(resultContent).length > 0) {
+      return resultContent;
+    }
+    if (Object.keys(result).length > 0) {
+      return result;
+    }
+
+    const dataRecord = this.asRecord(direct.data);
+    if (Object.keys(dataRecord).length > 0) {
+      return dataRecord;
+    }
+
+    return direct;
   }
 
   /**
