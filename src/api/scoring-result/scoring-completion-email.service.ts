@@ -5,13 +5,26 @@ import { firstValueFrom } from 'rxjs';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
 
+export type ScoringCompletionStatus = 'pass' | 'fail';
+
 export interface SubmissionScoringCompletionEmailDetails {
   challengeId: string;
   challengeName: string;
   submissionId: string;
   memberHandle: string;
+  scoringStatus: ScoringCompletionStatus;
   aggregateExampleScore: number;
   aggregateProvisionalScore: number;
+}
+
+export interface SystemScoringCompletionEmailDetails {
+  challengeId: string;
+  challengeName: string;
+  submissionId: string;
+  memberHandle: string;
+  scoringStatus: ScoringCompletionStatus;
+  finalSystemScore: number;
+  placement: string;
 }
 
 interface EventBusMessage<T> {
@@ -35,9 +48,11 @@ interface NotificationReservation {
   id: string;
 }
 
+type ScoringCompletionNotificationType = 'EXAMPLE_PROVISIONAL' | 'SYSTEM';
+
 /**
- * Sends one marathon scoring completion email through Topcoder Bus API after
- * both example and provisional scores are available for a submission.
+ * Sends marathon scoring completion emails through Topcoder Bus API after
+ * submission or system scoring results are available.
  */
 @Injectable()
 export class ScoringCompletionEmailService {
@@ -61,7 +76,7 @@ export class ScoringCompletionEmailService {
     token: string,
     details: SubmissionScoringCompletionEmailDetails,
   ): Promise<void> {
-    const sendgridTemplateId = this.getSendgridTemplateId();
+    const sendgridTemplateId = this.getSubmissionSendgridTemplateId();
     if (!sendgridTemplateId) {
       this.logger.warn(
         'Skipping Marathon Match scoring completion email because SENDGRID_TEMPLATE_ID_SCORING_COMPLETE is not configured.',
@@ -72,6 +87,7 @@ export class ScoringCompletionEmailService {
     const reservation = await this.reserveNotification(
       details.challengeId,
       details.submissionId,
+      'EXAMPLE_PROVISIONAL',
     );
     if (!reservation) {
       return;
@@ -90,7 +106,11 @@ export class ScoringCompletionEmailService {
 
       await this.postEventBusMessage(
         token,
-        this.buildEmailPayload(details, recipientEmail, sendgridTemplateId),
+        this.buildSubmissionEmailPayload(
+          details,
+          recipientEmail,
+          sendgridTemplateId,
+        ),
       );
       await this.markNotificationSent(
         reservation.id,
@@ -119,11 +139,92 @@ export class ScoringCompletionEmailService {
   }
 
   /**
-   * Reads the SendGrid template ID for scoring completion notifications.
+   * Sends the SYSTEM results email if the template is configured and this
+   * submission has not already produced a successful SYSTEM notification.
+   * @param token M2M token used for member-api-v6 and Bus API calls.
+   * @param details Submission, challenge, member, and system score values for the email.
+   * @returns Resolves after the email is sent, skipped, or marked failed.
+   */
+  async sendSystemScoringCompleteEmail(
+    token: string,
+    details: SystemScoringCompletionEmailDetails,
+  ): Promise<void> {
+    const sendgridTemplateId = this.getSystemSendgridTemplateId();
+    if (!sendgridTemplateId) {
+      this.logger.warn(
+        'Skipping Marathon Match system scoring email because SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS is not configured.',
+      );
+      return;
+    }
+
+    const reservation = await this.reserveNotification(
+      details.challengeId,
+      details.submissionId,
+      'SYSTEM',
+    );
+    if (!reservation) {
+      return;
+    }
+
+    try {
+      const recipientEmail = await this.fetchMemberEmail(
+        token,
+        details.memberHandle,
+      );
+      if (!recipientEmail) {
+        throw new Error(
+          `Member ${details.memberHandle} does not have an email returned by member-api-v6.`,
+        );
+      }
+
+      await this.postEventBusMessage(
+        token,
+        this.buildSystemEmailPayload(
+          details,
+          recipientEmail,
+          sendgridTemplateId,
+        ),
+      );
+      await this.markNotificationSent(
+        reservation.id,
+        details.memberHandle,
+        recipientEmail,
+      );
+
+      this.logger.log({
+        message: 'Sent Marathon Match system scoring email.',
+        challengeId: details.challengeId,
+        submissionId: details.submissionId,
+        memberHandle: details.memberHandle,
+      });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      await this.markNotificationFailed(reservation.id, errorMessage);
+      this.logger.error({
+        message: 'Failed to send Marathon Match system scoring email.',
+        challengeId: details.challengeId,
+        submissionId: details.submissionId,
+        memberHandle: details.memberHandle,
+        error: errorMessage,
+      });
+    }
+  }
+
+  /**
+   * Reads the SendGrid template ID for example/provisional completion notifications.
    * @returns Configured SendGrid template ID, if present.
    */
-  private getSendgridTemplateId(): string | undefined {
+  private getSubmissionSendgridTemplateId(): string | undefined {
     return this.asString(process.env.SENDGRID_TEMPLATE_ID_SCORING_COMPLETE);
+  }
+
+  /**
+   * Reads the SendGrid template ID for SYSTEM result notifications.
+   * @returns Configured SendGrid template ID, if present.
+   */
+  private getSystemSendgridTemplateId(): string | undefined {
+    return this.asString(process.env.SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS);
   }
 
   /**
@@ -131,18 +232,20 @@ export class ScoringCompletionEmailService {
    * duplicate completion emails.
    * @param challengeId Challenge identifier.
    * @param submissionId Submission identifier.
+   * @param notificationType Distinguishes submission-phase and SYSTEM emails.
    * @returns Reservation row when this worker should send, otherwise undefined.
    */
   private async reserveNotification(
     challengeId: string,
     submissionId: string,
+    notificationType: ScoringCompletionNotificationType,
   ): Promise<NotificationReservation | undefined> {
     const rows = await this.prisma.$queryRaw<NotificationReservation[]>(
       Prisma.sql`
         INSERT INTO "marathon_match"."scoringCompletionEmailNotification"
-          ("challengeId", "submissionId", "status", "createdAt", "updatedAt")
-        VALUES (${challengeId}, ${submissionId}, 'PROCESSING', NOW(), NOW())
-        ON CONFLICT ("challengeId", "submissionId") DO UPDATE
+          ("challengeId", "submissionId", "notificationType", "status", "createdAt", "updatedAt")
+        VALUES (${challengeId}, ${submissionId}, ${notificationType}, 'PROCESSING', NOW(), NOW())
+        ON CONFLICT ("challengeId", "submissionId", "notificationType") DO UPDATE
         SET
           "status" = 'PROCESSING',
           "updatedAt" = NOW(),
@@ -275,7 +378,7 @@ export class ScoringCompletionEmailService {
    * @param sendgridTemplateId SendGrid dynamic template ID.
    * @returns Event bus email payload.
    */
-  private buildEmailPayload(
+  private buildSubmissionEmailPayload(
     details: SubmissionScoringCompletionEmailDetails,
     recipientEmail: string,
     sendgridTemplateId: string,
@@ -294,8 +397,44 @@ export class ScoringCompletionEmailService {
         challengeId: details.challengeId,
         challengeUrl,
         challengeURL: challengeUrl,
+        scoringStatus: details.scoringStatus,
         aggregateExampleScore: details.aggregateExampleScore,
         aggregateProvisionalScore: details.aggregateProvisionalScore,
+      },
+      sendgrid_template_id: sendgridTemplateId,
+      version: 'v3',
+    };
+  }
+
+  /**
+   * Builds the SYSTEM result email payload expected by the `external.action.email` topic.
+   * @param details Submission, challenge, member, and system score values.
+   * @param recipientEmail Email address to receive the notification.
+   * @param sendgridTemplateId SendGrid dynamic template ID.
+   * @returns Event bus email payload.
+   */
+  private buildSystemEmailPayload(
+    details: SystemScoringCompletionEmailDetails,
+    recipientEmail: string,
+    sendgridTemplateId: string,
+  ): EventBusEmailPayload {
+    const challengeUrl = this.buildChallengeUrl(details.challengeId);
+    const fromEmail = this.getEmailFromAddress();
+
+    return {
+      from: fromEmail,
+      replyTo: fromEmail,
+      recipients: [recipientEmail],
+      data: {
+        memberHandle: details.memberHandle,
+        submissionId: details.submissionId,
+        challengeName: details.challengeName,
+        challengeId: details.challengeId,
+        challengeUrl,
+        challengeURL: challengeUrl,
+        scoringStatus: details.scoringStatus,
+        finalSystemScore: details.finalSystemScore,
+        placement: details.placement,
       },
       sendgrid_template_id: sendgridTemplateId,
       version: 'v3',

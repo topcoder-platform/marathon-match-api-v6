@@ -25,102 +25,103 @@ The service is configured via environment variables.
 
 ### Core service and database
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `PORT` | No | `3000` | HTTP listen port |
-| `NODE_ENV` | No | (unset) | Token-expiration behavior and Prisma logging behavior |
-| `CORS_ALLOWED_ORIGIN` | No | Built-in localhost/topcoder regex list | CORS origin matching |
-| `DATABASE_URL` | Yes | None | Prisma + pg-boss Postgres connection |
-| `POSTGRES_SCHEMA` | No | `public` | Prisma schema name used in runtime logging/connection context |
-| `MM_SERVICE_PRISMA_TIMEOUT` | No | `10000` | Prisma transaction timeout (ms) |
+| Variable                    | Required | Default                                | Used for                                                      |
+| --------------------------- | -------- | -------------------------------------- | ------------------------------------------------------------- |
+| `PORT`                      | No       | `3000`                                 | HTTP listen port                                              |
+| `NODE_ENV`                  | No       | (unset)                                | Token-expiration behavior and Prisma logging behavior         |
+| `CORS_ALLOWED_ORIGIN`       | No       | Built-in localhost/topcoder regex list | CORS origin matching                                          |
+| `DATABASE_URL`              | Yes      | None                                   | Prisma + pg-boss Postgres connection                          |
+| `POSTGRES_SCHEMA`           | No       | `public`                               | Prisma schema name used in runtime logging/connection context |
+| `MM_SERVICE_PRISMA_TIMEOUT` | No       | `10000`                                | Prisma transaction timeout (ms)                               |
 
 ### JWT auth and M2M auth
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `AUTH_SECRET` | Yes (for JWT validation) | None | tc-core JWT authenticator secret |
-| `VALID_ISSUERS` | No | Topcoder/Auth0 issuer JSON array string | Accepted JWT issuers |
-| `AUTH0_ISSUER` | No | `https://topcoder-dev.auth0.com/` | Legacy JWT config field |
-| `TOKEN_AUDIENCE` | No | `https://m2m.topcoder-dev.com/` | Legacy JWT config field |
-| `AUTH0_URL` | No | `http://localhost:4000/oauth/token` | M2M token endpoint |
-| `AUTH0_DOMAIN` | No | `topcoder-dev.auth0.com` | M2M config metadata |
-| `AUTH0_AUDIENCE` | No | `https://m2m.topcoder-dev.com/` | M2M audience |
-| `AUTH0_PROXY_SERVER_URL` | No | (unset) | Optional M2M proxy |
-| `AUTH0_CLIENT_ID` | Yes (for outbound API calls) | None | M2M client ID |
-| `AUTH0_CLIENT_SECRET` | Yes (for outbound API calls) | None | M2M client secret |
+| Variable                 | Required                     | Default                                 | Used for                         |
+| ------------------------ | ---------------------------- | --------------------------------------- | -------------------------------- |
+| `AUTH_SECRET`            | Yes (for JWT validation)     | None                                    | tc-core JWT authenticator secret |
+| `VALID_ISSUERS`          | No                           | Topcoder/Auth0 issuer JSON array string | Accepted JWT issuers             |
+| `AUTH0_ISSUER`           | No                           | `https://topcoder-dev.auth0.com/`       | Legacy JWT config field          |
+| `TOKEN_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | Legacy JWT config field          |
+| `AUTH0_URL`              | No                           | `http://localhost:4000/oauth/token`     | M2M token endpoint               |
+| `AUTH0_DOMAIN`           | No                           | `topcoder-dev.auth0.com`                | M2M config metadata              |
+| `AUTH0_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | M2M audience                     |
+| `AUTH0_PROXY_SERVER_URL` | No                           | (unset)                                 | Optional M2M proxy               |
+| `AUTH0_CLIENT_ID`        | Yes (for outbound API calls) | None                                    | M2M client ID                    |
+| `AUTH0_CLIENT_SECRET`    | Yes (for outbound API calls) | None                                    | M2M client secret                |
 
 ### Kafka consumer/producer
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `DISABLE_KAFKA` | No | `false` | Fully disable Kafka connection/consumption |
-| `KAFKA_URL` | No | `localhost:9092` | Broker list (comma-separated). If unset, `KAFKA_BROKERS` is also accepted |
-| `KAFKA_BROKERS` | No | (fallback only) | Alternative broker list env key (review-api compatibility) |
-| `KAFKA_CLIENT_ID` | No | `tc-marathon-match-api` | Kafka client ID |
-| `KAFKA_GROUP_ID` | No | `tc-marathon-match-consumer-group` | Consumer group ID |
-| `KAFKA_SSL_ENABLED` | No | `false` | Enable TLS |
-| `KAFKA_SASL_MECHANISM` | No | `plain` | SASL mechanism (`plain`, `scram-sha-256`, `scram-sha-512`) |
-| `KAFKA_SASL_USERNAME` | No | (unset) | SASL username (enables SASL when set) |
-| `KAFKA_SASL_PASSWORD` | No | empty string | SASL password |
-| `KAFKA_CONNECTION_TIMEOUT` | No | `10000` | Kafka connect timeout (ms) |
-| `KAFKA_REQUEST_TIMEOUT` | No | `30000` | Kafka request timeout (ms) |
-| `KAFKA_MAXBYTES` / `KAFKA_MAX_BYTES` | No | Kafka client default | Consumer fetch max bytes (dev parity with review-api usage) |
-| `KAFKA_MIN_BYTES` | No | Kafka client default | Consumer fetch minimum bytes |
-| `KAFKA_MAX_WAIT_TIME` | No | Auto-derived from request timeout | Consumer fetch max wait (ms) |
-| `KAFKA_RETRY_ATTEMPTS` | No | `5` | Client reconnection retry count |
-| `KAFKA_INITIAL_RETRY_TIME` | No | `100` | Initial retry delay (ms) |
-| `KAFKA_MAX_RETRY_TIME` | No | `30000` | Max exponential retry delay (ms) |
-| `KAFKA_DLQ_ENABLED` | No | `false` | Enable DLQ publishing after retry exhaustion |
-| `KAFKA_DLQ_TOPIC_SUFFIX` | No | `.dlq` | DLQ topic suffix |
-| `KAFKA_DLQ_MAX_RETRIES` | No | `3` | Per-message retries before DLQ |
+| Variable                             | Required | Default                            | Used for                                                                  |
+| ------------------------------------ | -------- | ---------------------------------- | ------------------------------------------------------------------------- |
+| `DISABLE_KAFKA`                      | No       | `false`                            | Fully disable Kafka connection/consumption                                |
+| `KAFKA_URL`                          | No       | `localhost:9092`                   | Broker list (comma-separated). If unset, `KAFKA_BROKERS` is also accepted |
+| `KAFKA_BROKERS`                      | No       | (fallback only)                    | Alternative broker list env key (review-api compatibility)                |
+| `KAFKA_CLIENT_ID`                    | No       | `tc-marathon-match-api`            | Kafka client ID                                                           |
+| `KAFKA_GROUP_ID`                     | No       | `tc-marathon-match-consumer-group` | Consumer group ID                                                         |
+| `KAFKA_SSL_ENABLED`                  | No       | `false`                            | Enable TLS                                                                |
+| `KAFKA_SASL_MECHANISM`               | No       | `plain`                            | SASL mechanism (`plain`, `scram-sha-256`, `scram-sha-512`)                |
+| `KAFKA_SASL_USERNAME`                | No       | (unset)                            | SASL username (enables SASL when set)                                     |
+| `KAFKA_SASL_PASSWORD`                | No       | empty string                       | SASL password                                                             |
+| `KAFKA_CONNECTION_TIMEOUT`           | No       | `10000`                            | Kafka connect timeout (ms)                                                |
+| `KAFKA_REQUEST_TIMEOUT`              | No       | `30000`                            | Kafka request timeout (ms)                                                |
+| `KAFKA_MAXBYTES` / `KAFKA_MAX_BYTES` | No       | Kafka client default               | Consumer fetch max bytes (dev parity with review-api usage)               |
+| `KAFKA_MIN_BYTES`                    | No       | Kafka client default               | Consumer fetch minimum bytes                                              |
+| `KAFKA_MAX_WAIT_TIME`                | No       | Auto-derived from request timeout  | Consumer fetch max wait (ms)                                              |
+| `KAFKA_RETRY_ATTEMPTS`               | No       | `5`                                | Client reconnection retry count                                           |
+| `KAFKA_INITIAL_RETRY_TIME`           | No       | `100`                              | Initial retry delay (ms)                                                  |
+| `KAFKA_MAX_RETRY_TIME`               | No       | `30000`                            | Max exponential retry delay (ms)                                          |
+| `KAFKA_DLQ_ENABLED`                  | No       | `false`                            | Enable DLQ publishing after retry exhaustion                              |
+| `KAFKA_DLQ_TOPIC_SUFFIX`             | No       | `.dlq`                             | DLQ topic suffix                                                          |
+| `KAFKA_DLQ_MAX_RETRIES`              | No       | `3`                                | Per-message retries before DLQ                                            |
 
 ### Scoring completion email notifications
 
-When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
+When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. When `SYSTEM` scoring is complete for every latest member submission in the challenge, the service sends separate system-results emails with each member's final placement. Both template payloads include `scoringStatus` as `pass` or `fail`, and local notification markers prevent duplicate sends for duplicate scorer callbacks.
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` | Yes (to send emails) | None | SendGrid template ID for Marathon Match scoring completion emails |
-| `MEMBER_API_URL` | No | `https://api.topcoder-dev.com/v6` | member-api-v6 base URL used to fetch the competitor email by handle |
-| `BUS_EVENTS_URL` | No | (derived) | Full Bus API event endpoint URL; overrides the base URL variables |
-| `BUS_API_URL` / `BUSAPI_URL` | No | `https://api.topcoder-dev.com/v5` | Bus API base URL used to publish `external.action.email` events |
-| `TC_EMAIL_FROM_EMAIL` / `EMAIL_FROM` | No | `no-reply@topcoder.com` | Sender and reply-to address for the email payload |
+| Variable                                   | Required             | Default                           | Used for                                                            |
+| ------------------------------------------ | -------------------- | --------------------------------- | ------------------------------------------------------------------- |
+| `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE`    | Yes (to send emails) | None                              | SendGrid template ID for example/provisional completion emails      |
+| `SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS` | Yes (to send emails) | None                              | SendGrid template ID for system test result emails                  |
+| `MEMBER_API_URL`                           | No                   | `https://api.topcoder-dev.com/v6` | member-api-v6 base URL used to fetch the competitor email by handle |
+| `BUS_EVENTS_URL`                           | No                   | (derived)                         | Full Bus API event endpoint URL; overrides the base URL variables   |
+| `BUS_API_URL` / `BUSAPI_URL`               | No                   | `https://api.topcoder-dev.com/v5` | Bus API base URL used to publish `external.action.email` events     |
+| `TC_EMAIL_FROM_EMAIL` / `EMAIL_FROM`       | No                   | `no-reply@topcoder.com`           | Sender and reply-to address for the email payload                   |
 
 ### Marathon scoring integration
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `CHALLENGE_API_URL` | No | `https://api.topcoder-dev.com` | Challenge API lookup for current active phase |
-| `RESOURCES_API_URL` | No | `${CHALLENGE_API_URL}/v6/resources` | Resource API lookup for challenge-specific copilot access to manual reruns |
-| `DISABLE_PG_BOSS` | No | `false` | Disable pg-boss queue/worker and run tester compilation inline |
-| `DEFAULT_REVIEW_SCORECARD_ID` | Yes (for UI defaults) | None | Default review scorecard returned by `GET /challenge/defaults` |
-| `DEFAULT_TEST_TIMEOUT_MS` | No | `90000` | Default test timeout returned by `GET /challenge/defaults` |
-| `DEFAULT_COMPILE_TIMEOUT_MS` | No | `120000` | Default compile timeout returned by `GET /challenge/defaults` |
-| `DEFAULT_TASK_DEFINITION_NAME` | No | empty string | Default ECS task definition family returned by `GET /challenge/defaults` |
-| `DEFAULT_TASK_DEFINITION_VERSION` | No | empty string | Default ECS task definition revision returned by `GET /challenge/defaults` |
-| `COMPILE_TIMEOUT_MS` | No | `120000` | Maven tester compilation timeout |
-| `COMPILE_JAVA_MAX_HEAP_MB` | No | `384` | Max JVM heap (MB) enforced for tester compilation Maven process when `-Xmx` is not already provided |
-| `COMPILE_MAVEN_OPTS` | No | (auto-derived) | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap |
-| `MVN_BINARY` | No | `mvn` | Maven executable for tester compilation |
-| `BOILERPLATE_DIR` | No | `<repo>/ecs-runner/boilerplate` | Java boilerplate project copied for compilation |
-| `COMPILATION_TMP_DIR` | No | Auto-discovery (`TMPDIR`, `/dev/shm` on Linux, `os.tmpdir()`, `<repo>/tmp`) | Writable temp root used for compile workspaces; set to `/dev/shm` to keep workspace on memory-backed tmpfs |
-| `PG_BOSS_COMPILE_TEAM_SIZE` | No | `1` | Number of pg-boss compile workers processing jobs in parallel |
-| `PG_BOSS_COMPILE_TEAM_CONCURRENCY` | No | `1` | Per-worker concurrency for compile jobs |
+| Variable                           | Required              | Default                                                                     | Used for                                                                                                   |
+| ---------------------------------- | --------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `CHALLENGE_API_URL`                | No                    | `https://api.topcoder-dev.com`                                              | Challenge API lookup for current active phase                                                              |
+| `RESOURCES_API_URL`                | No                    | `${CHALLENGE_API_URL}/v6/resources`                                         | Resource API lookup for challenge-specific copilot access to manual reruns                                 |
+| `DISABLE_PG_BOSS`                  | No                    | `false`                                                                     | Disable pg-boss queue/worker and run tester compilation inline                                             |
+| `DEFAULT_REVIEW_SCORECARD_ID`      | Yes (for UI defaults) | None                                                                        | Default review scorecard returned by `GET /challenge/defaults`                                             |
+| `DEFAULT_TEST_TIMEOUT_MS`          | No                    | `90000`                                                                     | Default test timeout returned by `GET /challenge/defaults`                                                 |
+| `DEFAULT_COMPILE_TIMEOUT_MS`       | No                    | `120000`                                                                    | Default compile timeout returned by `GET /challenge/defaults`                                              |
+| `DEFAULT_TASK_DEFINITION_NAME`     | No                    | empty string                                                                | Default ECS task definition family returned by `GET /challenge/defaults`                                   |
+| `DEFAULT_TASK_DEFINITION_VERSION`  | No                    | empty string                                                                | Default ECS task definition revision returned by `GET /challenge/defaults`                                 |
+| `COMPILE_TIMEOUT_MS`               | No                    | `120000`                                                                    | Maven tester compilation timeout                                                                           |
+| `COMPILE_JAVA_MAX_HEAP_MB`         | No                    | `384`                                                                       | Max JVM heap (MB) enforced for tester compilation Maven process when `-Xmx` is not already provided        |
+| `COMPILE_MAVEN_OPTS`               | No                    | (auto-derived)                                                              | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap     |
+| `MVN_BINARY`                       | No                    | `mvn`                                                                       | Maven executable for tester compilation                                                                    |
+| `BOILERPLATE_DIR`                  | No                    | `<repo>/ecs-runner/boilerplate`                                             | Java boilerplate project copied for compilation                                                            |
+| `COMPILATION_TMP_DIR`              | No                    | Auto-discovery (`TMPDIR`, `/dev/shm` on Linux, `os.tmpdir()`, `<repo>/tmp`) | Writable temp root used for compile workspaces; set to `/dev/shm` to keep workspace on memory-backed tmpfs |
+| `PG_BOSS_COMPILE_TEAM_SIZE`        | No                    | `1`                                                                         | Number of pg-boss compile workers processing jobs in parallel                                              |
+| `PG_BOSS_COMPILE_TEAM_CONCURRENCY` | No                    | `1`                                                                         | Per-worker concurrency for compile jobs                                                                    |
 
 ### ECS launch configuration
 
-| Variable | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `AWS_REGION` | No | `us-east-1` | AWS SDK ECS client region |
-| `ECS_CLUSTER` | Yes (for scoring) | None | ECS cluster for `RunTask` |
-| `ECS_SUBNETS` | Yes (for scoring) | None | Comma-separated subnets for awsvpc task networking |
-| `ECS_SECURITY_GROUPS` | Yes (for scoring) | None | Comma-separated security groups for awsvpc networking |
-| `ECS_CONTAINER_NAME` | Yes (for scoring) | None | Container override target in task definition |
-| `MARATHON_MATCH_API_URL` | Yes (for scoring) | None | Base URL passed to ECS runner |
-| `REVIEW_API_URL` | Yes (for scoring) | None | Review API base URL used by NestJS scoring callback processor |
-| `REVIEW_TYPE_ID` | Yes (for scoring) | None | Review type ID passed to ECS runner callback payload |
-| `DEBUG_LOG_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
-| `DEBUG_LOG_FULL_ACCESS_TOKEN` | No | `false` | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true` |
+| Variable                      | Required          | Default     | Used for                                                                                                |
+| ----------------------------- | ----------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| `AWS_REGION`                  | No                | `us-east-1` | AWS SDK ECS client region                                                                               |
+| `ECS_CLUSTER`                 | Yes (for scoring) | None        | ECS cluster for `RunTask`                                                                               |
+| `ECS_SUBNETS`                 | Yes (for scoring) | None        | Comma-separated subnets for awsvpc task networking                                                      |
+| `ECS_SECURITY_GROUPS`         | Yes (for scoring) | None        | Comma-separated security groups for awsvpc networking                                                   |
+| `ECS_CONTAINER_NAME`          | Yes (for scoring) | None        | Container override target in task definition                                                            |
+| `MARATHON_MATCH_API_URL`      | Yes (for scoring) | None        | Base URL passed to ECS runner                                                                           |
+| `REVIEW_API_URL`              | Yes (for scoring) | None        | Review API base URL used by NestJS scoring callback processor                                           |
+| `REVIEW_TYPE_ID`              | Yes (for scoring) | None        | Review type ID passed to ECS runner callback payload                                                    |
+| `DEBUG_LOG_ACCESS_TOKEN`      | No                | `false`     | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
+| `DEBUG_LOG_FULL_ACCESS_TOKEN` | No                | `false`     | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true`              |
 
 `launchScorerTask(...)` already disables public IP assignment for scorer tasks. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
 
@@ -186,48 +187,48 @@ Auth model in code:
 
 ### Public endpoints
 
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| `GET` | `/v6/marathon-match/health` | None | DB and Kafka consumer health check |
-| `GET` | `/v6/marathon-match/api-docs` | None | Swagger docs route |
+| Method | Path                          | Auth | Notes                              |
+| ------ | ----------------------------- | ---- | ---------------------------------- |
+| `GET`  | `/v6/marathon-match/health`   | None | DB and Kafka consumer health check |
+| `GET`  | `/v6/marathon-match/api-docs` | None | Swagger docs route                 |
 
 ### Tester endpoints
 
-| Method | Path | Required role/scope |
-| --- | --- | --- |
-| `POST` | `/v6/marathon-match/testers` | `administrator` OR `copilot` OR `create:marathon-match-tester` |
-| `GET` | `/v6/marathon-match/testers` | `administrator` OR `copilot` OR `read:marathon-match-tester` |
-| `GET` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `read:marathon-match-tester` |
-| `PUT` | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
-| `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester` |
+| Method   | Path                             | Required role/scope                                            |
+| -------- | -------------------------------- | -------------------------------------------------------------- |
+| `POST`   | `/v6/marathon-match/testers`     | `administrator` OR `copilot` OR `create:marathon-match-tester` |
+| `GET`    | `/v6/marathon-match/testers`     | `administrator` OR `copilot` OR `read:marathon-match-tester`   |
+| `GET`    | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `read:marathon-match-tester`   |
+| `PUT`    | `/v6/marathon-match/testers/:id` | `administrator` OR `copilot` OR `update:marathon-match-tester` |
+| `DELETE` | `/v6/marathon-match/testers/:id` | `administrator` OR `delete:marathon-match-tester`              |
 
 `POST /v6/marathon-match/testers` creates only the first record in a tester family and rejects names that already exist. `GET /v6/marathon-match/testers` returns tester summary rows only. `GET /v6/marathon-match/testers/:id` returns tester details with `sourceCode`. `PUT /v6/marathon-match/testers/:id` creates a new tester version while preserving older versions for lookup and selection. Detail and version-create responses omit `jarFile` by default; add `?includeJarFile=true` only when you explicitly need the compiled jar payload.
 
 ### Marathon match config endpoints
 
-| Method | Path | Required role/scope |
-| --- | --- | --- |
-| `POST` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `create:marathon-match` |
-| `GET` | `/v6/marathon-match/challenge` | `administrator` OR `read:marathon-match` |
-| `GET` | `/v6/marathon-match/challenge/defaults` | `administrator` OR `copilot` OR `read:marathon-match` |
-| `GET` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `read:marathon-match` |
-| `GET` | `/v6/marathon-match/challenge/:challengeId/tester-jar` | `administrator` OR `read:marathon-match` |
-| `PUT` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `copilot` OR `update:marathon-match` |
-| `DELETE` | `/v6/marathon-match/challenge/:challengeId` | `administrator` OR `delete:marathon-match` |
+| Method   | Path                                                   | Required role/scope                                     |
+| -------- | ------------------------------------------------------ | ------------------------------------------------------- |
+| `POST`   | `/v6/marathon-match/challenge/:challengeId`            | `administrator` OR `copilot` OR `create:marathon-match` |
+| `GET`    | `/v6/marathon-match/challenge`                         | `administrator` OR `read:marathon-match`                |
+| `GET`    | `/v6/marathon-match/challenge/defaults`                | `administrator` OR `copilot` OR `read:marathon-match`   |
+| `GET`    | `/v6/marathon-match/challenge/:challengeId`            | `administrator` OR `copilot` OR `read:marathon-match`   |
+| `GET`    | `/v6/marathon-match/challenge/:challengeId/tester-jar` | `administrator` OR `read:marathon-match`                |
+| `PUT`    | `/v6/marathon-match/challenge/:challengeId`            | `administrator` OR `copilot` OR `update:marathon-match` |
+| `DELETE` | `/v6/marathon-match/challenge/:challengeId`            | `administrator` OR `delete:marathon-match`              |
 
 ### Submission runner log endpoint
 
-| Method | Path | Required role/scope |
-| --- | --- | --- |
-| `GET` | `/v6/marathon-match/submissions/:submissionId/runner-logs` | `administrator` OR `copilot` OR `Manager` OR `read:marathon-match` |
+| Method | Path                                                       | Required role/scope                                                |
+| ------ | ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| `GET`  | `/v6/marathon-match/submissions/:submissionId/runner-logs` | `administrator` OR `copilot` OR `Manager` OR `read:marathon-match` |
 
 ### Internal scoring callback endpoint
 
-| Method | Path | Required role/scope |
-| --- | --- | --- |
+| Method | Path                                           | Required role/scope                        |
+| ------ | ---------------------------------------------- | ------------------------------------------ |
 | `POST` | `/v6/marathon-match/internal/scoring-progress` | `administrator` OR `update:marathon-match` |
-| `POST` | `/v6/marathon-match/internal/scoring-results` | `administrator` OR `update:marathon-match` |
-| `POST` | `/v6/marathon-match/internal/system-score` | `administrator` OR `update:marathon-match` |
+| `POST` | `/v6/marathon-match/internal/scoring-results`  | `administrator` OR `update:marathon-match` |
+| `POST` | `/v6/marathon-match/internal/system-score`     | `administrator` OR `update:marathon-match` |
 
 `POST /v6/marathon-match/internal/scoring-results` rejects callbacks whose `challengeId` does not map to an existing Marathon Match config.
 `POST /v6/marathon-match/internal/scoring-progress` stores runner progress in review summation metadata as `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`).

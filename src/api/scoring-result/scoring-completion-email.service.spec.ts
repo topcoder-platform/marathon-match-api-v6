@@ -21,6 +21,16 @@ describe('ScoringCompletionEmailService', () => {
     challengeId: '30000123',
     challengeName: 'Blocks',
     memberHandle: 'competitor',
+    scoringStatus: 'pass',
+    submissionId: 'submission-1',
+  };
+  const systemDetails = {
+    challengeId: '30000123',
+    challengeName: 'Blocks',
+    finalSystemScore: 91.5,
+    memberHandle: 'competitor',
+    placement: '1st',
+    scoringStatus: 'pass',
     submissionId: 'submission-1',
   };
 
@@ -55,6 +65,7 @@ describe('ScoringCompletionEmailService', () => {
       BUS_API_URL: 'https://api.topcoder-dev.com/v5',
       MEMBER_API_URL: 'https://api.topcoder-dev.com/v6',
       SENDGRID_TEMPLATE_ID_SCORING_COMPLETE: 'sendgrid-template-id',
+      SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS: 'system-template-id',
       TC_EMAIL_FROM_EMAIL: 'no-reply@topcoder.com',
     };
   });
@@ -107,6 +118,7 @@ describe('ScoringCompletionEmailService', () => {
             challengeName: details.challengeName,
             challengeUrl: 'https://topcoder.com/challenges/30000123',
             memberHandle: details.memberHandle,
+            scoringStatus: 'pass',
             submissionId: details.submissionId,
           }),
         }),
@@ -118,6 +130,55 @@ describe('ScoringCompletionEmailService', () => {
         }),
       }),
     );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends one system results email through Bus API and marks the notification sent', async () => {
+    const { httpService, prisma, service } = createService();
+
+    prisma.$queryRaw.mockResolvedValue([{ id: 'notification-1' }]);
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          email: 'competitor@example.com',
+          handle: 'competitor',
+        },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ status: 202 }));
+
+    await expect(
+      service.sendSystemScoringCompleteEmail('m2m-token', systemDetails),
+    ).resolves.toBe(undefined);
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v5/bus/events',
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          recipients: ['competitor@example.com'],
+          sendgrid_template_id: 'system-template-id',
+          data: expect.objectContaining({
+            challengeId: systemDetails.challengeId,
+            challengeName: systemDetails.challengeName,
+            challengeUrl: 'https://topcoder.com/challenges/30000123',
+            finalSystemScore: systemDetails.finalSystemScore,
+            memberHandle: systemDetails.memberHandle,
+            placement: '1st',
+            scoringStatus: 'pass',
+            submissionId: systemDetails.submissionId,
+          }),
+        }),
+        topic: 'external.action.email',
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer m2m-token',
+        }),
+      }),
+    );
+    const sentPayload = httpService.post.mock.calls[0][1].payload.data;
+    expect(sentPayload.aggregateExampleScore).toBeUndefined();
+    expect(sentPayload.aggregateProvisionalScore).toBeUndefined();
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
   });
 

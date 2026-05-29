@@ -24,15 +24,15 @@ The generic ECS runner searches the extracted submission for a supported source 
 
 Supported source extensions are:
 
-| Extension | Language / runtime |
-| --- | --- |
-| `.cpp` | C++ |
-| `.java` | Java |
-| `.py` | Python 3.12 |
-| `.cs` | C# using Mono |
-| `.cs_net10` | C# using .NET 10 / C# 14 |
-| `.cs_net7` | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
-| `.rs` | Rust latest stable |
+| Extension   | Language / runtime                                                           |
+| ----------- | ---------------------------------------------------------------------------- |
+| `.cpp`      | C++                                                                          |
+| `.java`     | Java                                                                         |
+| `.py`       | Python 3.12                                                                  |
+| `.cs`       | C# using Mono                                                                |
+| `.cs_net10` | C# using .NET 10 / C# 14                                                     |
+| `.cs_net7`  | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
+| `.rs`       | Rust latest stable                                                           |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
@@ -102,9 +102,9 @@ Compile and test timeouts are configured per Marathon Match challenge.
 
 The default values supplied by `marathon-match-api-v6` are environment-configurable. If not overridden in service configuration, the API defaults are:
 
-| Setting | Default |
-| --- | ---: |
-| `testTimeout` | `90000` ms |
+| Setting          |     Default |
+| ---------------- | ----------: |
+| `testTimeout`    |  `90000` ms |
 | `compileTimeout` | `120000` ms |
 
 ## Processing Server Specifications
@@ -115,19 +115,19 @@ The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:8-j
 
 Tool versions verified from a local build of the current runner image:
 
-| Tool | Version |
-| --- | --- |
-| Operating system | Ubuntu 24.04.4 LTS |
-| Java runtime | Temurin OpenJDK 8, `1.8.0_492-b09` |
-| Java compiler | `javac 1.8.0_492` |
-| GCC | `14.2.0` via `gcc-14` |
-| G++ | `14.2.0` via `g++-14` |
-| Python | `3.12.3` |
-| Mono runtime | `6.8.0.105` |
-| Mono C# compiler | `mcs 6.8.0.105` |
-| .NET SDK | `10.0.108` |
-| Rust compiler | `rustc 1.96.0` |
-| Bash | `5.2.21` |
+| Tool             | Version                            |
+| ---------------- | ---------------------------------- |
+| Operating system | Ubuntu 24.04.4 LTS                 |
+| Java runtime     | Temurin OpenJDK 8, `1.8.0_492-b09` |
+| Java compiler    | `javac 1.8.0_492`                  |
+| GCC              | `14.2.0` via `gcc-14`              |
+| G++              | `14.2.0` via `g++-14`              |
+| Python           | `3.12.3`                           |
+| Mono runtime     | `6.8.0.105`                        |
+| Mono C# compiler | `mcs 6.8.0.105`                    |
+| .NET SDK         | `10.0.108`                         |
+| Rust compiler    | `rustc 1.96.0`                     |
+| Bash             | `5.2.21`                           |
 
 The runner image includes:
 
@@ -243,11 +243,11 @@ After the match is complete and submissions are allowed to be public, other comp
 
 Marathon Match scoring is split into phase-specific scorer configurations.
 
-| Phase type | Typical trigger | Purpose |
-| --- | --- | --- |
-| `EXAMPLE` | Submission phase | Fast feedback on example seeds |
+| Phase type    | Typical trigger  | Purpose                                   |
+| ------------- | ---------------- | ----------------------------------------- |
+| `EXAMPLE`     | Submission phase | Fast feedback on example seeds            |
 | `PROVISIONAL` | Submission phase | Live provisional scoring during the match |
-| `SYSTEM` | Review phase | Final system scoring after the match |
+| `SYSTEM`      | Review phase     | Final system scoring after the match      |
 
 Each phase has:
 
@@ -282,15 +282,15 @@ The current processor does not expose queue position by assigning a magic tempor
 
 For Provisional and System scoring, the runner posts progress updates while tests are running. These updates are stored in review summation metadata:
 
-| Metadata field | Meaning |
-| --- | --- |
-| `testProcess` | `provisional` or `system` |
-| `testProgress` | progress from `0` to `1` |
-| `testStatus` | `IN PROGRESS`, `SUCCESS`, or `FAILED` |
-| `testProgressDetails.completedTests` | completed testcase count |
-| `testProgressDetails.totalTests` | configured testcase count |
-| `testProgressDetails.failedTests` | testcase count with errors |
-| `testProgressDetails.message` | latest runner progress or failure message |
+| Metadata field                       | Meaning                                   |
+| ------------------------------------ | ----------------------------------------- |
+| `testProcess`                        | `provisional` or `system`                 |
+| `testProgress`                       | progress from `0` to `1`                  |
+| `testStatus`                         | `IN PROGRESS`, `SUCCESS`, or `FAILED`     |
+| `testProgressDetails.completedTests` | completed testcase count                  |
+| `testProgressDetails.totalTests`     | configured testcase count                 |
+| `testProgressDetails.failedTests`    | testcase count with errors                |
+| `testProgressDetails.message`        | latest runner progress or failure message |
 
 Operators can also inspect ECS runner logs. Runner log mappings are stored for each launched scoring task and can be exposed through:
 
@@ -300,16 +300,25 @@ GET /v6/marathon-match/submissions/:submissionId/runner-logs
 
 ## Notification Emails
 
-When both Example and Provisional scoring are complete for a submission, `marathon-match-api-v6` sends one Bus API event to topic `external.action.email` if `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` is configured.
+When both Example and Provisional scoring are complete for a submission, `marathon-match-api-v6` sends one Bus API event to topic `external.action.email` if `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` is configured. System scoring emails are held until every latest member submission in the challenge has a completed System review summation; then the service sends a separate Bus API event per member if `SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS` is configured.
 
-The email payload includes:
+Both email payloads include:
 
 - member handle
 - submission ID
 - challenge name and challenge ID
 - challenge URL in the form `https://topcoder.com/challenges/{challengeId}`
+- overall scoring status, either `pass` or `fail`
+
+The Example/Provisional completion payload also includes:
+
 - aggregate example score after relative scoring updates
 - aggregate provisional score after relative scoring updates
+
+The System completion payload also includes:
+
+- final system score
+- placement, formatted as an ordinal string such as `1st`, `2nd`, or `3rd`
 
 The competitor email address is read from `member-api-v6` with the service M2M token, using the member handle on the submission. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
 

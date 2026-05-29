@@ -120,20 +120,22 @@ model submissionRunnerLog {
 }
 
 model scoringCompletionEmailNotification {
-  id             String    @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
-  challengeId    String    @db.VarChar(36)
-  submissionId   String
-  memberHandle   String?
-  recipientEmail String?
-  status         String    @default("PROCESSING")
-  errorMessage   String?   @db.Text
-  sentAt         DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(dbgenerated("nanoid()")) @db.VarChar(14)
+  challengeId      String    @db.VarChar(36)
+  submissionId     String
+  notificationType String    @default("EXAMPLE_PROVISIONAL")
+  memberHandle     String?
+  recipientEmail   String?
+  status           String    @default("PROCESSING")
+  errorMessage     String?   @db.Text
+  sentAt           DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  @@unique([challengeId, submissionId])
+  @@unique([challengeId, submissionId, notificationType])
   @@index([challengeId])
   @@index([submissionId])
+  @@index([notificationType])
   @@index([status])
   @@schema("marathon_match")
 }

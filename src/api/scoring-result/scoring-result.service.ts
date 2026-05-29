@@ -16,8 +16,10 @@ import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
 import {
+  ScoringCompletionStatus,
   ScoringCompletionEmailService,
   SubmissionScoringCompletionEmailDetails,
+  SystemScoringCompletionEmailDetails,
 } from './scoring-completion-email.service';
 
 export interface ScoringResultCallbackPayload {
@@ -110,6 +112,25 @@ interface SystemReviewCompletionContext {
   challengeId: string;
   submissionId: string;
   scorecardId?: string;
+}
+
+interface CompletedPhaseScoringResult {
+  aggregateScore: number;
+  status: ScoringCompletionStatus;
+}
+
+interface LatestMemberSubmissionCandidate {
+  submission: Record<string, unknown>;
+  memberKey: string;
+  submittedDate?: string;
+  isLatest?: boolean;
+  sequence: number;
+}
+
+interface SystemScoringCompletionCandidate {
+  submissionId: string;
+  memberHandle: string;
+  scoringResult: CompletedPhaseScoringResult;
 }
 
 /**
@@ -578,8 +599,9 @@ export class ScoringResultService {
   }
 
   /**
-   * Sends the scoring completion email once example and provisional summations
-   * are both complete for the callback submission.
+   * Sends scoring completion emails once the relevant phase result set is complete.
+   * Example/provisional emails are evaluated per callback submission; SYSTEM
+   * emails are evaluated for all latest member submissions in the challenge.
    * @param token M2M token for downstream API calls.
    * @param payload Original scorer callback payload.
    * @param testPhase Normalized scoring phase from the callback.
@@ -592,14 +614,29 @@ export class ScoringResultService {
     testPhase: string,
     config: ScoringResultConfigSummary,
   ): Promise<void> {
-    if (
-      !this.scoringCompletionEmailService ||
-      this.normalizeTestPhase(testPhase) === 'system'
-    ) {
+    if (!this.scoringCompletionEmailService) {
       return;
     }
 
     try {
+      if (this.normalizeTestPhase(testPhase) === 'system') {
+        const systemDetails = await this.resolveSystemScoringCompletionDetails(
+          token,
+          config,
+        );
+        if (systemDetails.length === 0) {
+          return;
+        }
+
+        for (const details of systemDetails) {
+          await this.scoringCompletionEmailService.sendSystemScoringCompleteEmail(
+            token,
+            details,
+          );
+        }
+        return;
+      }
+
       const completionDetails =
         await this.resolveSubmissionScoringCompletionDetails(
           token,
@@ -672,17 +709,14 @@ export class ScoringResultService {
       return undefined;
     }
 
-    const aggregateExampleScore = this.resolveCompletedPhaseAggregateScore(
+    const exampleResult = this.resolveCompletedPhaseScoringResult(
       this.findPhaseReviewSummation(submission, 'example'),
     );
-    const aggregateProvisionalScore = this.resolveCompletedPhaseAggregateScore(
+    const provisionalResult = this.resolveCompletedPhaseScoringResult(
       this.findPhaseReviewSummation(submission, 'provisional'),
     );
 
-    if (
-      aggregateExampleScore === undefined ||
-      aggregateProvisionalScore === undefined
-    ) {
+    if (!exampleResult || !provisionalResult) {
       return undefined;
     }
 
@@ -691,19 +725,302 @@ export class ScoringResultService {
       challengeName: config.name,
       submissionId,
       memberHandle,
-      aggregateExampleScore,
-      aggregateProvisionalScore,
+      scoringStatus:
+        exampleResult.status === 'pass' && provisionalResult.status === 'pass'
+          ? 'pass'
+          : 'fail',
+      aggregateExampleScore: exampleResult.aggregateScore,
+      aggregateProvisionalScore: provisionalResult.aggregateScore,
     };
   }
 
   /**
-   * Extracts a completed aggregate score from a phase review summation.
-   * @param reviewObject Review summation object returned by submission-api-v6.
-   * @returns Aggregate score when scoring is complete, otherwise undefined.
+   * Resolves member placements and final SYSTEM score values from the latest
+   * persisted submission data after all member SYSTEM review summation writes complete.
+   * @param token M2M token for submission-api-v6.
+   * @param config Marathon Match config summary for the challenge.
+   * @returns Email details for all latest member submissions when SYSTEM scoring is complete, otherwise an empty array.
    */
-  private resolveCompletedPhaseAggregateScore(
+  private async resolveSystemScoringCompletionDetails(
+    token: string,
+    config: ScoringResultConfigSummary,
+  ): Promise<SystemScoringCompletionEmailDetails[]> {
+    const submissions = await this.fetchChallengeSubmissions(
+      token,
+      config.submissionApiUrl,
+      config.challengeId,
+    );
+    const latestSubmissions = this.selectLatestSubmissionsByMember(submissions);
+    if (latestSubmissions.length === 0) {
+      return [];
+    }
+
+    const completedCandidates: SystemScoringCompletionCandidate[] = [];
+    for (const candidate of latestSubmissions) {
+      const submission = candidate.submission;
+      const submissionId = this.extractSubmissionId(submission);
+      if (!submissionId) {
+        this.logger.warn({
+          message:
+            'Skipping Marathon Match system scoring emails because a latest member submission has no submission ID.',
+          challengeId: config.challengeId,
+          memberKey: candidate.memberKey,
+        });
+        return [];
+      }
+
+      const memberHandle = this.extractSubmissionMemberHandle(submission);
+      if (!memberHandle) {
+        this.logger.warn({
+          message:
+            'Skipping Marathon Match system scoring emails because a latest member submission has no member handle.',
+          challengeId: config.challengeId,
+          submissionId,
+        });
+        return [];
+      }
+
+      const systemResult = this.resolveCompletedPhaseScoringResult(
+        this.findPhaseReviewSummation(submission, 'system'),
+      );
+      if (!systemResult) {
+        return [];
+      }
+
+      completedCandidates.push({
+        submissionId,
+        memberHandle,
+        scoringResult: systemResult,
+      });
+    }
+
+    return this.buildRankedSystemScoringCompletionDetails(
+      completedCandidates,
+      config,
+    );
+  }
+
+  /**
+   * Selects one latest submission per member from submission-api-v6 results.
+   * Prefers submissions explicitly marked `isLatest`, otherwise falls back to
+   * the newest available submission timestamp for each member.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @returns Latest submission candidates keyed by member.
+   */
+  private selectLatestSubmissionsByMember(
+    submissions: Record<string, unknown>[],
+  ): LatestMemberSubmissionCandidate[] {
+    const latestByMember = new Map<string, LatestMemberSubmissionCandidate>();
+    const flaggedLatestByMember = new Map<
+      string,
+      LatestMemberSubmissionCandidate
+    >();
+
+    submissions.forEach((submission, sequence) => {
+      const submissionId = this.extractSubmissionId(submission);
+      const memberKey = this.extractSubmissionMemberKey(submission);
+      if (!submissionId || !memberKey) {
+        return;
+      }
+
+      const candidate: LatestMemberSubmissionCandidate = {
+        submission,
+        memberKey,
+        submittedDate: this.resolveSubmissionDate(submission),
+        isLatest:
+          this.parseBooleanFlag(submission.isLatest) ??
+          this.parseBooleanFlag(submission.latest) ??
+          undefined,
+        sequence,
+      };
+
+      const currentLatest = latestByMember.get(memberKey);
+      if (
+        !currentLatest ||
+        this.compareSubmissionCandidates(candidate, currentLatest) > 0
+      ) {
+        latestByMember.set(memberKey, candidate);
+      }
+
+      if (candidate.isLatest === true) {
+        const currentFlaggedLatest = flaggedLatestByMember.get(memberKey);
+        if (
+          !currentFlaggedLatest ||
+          this.compareSubmissionCandidates(candidate, currentFlaggedLatest) > 0
+        ) {
+          flaggedLatestByMember.set(memberKey, candidate);
+        }
+      }
+    });
+
+    return Array.from(latestByMember.entries()).map(
+      ([memberKey, fallbackLatest]) =>
+        flaggedLatestByMember.get(memberKey) ?? fallbackLatest,
+    );
+  }
+
+  /**
+   * Builds ranked SYSTEM email details after every latest member submission has
+   * a completed SYSTEM result.
+   * @param candidates Completed latest member submission score records.
+   * @param config Marathon Match config summary for the challenge.
+   * @returns Email details including ordinal placement strings.
+   */
+  private buildRankedSystemScoringCompletionDetails(
+    candidates: SystemScoringCompletionCandidate[],
+    config: ScoringResultConfigSummary,
+  ): SystemScoringCompletionEmailDetails[] {
+    const rankedCandidates = [...candidates].sort((left, right) =>
+      this.compareSystemScoringCandidates(left, right, config.scoreDirection),
+    );
+
+    let previousCandidate: SystemScoringCompletionCandidate | undefined;
+    let previousRank = 0;
+
+    return rankedCandidates.map((candidate, index) => {
+      const rank =
+        previousCandidate &&
+        this.compareSystemScoringCandidates(
+          candidate,
+          previousCandidate,
+          config.scoreDirection,
+        ) === 0
+          ? previousRank
+          : index + 1;
+
+      previousCandidate = candidate;
+      previousRank = rank;
+
+      return {
+        challengeId: config.challengeId,
+        challengeName: config.name,
+        submissionId: candidate.submissionId,
+        memberHandle: candidate.memberHandle,
+        scoringStatus: candidate.scoringResult.status,
+        finalSystemScore: candidate.scoringResult.aggregateScore,
+        placement: this.formatOrdinalPlacement(rank),
+      };
+    });
+  }
+
+  /**
+   * Compares two latest-submission candidates by submission timestamp and
+   * response order.
+   * @param left Candidate being evaluated.
+   * @param right Current selected candidate.
+   * @returns Positive when left is newer, negative when right is newer, zero when equal.
+   */
+  private compareSubmissionCandidates(
+    left: LatestMemberSubmissionCandidate,
+    right: LatestMemberSubmissionCandidate,
+  ): number {
+    const dateComparison = this.compareIsoDateStrings(
+      left.submittedDate,
+      right.submittedDate,
+    );
+    if (dateComparison !== 0) {
+      return dateComparison;
+    }
+
+    return left.sequence - right.sequence;
+  }
+
+  /**
+   * Compares completed SYSTEM scoring candidates for leaderboard placement.
+   * Passing submissions rank ahead of failed submissions, then scores are
+   * ordered using the challenge score direction.
+   * @param left First completed scoring candidate.
+   * @param right Second completed scoring candidate.
+   * @param scoreDirection Challenge score direction.
+   * @returns Negative when left ranks before right, positive when right ranks before left, zero for ties.
+   */
+  private compareSystemScoringCandidates(
+    left: SystemScoringCompletionCandidate,
+    right: SystemScoringCompletionCandidate,
+    scoreDirection: ScoreDirection,
+  ): number {
+    if (left.scoringResult.status !== right.scoringResult.status) {
+      return left.scoringResult.status === 'pass' ? -1 : 1;
+    }
+
+    const leftScore = left.scoringResult.aggregateScore;
+    const rightScore = right.scoringResult.aggregateScore;
+    if (leftScore === rightScore) {
+      return 0;
+    }
+
+    return scoreDirection === ScoreDirection.MINIMIZE
+      ? leftScore - rightScore
+      : rightScore - leftScore;
+  }
+
+  /**
+   * Formats a numeric rank into an ordinal placement string.
+   * @param rank One-based placement rank.
+   * @returns Ordinal placement string, such as `1st`, `2nd`, or `3rd`.
+   */
+  private formatOrdinalPlacement(rank: number): string {
+    const remainder100 = rank % 100;
+    if (remainder100 >= 11 && remainder100 <= 13) {
+      return `${rank}th`;
+    }
+
+    switch (rank % 10) {
+      case 1:
+        return `${rank}st`;
+      case 2:
+        return `${rank}nd`;
+      case 3:
+        return `${rank}rd`;
+      default:
+        return `${rank}th`;
+    }
+  }
+
+  /**
+   * Extracts a submission identifier from current and legacy submission shapes.
+   * @param submission Submission object returned by submission-api-v6.
+   * @returns Submission identifier when present.
+   */
+  private extractSubmissionId(
+    submission: Record<string, unknown>,
+  ): string | undefined {
+    return this.coalesceString(
+      this.asString(submission.submissionId),
+      this.asString(submission.id),
+    );
+  }
+
+  /**
+   * Extracts a stable member key used to reduce submissions to one latest
+   * candidate per member.
+   * @param submission Submission object returned by submission-api-v6.
+   * @returns Member identifier or handle when present.
+   */
+  private extractSubmissionMemberKey(
+    submission: Record<string, unknown>,
+  ): string | undefined {
+    const member = this.asRecord(submission.member);
+    const submitter = this.asRecord(submission.submitter);
+
+    return this.coalesceString(
+      this.asString(submission.memberId),
+      this.asString(submission.userId),
+      this.asString(member.id),
+      this.asString(submitter.id),
+      this.extractSubmissionMemberHandle(submission),
+    );
+  }
+
+  /**
+   * Extracts a completed aggregate score and pass/fail status from a phase
+   * review summation.
+   * @param reviewObject Review summation object returned by submission-api-v6.
+   * @returns Phase scoring result when scoring is complete, otherwise undefined.
+   */
+  private resolveCompletedPhaseScoringResult(
     reviewObject: Record<string, unknown> | null,
-  ): number | undefined {
+  ): CompletedPhaseScoringResult | undefined {
     if (!reviewObject) {
       return undefined;
     }
@@ -726,7 +1043,18 @@ export class ScoringResultService {
       return undefined;
     }
 
-    return aggregateScore;
+    const isPassing = this.parseBooleanFlag(reviewObject.isPassing);
+    const status =
+      testStatus === ScoringTestStatus.Failed ||
+      isPassing === false ||
+      aggregateScore < 0
+        ? 'fail'
+        : 'pass';
+
+    return {
+      aggregateScore,
+      status,
+    };
   }
 
   /**
