@@ -300,7 +300,18 @@ GET /v6/marathon-match/submissions/:submissionId/runner-logs
 
 ## Notification Emails
 
-Notification behavior is driven by Topcoder review and notification services. The exact email template can vary by environment and challenge configuration.
+When both Example and Provisional scoring are complete for a submission, `marathon-match-api-v6` sends one Bus API event to topic `external.action.email` if `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` is configured.
+
+The email payload includes:
+
+- member handle
+- submission ID
+- challenge name and challenge ID
+- challenge URL in the form `https://topcoder.com/challenges/{challengeId}`
+- aggregate example score after relative scoring updates
+- aggregate provisional score after relative scoring updates
+
+The competitor email address is read from `member-api-v6` with the service M2M token, using the member handle on the submission. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
 
 Do not rely on the old three-email interpretation where:
 

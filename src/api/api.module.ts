@@ -8,6 +8,7 @@ import { HealthCheckController } from './health-check/healthCheck.controller';
 import { MarathonMatchConfigController } from './marathon-match-config/marathon-match-config.controller';
 import { MarathonMatchConfigService } from './marathon-match-config/marathon-match-config.service';
 import { ScoringResultController } from './scoring-result/scoring-result.controller';
+import { ScoringCompletionEmailService } from './scoring-result/scoring-completion-email.service';
 import { ScoringResultService } from './scoring-result/scoring-result.service';
 import { SubmissionRunnerLogController } from './submission-runner-log/submission-runner-log.controller';
 import { SubmissionRunnerLogService } from './submission-runner-log/submission-runner-log.service';
@@ -35,6 +36,7 @@ import { TesterService } from './tester/tester.service';
     TesterCompilationService,
     CompilationWorkerService,
     MarathonMatchConfigService,
+    ScoringCompletionEmailService,
     ScoringResultService,
     SubmissionRunnerLogService,
     ChallengeCopilotResourceGuard,

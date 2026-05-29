@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   CompilationStatus,
@@ -14,6 +15,10 @@ import { EcsService } from 'src/shared/modules/global/ecs.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
+import {
+  ScoringCompletionEmailService,
+  SubmissionScoringCompletionEmailDetails,
+} from './scoring-completion-email.service';
 
 export interface ScoringResultCallbackPayload {
   challengeId: string;
@@ -80,6 +85,7 @@ interface RelativeScoringSettings {
 
 interface ScoringResultConfigSummary {
   challengeId: string;
+  name: string;
   submissionApiUrl: string;
   relativeScoringEnabled: boolean;
   scoreDirection: ScoreDirection;
@@ -120,6 +126,8 @@ export class ScoringResultService {
     private readonly m2mService: M2MService,
     private readonly prisma: PrismaService,
     private readonly ecsService: EcsService,
+    @Optional()
+    private readonly scoringCompletionEmailService?: ScoringCompletionEmailService,
   ) {}
 
   /**
@@ -176,6 +184,12 @@ export class ScoringResultService {
             submissionId: payload.submissionId,
           },
         );
+        await this.notifyScoringCompletionEmailIfReady(
+          token,
+          payload,
+          normalizedPhase,
+          config,
+        );
         return;
       }
     }
@@ -218,6 +232,12 @@ export class ScoringResultService {
           submissionId: payload.submissionId,
         },
       );
+      await this.notifyScoringCompletionEmailIfReady(
+        token,
+        payload,
+        normalizedPhase,
+        config,
+      );
       return;
     }
 
@@ -240,6 +260,12 @@ export class ScoringResultService {
         scorecardId: fallbackScorecardId,
         submissionId: payload.submissionId,
       },
+    );
+    await this.notifyScoringCompletionEmailIfReady(
+      token,
+      payload,
+      normalizedPhase,
+      config,
     );
   }
 
@@ -414,7 +440,7 @@ export class ScoringResultService {
         testPhase,
       ),
       memberId: currentMemberId,
-      createdAt: this.asString(currentSubmission?.created),
+      createdAt: this.resolveSubmissionDate(currentSubmission),
       testPhase,
     });
 
@@ -534,6 +560,7 @@ export class ScoringResultService {
           where: { challengeId: normalizedChallengeId },
           select: {
             challengeId: true,
+            name: true,
             submissionApiUrl: true,
             relativeScoringEnabled: true,
             scoreDirection: true,
@@ -548,6 +575,177 @@ export class ScoringResultService {
     }
 
     return config;
+  }
+
+  /**
+   * Sends the scoring completion email once example and provisional summations
+   * are both complete for the callback submission.
+   * @param token M2M token for downstream API calls.
+   * @param payload Original scorer callback payload.
+   * @param testPhase Normalized scoring phase from the callback.
+   * @param config Marathon Match config summary for the callback challenge.
+   * @returns Resolves after the notification check has completed.
+   */
+  private async notifyScoringCompletionEmailIfReady(
+    token: string,
+    payload: ScoringResultCallbackPayload,
+    testPhase: string,
+    config: ScoringResultConfigSummary,
+  ): Promise<void> {
+    if (
+      !this.scoringCompletionEmailService ||
+      this.normalizeTestPhase(testPhase) === 'system'
+    ) {
+      return;
+    }
+
+    try {
+      const completionDetails =
+        await this.resolveSubmissionScoringCompletionDetails(
+          token,
+          config,
+          payload.submissionId,
+        );
+      if (!completionDetails) {
+        return;
+      }
+
+      await this.scoringCompletionEmailService.sendSubmissionScoringCompleteEmail(
+        token,
+        completionDetails,
+      );
+    } catch (error) {
+      this.logger.error({
+        message:
+          'Unable to evaluate Marathon Match scoring completion email state.',
+        challengeId: payload.challengeId,
+        submissionId: payload.submissionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Resolves member and final example/provisional score values from the latest
+   * persisted submission data after review summation writes complete.
+   * @param token M2M token for submission-api-v6.
+   * @param config Marathon Match config summary for the challenge.
+   * @param submissionId Submission identifier to inspect.
+   * @returns Email details when both phases are complete, otherwise undefined.
+   */
+  private async resolveSubmissionScoringCompletionDetails(
+    token: string,
+    config: ScoringResultConfigSummary,
+    submissionId: string,
+  ): Promise<SubmissionScoringCompletionEmailDetails | undefined> {
+    const submissions = await this.fetchChallengeSubmissions(
+      token,
+      config.submissionApiUrl,
+      config.challengeId,
+    );
+    const submission = submissions.find(
+      (entry) =>
+        this.coalesceString(
+          this.asString(entry.id),
+          this.asString(entry.submissionId),
+        ) === submissionId.trim(),
+    );
+
+    if (!submission) {
+      this.logger.warn({
+        message:
+          'Skipping Marathon Match scoring completion email because submission-api-v6 did not return the callback submission.',
+        challengeId: config.challengeId,
+        submissionId,
+      });
+      return undefined;
+    }
+
+    const memberHandle = this.extractSubmissionMemberHandle(submission);
+    if (!memberHandle) {
+      this.logger.warn({
+        message:
+          'Skipping Marathon Match scoring completion email because the submission has no member handle.',
+        challengeId: config.challengeId,
+        submissionId,
+      });
+      return undefined;
+    }
+
+    const aggregateExampleScore = this.resolveCompletedPhaseAggregateScore(
+      this.findPhaseReviewSummation(submission, 'example'),
+    );
+    const aggregateProvisionalScore = this.resolveCompletedPhaseAggregateScore(
+      this.findPhaseReviewSummation(submission, 'provisional'),
+    );
+
+    if (
+      aggregateExampleScore === undefined ||
+      aggregateProvisionalScore === undefined
+    ) {
+      return undefined;
+    }
+
+    return {
+      challengeId: config.challengeId,
+      challengeName: config.name,
+      submissionId,
+      memberHandle,
+      aggregateExampleScore,
+      aggregateProvisionalScore,
+    };
+  }
+
+  /**
+   * Extracts a completed aggregate score from a phase review summation.
+   * @param reviewObject Review summation object returned by submission-api-v6.
+   * @returns Aggregate score when scoring is complete, otherwise undefined.
+   */
+  private resolveCompletedPhaseAggregateScore(
+    reviewObject: Record<string, unknown> | null,
+  ): number | undefined {
+    if (!reviewObject) {
+      return undefined;
+    }
+
+    const metadata = this.asRecord(reviewObject.metadata);
+    const aggregateScore =
+      this.toNumber(reviewObject.aggregateScore) ??
+      this.toNumber(reviewObject.score);
+    if (aggregateScore === null) {
+      return undefined;
+    }
+
+    const testStatus = this.asString(metadata.testStatus)?.toUpperCase();
+    if (testStatus === ScoringTestStatus.InProgress) {
+      return undefined;
+    }
+
+    const testProgress = this.toNumber(metadata.testProgress);
+    if (testProgress !== null && testProgress < 1) {
+      return undefined;
+    }
+
+    return aggregateScore;
+  }
+
+  /**
+   * Extracts the competitor handle from known submission payload shapes.
+   * @param submission Submission object returned by submission-api-v6.
+   * @returns Member handle when present.
+   */
+  private extractSubmissionMemberHandle(
+    submission: Record<string, unknown>,
+  ): string | undefined {
+    const member = this.asRecord(submission.member);
+    const submitter = this.asRecord(submission.submitter);
+
+    return this.coalesceString(
+      this.asString(submission.memberHandle),
+      this.asString(submission.handle),
+      this.asString(member.handle),
+      this.asString(submitter.handle),
+    );
   }
 
   /**
@@ -624,7 +822,7 @@ export class ScoringResultService {
       }
 
       const key = memberId ?? `submission:${submissionId}`;
-      const createdAt = this.asString(submission.created);
+      const createdAt = this.resolveSubmissionDate(submission);
       const existing = latestByMember.get(key);
 
       if (
@@ -2103,6 +2301,27 @@ export class ScoringResultService {
       10,
     );
     return Number.isFinite(totalPages) && totalPages > 0 ? totalPages : 1;
+  }
+
+  /**
+   * Resolves the best available submission timestamp across current and legacy
+   * submission-api payload shapes.
+   */
+  private resolveSubmissionDate(
+    submission: Record<string, unknown> | undefined,
+  ): string | undefined {
+    if (!submission) {
+      return undefined;
+    }
+
+    return this.coalesceString(
+      this.asString(submission.submittedDate),
+      this.asString(submission.receivedDate),
+      this.asString(submission.receivedAt),
+      this.asString(submission.createdAt),
+      this.asString(submission.updatedAt),
+      this.asString(submission.created),
+    );
   }
 
   /**

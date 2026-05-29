@@ -32,7 +32,9 @@ describe('ScoringResultService', () => {
     reviewTypeId: 'review-type-1',
   };
 
-  const createService = () => {
+  const createService = (scoringCompletionEmailService?: {
+    sendSubmissionScoringCompleteEmail: jest.Mock;
+  }) => {
     const httpService = {
       get: jest.fn(),
       post: jest.fn(),
@@ -56,6 +58,7 @@ describe('ScoringResultService', () => {
       m2mService as never,
       prisma as never,
       ecsService as never,
+      scoringCompletionEmailService as never,
     );
 
     return {
@@ -87,6 +90,7 @@ describe('ScoringResultService', () => {
       where: { challengeId: basePayload.challengeId },
       select: {
         challengeId: true,
+        name: true,
         submissionApiUrl: true,
         relativeScoringEnabled: true,
         scoreDirection: true,
@@ -119,6 +123,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
+      name: 'Blocks',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -202,6 +207,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
+      name: 'Blocks',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -273,6 +279,83 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('sends scoring completion email after example and provisional summations are both complete', async () => {
+    const scoringCompletionEmailService = {
+      sendSubmissionScoringCompleteEmail: jest
+        .fn()
+        .mockResolvedValue(undefined),
+    };
+    const { service, httpService, m2mService, prisma } = createService(
+      scoringCompletionEmailService,
+    );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: [
+          {
+            id: basePayload.submissionId,
+            memberHandle: 'competitor',
+            reviewSummation: [
+              {
+                aggregateScore: 96,
+                isExample: true,
+                metadata: {
+                  testProgress: 1,
+                  testStatus: ScoringTestStatus.Success,
+                  testType: 'example',
+                },
+              },
+              {
+                aggregateScore: 88,
+                isProvisional: true,
+                metadata: {
+                  testProgress: 1,
+                  testStatus: ScoringTestStatus.Success,
+                  testType: 'provisional',
+                },
+              },
+            ],
+          },
+        ],
+        headers: {},
+      }),
+    );
+
+    await expect(service.processScoringResult(basePayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(
+      scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
+    ).toHaveBeenCalledWith('m2m-token', {
+      aggregateExampleScore: 96,
+      aggregateProvisionalScore: 88,
+      challengeId: basePayload.challengeId,
+      challengeName: 'Blocks',
+      memberHandle: 'competitor',
+      submissionId: basePayload.submissionId,
+    });
+  });
+
   it('completes a pending system review found by submission when the callback has no reviewId', async () => {
     const { service, httpService, m2mService, prisma } = createService();
 
@@ -285,6 +368,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
+      name: 'Blocks',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -354,6 +438,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
+      name: 'Blocks',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -391,6 +476,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
+      name: 'Blocks',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -461,5 +547,134 @@ describe('ScoringResultService', () => {
     expect(calculateRelativeScore(0, 50)).toBe(0);
     expect(calculateRelativeScore(50, 0)).toBe(0);
     expect(calculateRelativeScore(50, 50)).toBe(100);
+  });
+
+  it('selects the latest relative review using current submission date fields when created is missing', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberId?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'newer-submission',
+          memberId: 'member-1',
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          createdAt: '2026-05-28T15:23:32.878Z',
+          reviewSummation: [
+            {
+              id: 'newer-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'older-submission',
+          memberId: 'member-1',
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          createdAt: '2026-05-28T15:21:12.606Z',
+          reviewSummation: [
+            {
+              id: 'older-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'newer-submission',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
+
+  it('does not let an older no-testScores summation drop a newer valid relative review', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberId?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'newer-valid-submission',
+          memberId: 'member-1',
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          createdAt: '2026-05-28T15:23:32.878Z',
+          reviewSummation: [
+            {
+              id: 'newer-valid-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'older-failed-submission',
+          memberId: 'member-1',
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          createdAt: '2026-05-28T15:21:12.606Z',
+          reviewSummation: [
+            {
+              id: 'older-failed-review',
+              aggregateScore: -1,
+              isProvisional: true,
+              metadata: {
+                testStatus: ScoringTestStatus.Failed,
+                testType: 'provisional',
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'newer-valid-submission',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
   });
 });

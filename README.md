@@ -74,6 +74,18 @@ The service is configured via environment variables.
 | `KAFKA_DLQ_TOPIC_SUFFIX` | No | `.dlq` | DLQ topic suffix |
 | `KAFKA_DLQ_MAX_RETRIES` | No | `3` | Per-message retries before DLQ |
 
+### Scoring completion email notifications
+
+When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
+
+| Variable | Required | Default | Used for |
+| --- | --- | --- | --- |
+| `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` | Yes (to send emails) | None | SendGrid template ID for Marathon Match scoring completion emails |
+| `MEMBER_API_URL` | No | `https://api.topcoder-dev.com/v6` | member-api-v6 base URL used to fetch the competitor email by handle |
+| `BUS_EVENTS_URL` | No | (derived) | Full Bus API event endpoint URL; overrides the base URL variables |
+| `BUS_API_URL` / `BUSAPI_URL` | No | `https://api.topcoder-dev.com/v5` | Bus API base URL used to publish `external.action.email` events |
+| `TC_EMAIL_FROM_EMAIL` / `EMAIL_FROM` | No | `no-reply@topcoder.com` | Sender and reply-to address for the email payload |
+
 ### Marathon scoring integration
 
 | Variable | Required | Default | Used for |
