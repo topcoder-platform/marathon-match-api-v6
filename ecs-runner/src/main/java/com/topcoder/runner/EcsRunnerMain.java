@@ -85,7 +85,9 @@ public class EcsRunnerMain {
         ".java",
         ".py",
         ".cs",
-        ".cs_net7"
+        ".cs_net10",
+        ".cs_net7",
+        ".rs"
     );
     private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
         "(?m)^\\s*package\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)\\s*;"
@@ -95,6 +97,18 @@ public class EcsRunnerMain {
     );
     private static final Pattern JAVA_CLASS_PATTERN = Pattern.compile(
         "\\bclass\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b"
+    );
+    private static final Pattern MEMBER_ARTIFACT_JSON_SEED_PATTERN = Pattern.compile(
+        "(?i)(\"(?:seed|startSeed|endSeed|phaseStartSeed)\"\\s*:\\s*\"?)\\d+(\"?)"
+    );
+    private static final Pattern MEMBER_ARTIFACT_KEY_VALUE_SEED_PATTERN = Pattern.compile(
+        "(?i)(\\b(?:seed|startSeed|endSeed|phaseStartSeed)\\s*[=:]\\s*)\\d+"
+    );
+    private static final Pattern MEMBER_ARTIFACT_COMPLETED_SEED_PATTERN = Pattern.compile(
+        "(?i)(\\bcompleted\\s+seed\\s+)\\d+"
+    );
+    private static final Pattern MEMBER_ARTIFACT_TEST_CASE_SEED_PATTERN = Pattern.compile(
+        "(?i)(\\btest\\s*case\\s*#)\\d+"
     );
 
     private static String logChallengeId = "<unset>";
@@ -322,10 +336,6 @@ public class EcsRunnerMain {
                 );
                 logMap("tester.metadata", testerExecution.getMetadata());
                 logIndividualScores(testerExecution.getMetadata());
-                logCurrentAndImpactedReviews(
-                    testerExecution.getCurrentReview(),
-                    testerExecution.getImpactedReviews()
-                );
                 logArtifactFilePreview(
                     submissionDir,
                     "execution-" + submissionId + ".log",
@@ -341,6 +351,15 @@ public class EcsRunnerMain {
                     testerExecution.getMetadata(),
                     testPhase,
                     reviewTypeId
+                );
+                Map<String, Object> callbackCurrentReview = sanitizeMemberVisibleReview(
+                    testerExecution.getCurrentReview()
+                );
+                List<Map<String, Object>> callbackImpactedReviews =
+                    sanitizeMemberVisibleReviews(testerExecution.getImpactedReviews());
+                logCurrentAndImpactedReviews(
+                    callbackCurrentReview,
+                    callbackImpactedReviews
                 );
                 logMap("callback.metadata", callbackMetadata);
                 writeInternalReviewArtifact(
@@ -373,8 +392,8 @@ public class EcsRunnerMain {
                     reviewId,
                     scorerConfig.getScoreCardId(),
                     callbackMetadata,
-                    testerExecution.getCurrentReview(),
-                    testerExecution.getImpactedReviews()
+                    callbackCurrentReview,
+                    callbackImpactedReviews
                 );
                 logInfo(
                     "api.callback",
@@ -632,9 +651,14 @@ public class EcsRunnerMain {
                             );
                         }
                     } else {
-                        System.out.println(line);
-                        appendText(executionLogPath, line + "\n");
-                        appendBounded(childOutputTail, line + "\n", CHILD_OUTPUT_TAIL_LIMIT);
+                        String publicLine = redactSeedValuesForMemberArtifacts(line);
+                        System.out.println(publicLine);
+                        appendText(executionLogPath, publicLine + "\n");
+                        appendBounded(
+                            childOutputTail,
+                            publicLine + "\n",
+                            CHILD_OUTPUT_TAIL_LIMIT
+                        );
                     }
                 }
             }
@@ -1180,8 +1204,7 @@ public class EcsRunnerMain {
                 + scorerConfig.getReviewerId()
                 + ", typeId="
                 + scorerConfig.getTypeId()
-                + ", startSeed="
-                + scorerConfig.getStartSeed()
+                + ", startSeed=<redacted>"
                 + ", numberOfTests="
                 + scorerConfig.getNumberOfTests()
                 + ", timeLimit="
@@ -1429,6 +1452,32 @@ public class EcsRunnerMain {
 
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? "<empty>" : text;
+    }
+
+    /**
+     * Redacts obvious seed-bearing log fragments before they are copied into public artifacts.
+     *
+     * @param value Child process output line.
+     * @return Redacted line safe for member-visible execution artifacts.
+     */
+    private static String redactSeedValuesForMemberArtifacts(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String redacted = MEMBER_ARTIFACT_JSON_SEED_PATTERN
+            .matcher(value)
+            .replaceAll("$1<redacted>$2");
+        redacted = MEMBER_ARTIFACT_KEY_VALUE_SEED_PATTERN
+            .matcher(redacted)
+            .replaceAll("$1<redacted>");
+        redacted = MEMBER_ARTIFACT_COMPLETED_SEED_PATTERN
+            .matcher(redacted)
+            .replaceAll("$1<redacted>");
+        redacted = MEMBER_ARTIFACT_TEST_CASE_SEED_PATTERN
+            .matcher(redacted)
+            .replaceAll("$1<redacted>");
+        return redacted;
     }
 
     /**
@@ -2025,9 +2074,10 @@ public class EcsRunnerMain {
         String testPhase,
         String reviewTypeId
     ) {
-        Map<String, Object> result = metadata == null
+        Map<String, Object> safeMetadata = sanitizeMemberVisibleMetadata(metadata);
+        Map<String, Object> result = safeMetadata == null
             ? new LinkedHashMap<String, Object>()
-            : new LinkedHashMap<String, Object>(metadata);
+            : new LinkedHashMap<String, Object>(safeMetadata);
 
         String normalizedTestPhase = normalizeTestPhase(testPhase);
         if (isProgressTrackedPhase(normalizedTestPhase)) {
@@ -2038,6 +2088,147 @@ public class EcsRunnerMain {
         result.put("testType", normalizedTestPhase);
         result.put("reviewTypeId", reviewTypeId);
         return result;
+    }
+
+    /**
+     * Removes configured seed values from metadata that may be persisted or rendered to members.
+     * Per-test entries keep a stable 1-based testcase ordinal so relative scoring still works.
+     *
+     * @param metadata Metadata returned by tester execution.
+     * @return Copy with seed-bearing fields removed or replaced, or {@code null}.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> sanitizeMemberVisibleMetadata(
+        Map<String, Object> metadata
+    ) {
+        if (metadata == null) {
+            return null;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
+            String key = entry.getKey();
+            if (isSensitiveSeedMetadataKey(key)) {
+                continue;
+            }
+
+            Object value = entry.getValue();
+            if ("testScores".equals(key) && value instanceof List) {
+                result.put(key, sanitizeMemberVisibleScoreEntries((List<?>) value));
+            } else if ("relativeScores".equals(key) && value instanceof List) {
+                result.put(key, sanitizeMemberVisibleScoreEntries((List<?>) value));
+            } else if (value instanceof Map) {
+                result.put(
+                    key,
+                    sanitizeMemberVisibleMetadata((Map<String, Object>) value)
+                );
+            } else {
+                result.put(key, value);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Replaces seed-valued score entry identifiers with stable 1-based ordinals.
+     *
+     * @param scoreEntries Raw `testScores` or `relativeScores` entries.
+     * @return Sanitized score entries.
+     */
+    private static List<Object> sanitizeMemberVisibleScoreEntries(List<?> scoreEntries) {
+        List<Object> result = new ArrayList<Object>();
+        for (int index = 0; index < scoreEntries.size(); index++) {
+            Object rawEntry = scoreEntries.get(index);
+            Map<String, Object> safeEntry = new LinkedHashMap<String, Object>();
+            if (rawEntry instanceof Map) {
+                Map<?, ?> rawMap = (Map<?, ?>) rawEntry;
+                for (Map.Entry<?, ?> rawMapEntry : rawMap.entrySet()) {
+                    Object rawKey = rawMapEntry.getKey();
+                    if (!(rawKey instanceof String)) {
+                        continue;
+                    }
+
+                    String key = (String) rawKey;
+                    if (isSensitiveSeedMetadataKey(key) || "testcase".equals(key)) {
+                        continue;
+                    }
+
+                    safeEntry.put(key, rawMapEntry.getValue());
+                }
+            }
+
+            safeEntry.put("testcase", Integer.toString(index + 1));
+            result.add(safeEntry);
+        }
+
+        return result;
+    }
+
+    /**
+     * Removes seed values from review metadata before it is sent to API callbacks.
+     *
+     * @param review Review object returned by tester execution.
+     * @return Sanitized review copy.
+     */
+    private static Map<String, Object> sanitizeMemberVisibleReview(
+        Map<String, Object> review
+    ) {
+        if (review == null) {
+            return null;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>(review);
+        Object metadata = result.get("metadata");
+        if (metadata instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> metadataMap = (Map<String, Object>) metadata;
+            result.put("metadata", sanitizeMemberVisibleMetadata(metadataMap));
+        }
+        return result;
+    }
+
+    /**
+     * Sanitizes every impacted review before callback submission.
+     *
+     * @param reviews Review payloads returned by tester execution.
+     * @return Sanitized review list.
+     */
+    private static List<Map<String, Object>> sanitizeMemberVisibleReviews(
+        List<Map<String, Object>> reviews
+    ) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        if (reviews == null) {
+            return result;
+        }
+
+        for (Map<String, Object> review : reviews) {
+            result.add(sanitizeMemberVisibleReview(review));
+        }
+        return result;
+    }
+
+    /**
+     * Detects metadata keys that directly carry configured seed values.
+     *
+     * @param key Metadata key.
+     * @return True when the key should not be persisted in member-visible payloads.
+     */
+    private static boolean isSensitiveSeedMetadataKey(String key) {
+        if (key == null) {
+            return false;
+        }
+
+        String normalized = key
+            .replace("_", "")
+            .replace("-", "")
+            .toLowerCase(Locale.US);
+        return "seed".equals(normalized)
+            || "seeds".equals(normalized)
+            || "startseed".equals(normalized)
+            || "endseed".equals(normalized)
+            || "phasestartseed".equals(normalized)
+            || "phaseendseed".equals(normalized);
     }
 
     /**
@@ -2141,7 +2332,7 @@ public class EcsRunnerMain {
         );
         List<Map<String, Object>> impactedReviews = new ArrayList<Map<String, Object>>();
         for (Map<String, Object> impactedReview : testerExecution.getImpactedReviews()) {
-            impactedReviews.add(new LinkedHashMap<String, Object>(impactedReview));
+            impactedReviews.add(sanitizeMemberVisibleReview(impactedReview));
         }
 
         List<Map<String, Object>> reviews = new ArrayList<Map<String, Object>>();
@@ -2192,7 +2383,15 @@ public class EcsRunnerMain {
         putIfMissing(review, "typeId", reviewTypeId);
         putIfMissing(review, "reviewTypeId", reviewTypeId);
         putIfMissing(review, "scorecardId", scorecardId);
-        putIfMissing(review, "metadata", metadata);
+        Object reviewMetadata = review.get("metadata");
+        if (reviewMetadata instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> reviewMetadataMap =
+                (Map<String, Object>) reviewMetadata;
+            review.put("metadata", sanitizeMemberVisibleMetadata(reviewMetadataMap));
+        } else {
+            putIfMissing(review, "metadata", metadata);
+        }
         return review;
     }
 
@@ -2848,6 +3047,7 @@ public class EcsRunnerMain {
 
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
+                int testCaseNumber = testScores.size() + 1;
                 MarathonTestResult testResult = controller.run(
                     testerClassName,
                     seed,
@@ -2863,13 +3063,13 @@ public class EcsRunnerMain {
                 }
 
                 Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
-                seedResult.put("testcase", Long.toString(seed));
+                seedResult.put("testcase", Integer.toString(testCaseNumber));
                 seedResult.put("score", seedScore);
                 seedResult.put("runTimeMs", testResult.getRunTime());
                 seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
-                outputText.append("Test Case #").append(seed).append(":\n");
+                outputText.append("Test Case #").append(testCaseNumber).append(":\n");
                 outputText.append("Score = ").append(seedScore).append('\n');
                 outputText.append("Run Time = ")
                     .append(testResult.getRunTime())
@@ -2893,7 +3093,7 @@ public class EcsRunnerMain {
                     numberOfTests,
                     failedTests,
                     failedTests > 0 ? TEST_STATUS_FAILED : TEST_STATUS_IN_PROGRESS,
-                    "Completed seed " + seed
+                    "Completed test " + testCaseNumber + " of " + numberOfTests
                 );
             }
 
@@ -2913,7 +3113,6 @@ public class EcsRunnerMain {
             metadata.put("solutionSourceFile", submissionSource.getFileName().toString());
             metadata.put("normalizedSourceFile", compiledSubmission.getSourceFileName());
             metadata.put("sourceLanguage", compiledSubmission.getSourceLanguage());
-            metadata.put("startSeed", Long.toString(startSeed));
             metadata.put("numberOfTests", numberOfTests);
             metadata.put("timeLimitMs", timeLimitMs);
             metadata.put("compileTimeoutMs", compileTimeoutMs);
@@ -3099,7 +3298,7 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, or .NET 7 C# submissions.
+     * @return {@code true} for C++, Java, Python, Mono C#, .NET 10 C#, or Rust submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -3121,10 +3320,13 @@ public class EcsRunnerMain {
      * Extracts a supported source extension from a filename.
      *
      * @param fileName Source filename.
-     * @return Extension with leading dot, preserving the special {@code .cs_net7} extension.
+     * @return Extension with leading dot, preserving special .NET C# extensions.
      */
     private static String extensionOf(String fileName) {
         String lower = fileName.toLowerCase(Locale.US);
+        if (lower.endsWith(".cs_net10")) {
+            return ".cs_net10";
+        }
         if (lower.endsWith(".cs_net7")) {
             return ".cs_net7";
         }
@@ -3234,8 +3436,9 @@ public class EcsRunnerMain {
             runCommand(
                 Arrays.asList(
                     "g++",
-                    "-std=gnu++17",
+                    "-std=gnu++23",
                     "-O3",
+                    "-march=native",
                     normalizedSource.getFileName().toString(),
                     "-o",
                     binaryPath
@@ -3255,6 +3458,32 @@ public class EcsRunnerMain {
         if (".py".equals(extension)) {
             return new CompiledSubmission(
                 "python3 " + normalizedSource.toAbsolutePath(),
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".rs".equals(extension)) {
+            String binaryPath = workDir
+                .resolve(GENERIC_SOLUTION_BASE_NAME)
+                .toAbsolutePath()
+                .toString();
+            runCommand(
+                Arrays.asList(
+                    "rustc",
+                    "--edition=2024",
+                    "-O",
+                    normalizedSource.getFileName().toString(),
+                    "-o",
+                    binaryPath
+                ),
+                workDir,
+                compileTimeoutMs,
+                "Rust compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                binaryPath,
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3284,14 +3513,14 @@ public class EcsRunnerMain {
             );
         }
 
-        if (".cs_net7".equals(extension)) {
+        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
             Path csproj = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".csproj");
             Files.write(
                 csproj,
                 Arrays.asList(
                     "<Project Sdk=\"Microsoft.NET.Sdk\">",
                     "  <PropertyGroup>",
-                    "    <TargetFramework>net7.0</TargetFramework>",
+                    "    <TargetFramework>net10.0</TargetFramework>",
                     "    <OutputType>Exe</OutputType>",
                     "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
                     "  </PropertyGroup>",
@@ -3315,7 +3544,7 @@ public class EcsRunnerMain {
                 ),
                 workDir,
                 compileTimeoutMs,
-                "C# (.NET 7) compilation failed.",
+                "C# (.NET 10) compilation failed.",
                 compileLogPath
             );
             return new CompiledSubmission(
@@ -3350,8 +3579,11 @@ public class EcsRunnerMain {
         if (".cs".equals(extension)) {
             return "csharp-mono";
         }
-        if (".cs_net7".equals(extension)) {
-            return "csharp-net7";
+        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+            return "csharp-net10";
+        }
+        if (".rs".equals(extension)) {
+            return "rust";
         }
         return "unknown";
     }

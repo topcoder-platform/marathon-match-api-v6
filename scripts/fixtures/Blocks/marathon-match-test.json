@@ -139,6 +139,15 @@
         "fileName": "submission-winner.zip",
         "winner": true
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-rust-sample.zip",
+      "source": {
+        "fileName": "submission-rust-sample.zip",
+        "language": "rust"
+      }
     }
   ]
 }

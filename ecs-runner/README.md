@@ -4,13 +4,14 @@ This image is the runtime container for marathon match scoring tasks launched by
 
 ## What this image includes
 
-- Java 8 runtime (`eclipse-temurin:8-jre-jammy`)
+- Java 8 JDK/runtime (`eclipse-temurin:8-jdk-noble`) for runner execution and Java submission compilation (`javac`, `java`)
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
-- C++ toolchain support for tester-side submission compilation (`g++`)
-- Python runtime support for tester-side submission execution (`python3`)
+- C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
+- Python 3.12 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
-- C# (.NET 7) SDK support for tester-side submission compilation (`dotnet publish`)
+- C# (.NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
+- Rust latest stable compiler support for tester-side submission compilation (`rustc`)
 - native `mm-net-isolate` helper that drops untrusted execution to the `runner` user and blocks non-`AF_UNIX` sockets
 
 ## Isolation model
