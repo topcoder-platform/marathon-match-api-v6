@@ -292,7 +292,7 @@ describe('ScoringResultService', () => {
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
-      name: 'Blocks',
+      name: 'Marathon Match Scorer',
       submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       relativeScoringEnabled: false,
       scoreDirection: ScoreDirection.MAXIMIZE,
@@ -309,37 +309,49 @@ describe('ScoringResultService', () => {
       .spyOn(service as any, 'completeSystemReviewIfNeeded')
       .mockResolvedValue(undefined);
 
-    httpService.get.mockReturnValue(
-      of({
-        data: [
-          {
-            id: basePayload.submissionId,
-            memberHandle: 'competitor',
-            reviewSummation: [
-              {
-                aggregateScore: 96,
-                isExample: true,
-                metadata: {
-                  testProgress: 1,
-                  testStatus: ScoringTestStatus.Success,
-                  testType: 'example',
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: [
+            {
+              id: basePayload.submissionId,
+              memberHandle: 'competitor',
+              reviewSummation: [
+                {
+                  aggregateScore: 96,
+                  isExample: true,
+                  metadata: {
+                    testProgress: 1,
+                    testStatus: ScoringTestStatus.Success,
+                    testType: 'example',
+                  },
                 },
-              },
-              {
-                aggregateScore: 88,
-                isProvisional: true,
-                metadata: {
-                  testProgress: 1,
-                  testStatus: ScoringTestStatus.Success,
-                  testType: 'provisional',
+                {
+                  aggregateScore: 88,
+                  isProvisional: true,
+                  metadata: {
+                    testProgress: 1,
+                    testStatus: ScoringTestStatus.Success,
+                    testType: 'provisional',
+                  },
                 },
+              ],
+            },
+          ],
+          headers: {},
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: {
+                name: 'Marathon Match 2026 Beta Test',
               },
-            ],
+            },
           },
-        ],
-        headers: {},
-      }),
-    );
+        }),
+      );
 
     await expect(service.processScoringResult(basePayload)).resolves.toBe(
       undefined,
@@ -351,7 +363,7 @@ describe('ScoringResultService', () => {
       aggregateExampleScore: 96,
       aggregateProvisionalScore: 88,
       challengeId: basePayload.challengeId,
-      challengeName: 'Blocks',
+      challengeName: 'Marathon Match 2026 Beta Test',
       memberHandle: 'competitor',
       scoringStatus: 'pass',
       submissionId: basePayload.submissionId,
@@ -423,6 +435,13 @@ describe('ScoringResultService', () => {
           data: {
             id: basePayload.submissionId,
             memberId: '123456',
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            name: 'Blocks',
           },
         }),
       );
