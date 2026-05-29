@@ -133,6 +133,56 @@ describe('ScoringCompletionEmailService', () => {
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
+  it('looks up the member by userId when the submission has no member handle', async () => {
+    const { httpService, prisma, service } = createService();
+
+    prisma.$queryRaw.mockResolvedValue([{ id: 'notification-1' }]);
+    httpService.get.mockReturnValue(
+      of({
+        data: [
+          {
+            email: 'competitor@example.com',
+            handle: 'competitor',
+          },
+        ],
+      }),
+    );
+    httpService.post.mockReturnValue(of({ status: 202 }));
+
+    await expect(
+      service.sendSubmissionScoringCompleteEmail('m2m-token', {
+        ...details,
+        memberHandle: undefined,
+        userId: '123456',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/members',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+        params: {
+          fields: 'handle,email',
+          userId: '123456',
+        },
+      }),
+    );
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v5/bus/events',
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          data: expect.objectContaining({
+            memberHandle: 'competitor',
+          }),
+          recipients: ['competitor@example.com'],
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('sends one system results email through Bus API and marks the notification sent', async () => {
     const { httpService, prisma, service } = createService();
 

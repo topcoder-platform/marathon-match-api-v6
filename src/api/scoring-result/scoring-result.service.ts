@@ -127,9 +127,17 @@ interface LatestMemberSubmissionCandidate {
   sequence: number;
 }
 
+interface SubmissionMemberIdentity {
+  memberHandle?: string;
+  memberId?: string;
+  userId?: string;
+}
+
 interface SystemScoringCompletionCandidate {
   submissionId: string;
-  memberHandle: string;
+  memberHandle?: string;
+  memberId?: string;
+  userId?: string;
   scoringResult: CompletedPhaseScoringResult;
 }
 
@@ -680,29 +688,47 @@ export class ScoringResultService {
       config.submissionApiUrl,
       config.challengeId,
     );
-    const submission = submissions.find(
-      (entry) =>
-        this.coalesceString(
-          this.asString(entry.id),
-          this.asString(entry.submissionId),
-        ) === submissionId.trim(),
+    let submission = submissions.find(
+      (entry) => this.extractSubmissionId(entry) === submissionId.trim(),
     );
 
     if (!submission) {
-      this.logger.warn({
-        message:
-          'Skipping Marathon Match scoring completion email because submission-api-v6 did not return the callback submission.',
-        challengeId: config.challengeId,
+      submission = await this.fetchSubmissionById(
+        token,
+        config.submissionApiUrl,
         submissionId,
-      });
-      return undefined;
+      );
+      if (!submission) {
+        this.logger.warn({
+          message:
+            'Skipping Marathon Match scoring completion email because submission-api-v6 did not return the callback submission.',
+          challengeId: config.challengeId,
+          submissionId,
+        });
+        return undefined;
+      }
     }
 
-    const memberHandle = this.extractSubmissionMemberHandle(submission);
-    if (!memberHandle) {
+    let memberIdentity = this.extractSubmissionMemberIdentity(submission);
+    if (!this.hasSubmissionMemberIdentity(memberIdentity)) {
+      const detailedSubmission = await this.fetchSubmissionById(
+        token,
+        config.submissionApiUrl,
+        submissionId,
+      );
+      if (detailedSubmission) {
+        submission = {
+          ...submission,
+          ...detailedSubmission,
+        };
+        memberIdentity = this.extractSubmissionMemberIdentity(submission);
+      }
+    }
+
+    if (!this.hasSubmissionMemberIdentity(memberIdentity)) {
       this.logger.warn({
         message:
-          'Skipping Marathon Match scoring completion email because the submission has no member handle.',
+          'Skipping Marathon Match scoring completion email because the submission has no member handle or user ID.',
         challengeId: config.challengeId,
         submissionId,
       });
@@ -724,7 +750,7 @@ export class ScoringResultService {
       challengeId: config.challengeId,
       challengeName: config.name,
       submissionId,
-      memberHandle,
+      ...memberIdentity,
       scoringStatus:
         exampleResult.status === 'pass' && provisionalResult.status === 'pass'
           ? 'pass'
@@ -757,7 +783,7 @@ export class ScoringResultService {
 
     const completedCandidates: SystemScoringCompletionCandidate[] = [];
     for (const candidate of latestSubmissions) {
-      const submission = candidate.submission;
+      let submission = candidate.submission;
       const submissionId = this.extractSubmissionId(submission);
       if (!submissionId) {
         this.logger.warn({
@@ -769,11 +795,26 @@ export class ScoringResultService {
         return [];
       }
 
-      const memberHandle = this.extractSubmissionMemberHandle(submission);
-      if (!memberHandle) {
+      let memberIdentity = this.extractSubmissionMemberIdentity(submission);
+      if (!this.hasSubmissionMemberIdentity(memberIdentity)) {
+        const detailedSubmission = await this.fetchSubmissionById(
+          token,
+          config.submissionApiUrl,
+          submissionId,
+        );
+        if (detailedSubmission) {
+          submission = {
+            ...submission,
+            ...detailedSubmission,
+          };
+          memberIdentity = this.extractSubmissionMemberIdentity(submission);
+        }
+      }
+
+      if (!this.hasSubmissionMemberIdentity(memberIdentity)) {
         this.logger.warn({
           message:
-            'Skipping Marathon Match system scoring emails because a latest member submission has no member handle.',
+            'Skipping Marathon Match system scoring emails because a latest member submission has no member handle or user ID.',
           challengeId: config.challengeId,
           submissionId,
         });
@@ -789,7 +830,7 @@ export class ScoringResultService {
 
       completedCandidates.push({
         submissionId,
-        memberHandle,
+        ...memberIdentity,
         scoringResult: systemResult,
       });
     }
@@ -896,6 +937,8 @@ export class ScoringResultService {
         challengeName: config.name,
         submissionId: candidate.submissionId,
         memberHandle: candidate.memberHandle,
+        memberId: candidate.memberId,
+        userId: candidate.userId,
         scoringStatus: candidate.scoringResult.status,
         finalSystemScore: candidate.scoringResult.aggregateScore,
         placement: this.formatOrdinalPlacement(rank),
@@ -1000,15 +1043,68 @@ export class ScoringResultService {
   private extractSubmissionMemberKey(
     submission: Record<string, unknown>,
   ): string | undefined {
+    const memberIdentity = this.extractSubmissionMemberIdentity(submission);
+
+    return this.coalesceString(
+      memberIdentity.userId,
+      memberIdentity.memberId,
+      memberIdentity.memberHandle,
+    );
+  }
+
+  /**
+   * Extracts member handle and ID values from known submission payload shapes.
+   * @param submission Submission object returned by submission-api-v6.
+   * @returns Available member identity values.
+   */
+  private extractSubmissionMemberIdentity(
+    submission: Record<string, unknown>,
+  ): SubmissionMemberIdentity {
     const member = this.asRecord(submission.member);
     const submitter = this.asRecord(submission.submitter);
 
-    return this.coalesceString(
-      this.asString(submission.memberId),
+    const userId = this.coalesceString(
       this.asString(submission.userId),
+      this.asString(submission.memberId),
+      this.asString(member.userId),
+      this.asString(member.id),
+      this.asString(submitter.userId),
+      this.asString(submitter.id),
+    );
+
+    const memberIdentity: SubmissionMemberIdentity = {};
+    const memberHandle = this.extractSubmissionMemberHandle(submission);
+    const memberId = this.coalesceString(
+      this.asString(submission.memberId),
       this.asString(member.id),
       this.asString(submitter.id),
-      this.extractSubmissionMemberHandle(submission),
+    );
+
+    if (memberHandle) {
+      memberIdentity.memberHandle = memberHandle;
+    }
+    if (memberId) {
+      memberIdentity.memberId = memberId;
+    }
+    if (userId) {
+      memberIdentity.userId = userId;
+    }
+
+    return memberIdentity;
+  }
+
+  /**
+   * Checks whether a submission carries enough member identity to resolve an email.
+   * @param memberIdentity Member identity extracted from a submission.
+   * @returns True when a handle, member ID, or user ID is available.
+   */
+  private hasSubmissionMemberIdentity(
+    memberIdentity: SubmissionMemberIdentity,
+  ): boolean {
+    return Boolean(
+      memberIdentity.memberHandle ||
+      memberIdentity.userId ||
+      memberIdentity.memberId,
     );
   }
 
@@ -1111,6 +1207,32 @@ export class ScoringResultService {
     } while (page <= totalPages);
 
     return submissions;
+  }
+
+  /**
+   * Fetches one submission by ID from submission-api-v6 for identity fallback.
+   * @param token M2M token for submission-api-v6.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param submissionId Submission identifier to fetch.
+   * @returns Submission record when the API returns one, otherwise undefined.
+   */
+  private async fetchSubmissionById(
+    token: string,
+    submissionApiUrl: string,
+    submissionId: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    const url = `${this.buildSubmissionApiBaseUrl(
+      submissionApiUrl,
+    )}/submissions/${encodeURIComponent(submissionId)}`;
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }),
+    );
+
+    return this.extractSubmissionRecord(response.data);
   }
 
   /**
@@ -2556,6 +2678,31 @@ export class ScoringResultService {
     }
 
     return [];
+  }
+
+  /**
+   * Extracts one submission object from direct and wrapped submission-api responses.
+   */
+  private extractSubmissionRecord(
+    data: unknown,
+  ): Record<string, unknown> | undefined {
+    const records = this.extractSubmissionArray(data);
+    if (records.length > 0) {
+      return records[0];
+    }
+
+    const direct = this.asRecord(data);
+    const result = this.asRecord(direct.result);
+    if (Object.keys(result).length > 0) {
+      return result;
+    }
+
+    const dataRecord = this.asRecord(direct.data);
+    if (Object.keys(dataRecord).length > 0) {
+      return dataRecord;
+    }
+
+    return Object.keys(direct).length > 0 ? direct : undefined;
   }
 
   /**

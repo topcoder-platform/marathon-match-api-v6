@@ -76,7 +76,7 @@ The service is configured via environment variables.
 
 ### Scoring completion email notifications
 
-When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. When `SYSTEM` scoring is complete for every latest member submission in the challenge, the service sends separate system-results emails with each member's final placement. Both template payloads include `scoringStatus` as `pass` or `fail`, and local notification markers prevent duplicate sends for duplicate scorer callbacks.
+When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. When `SYSTEM` scoring is complete for every latest member submission in the challenge, the service sends separate system-results emails with each member's final placement. Both template payloads include `scoringStatus` as `pass` or `fail`, and local notification markers prevent duplicate sends for duplicate scorer callbacks. The service resolves member identity from submission-api-v6 using the submission ID; if no handle is present, it uses the submission `userId` or `memberId` to call member-api-v6 `GET /members?userId={userId}` before publishing the email event.
 
 | Variable                                   | Required             | Default                           | Used for                                                            |
 | ------------------------------------------ | -------------------- | --------------------------------- | ------------------------------------------------------------------- |

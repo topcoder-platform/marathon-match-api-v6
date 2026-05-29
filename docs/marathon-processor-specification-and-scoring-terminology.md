@@ -320,7 +320,7 @@ The System completion payload also includes:
 - final system score
 - placement, formatted as an ordinal string such as `1st`, `2nd`, or `3rd`
 
-The competitor email address is read from `member-api-v6` with the service M2M token, using the member handle on the submission. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
+The competitor email address is read from `member-api-v6` with the service M2M token. The service first reads member identity from submission-api-v6 using the submission ID; when the submission has no handle, it uses the submission `userId` or `memberId` to call `GET /v6/members?userId={userId}` and resolve the member handle and email. A local notification marker prevents duplicate sends for duplicate scorer callbacks.
 
 Do not rely on the old three-email interpretation where:
 

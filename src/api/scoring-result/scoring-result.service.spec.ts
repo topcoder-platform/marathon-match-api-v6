@@ -358,6 +358,98 @@ describe('ScoringResultService', () => {
     });
   });
 
+  it('uses the submission ID to resolve member ID when the listed submission has no handle', async () => {
+    const scoringCompletionEmailService = {
+      sendSubmissionScoringCompleteEmail: jest
+        .fn()
+        .mockResolvedValue(undefined),
+    };
+    const { service, httpService, m2mService, prisma } = createService(
+      scoringCompletionEmailService,
+    );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: [
+            {
+              id: basePayload.submissionId,
+              reviewSummation: [
+                {
+                  aggregateScore: 96,
+                  isExample: true,
+                  metadata: {
+                    testProgress: 1,
+                    testStatus: ScoringTestStatus.Success,
+                    testType: 'example',
+                  },
+                },
+                {
+                  aggregateScore: 88,
+                  isProvisional: true,
+                  metadata: {
+                    testProgress: 1,
+                    testStatus: ScoringTestStatus.Success,
+                    testType: 'provisional',
+                  },
+                },
+              ],
+            },
+          ],
+          headers: {},
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: basePayload.submissionId,
+            memberId: '123456',
+          },
+        }),
+      );
+
+    await expect(service.processScoringResult(basePayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/submissions/submission-1',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(
+      scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
+    ).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        memberId: '123456',
+        userId: '123456',
+      }),
+    );
+  });
+
   it('marks scoring completion email status as fail when a completed phase failed', async () => {
     const scoringCompletionEmailService = {
       sendSubmissionScoringCompleteEmail: jest
@@ -606,26 +698,32 @@ describe('ScoringResultService', () => {
     ).toHaveBeenCalledTimes(2);
     expect(
       scoringCompletionEmailService.sendSystemScoringCompleteEmail,
-    ).toHaveBeenCalledWith('m2m-token', {
-      challengeId: basePayload.challengeId,
-      challengeName: 'Blocks',
-      finalSystemScore: 90,
-      memberHandle: 'second',
-      placement: '1st',
-      scoringStatus: 'pass',
-      submissionId: 'submission-2',
-    });
+    ).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        challengeName: 'Blocks',
+        finalSystemScore: 90,
+        memberHandle: 'second',
+        placement: '1st',
+        scoringStatus: 'pass',
+        submissionId: 'submission-2',
+      }),
+    );
     expect(
       scoringCompletionEmailService.sendSystemScoringCompleteEmail,
-    ).toHaveBeenCalledWith('m2m-token', {
-      challengeId: basePayload.challengeId,
-      challengeName: 'Blocks',
-      finalSystemScore: -1,
-      memberHandle: 'competitor',
-      placement: '2nd',
-      scoringStatus: 'fail',
-      submissionId: basePayload.submissionId,
-    });
+    ).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        challengeName: 'Blocks',
+        finalSystemScore: -1,
+        memberHandle: 'competitor',
+        placement: '2nd',
+        scoringStatus: 'fail',
+        submissionId: basePayload.submissionId,
+      }),
+    );
   });
 
   it('completes a pending system review found by submission when the callback has no reviewId', async () => {

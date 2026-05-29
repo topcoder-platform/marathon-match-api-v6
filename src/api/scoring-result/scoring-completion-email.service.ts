@@ -11,7 +11,9 @@ export interface SubmissionScoringCompletionEmailDetails {
   challengeId: string;
   challengeName: string;
   submissionId: string;
-  memberHandle: string;
+  memberHandle?: string;
+  memberId?: string;
+  userId?: string;
   scoringStatus: ScoringCompletionStatus;
   aggregateExampleScore: number;
   aggregateProvisionalScore: number;
@@ -21,7 +23,9 @@ export interface SystemScoringCompletionEmailDetails {
   challengeId: string;
   challengeName: string;
   submissionId: string;
-  memberHandle: string;
+  memberHandle?: string;
+  memberId?: string;
+  userId?: string;
   scoringStatus: ScoringCompletionStatus;
   finalSystemScore: number;
   placement: string;
@@ -46,6 +50,11 @@ interface EventBusEmailPayload {
 
 interface NotificationReservation {
   id: string;
+}
+
+interface MemberEmailRecipient {
+  email: string;
+  handle: string;
 }
 
 type ScoringCompletionNotificationType = 'EXAMPLE_PROVISIONAL' | 'SYSTEM';
@@ -94,13 +103,10 @@ export class ScoringCompletionEmailService {
     }
 
     try {
-      const recipientEmail = await this.fetchMemberEmail(
-        token,
-        details.memberHandle,
-      );
-      if (!recipientEmail) {
+      const recipient = await this.fetchMemberEmailRecipient(token, details);
+      if (!recipient) {
         throw new Error(
-          `Member ${details.memberHandle} does not have an email returned by member-api-v6.`,
+          `Member ${this.describeMemberLookup(details)} does not have a handle and email returned by member-api-v6.`,
         );
       }
 
@@ -108,21 +114,22 @@ export class ScoringCompletionEmailService {
         token,
         this.buildSubmissionEmailPayload(
           details,
-          recipientEmail,
+          recipient.email,
+          recipient.handle,
           sendgridTemplateId,
         ),
       );
       await this.markNotificationSent(
         reservation.id,
-        details.memberHandle,
-        recipientEmail,
+        recipient.handle,
+        recipient.email,
       );
 
       this.logger.log({
         message: 'Sent Marathon Match scoring completion email.',
         challengeId: details.challengeId,
         submissionId: details.submissionId,
-        memberHandle: details.memberHandle,
+        memberHandle: recipient.handle,
       });
     } catch (error) {
       const errorMessage =
@@ -133,6 +140,8 @@ export class ScoringCompletionEmailService {
         challengeId: details.challengeId,
         submissionId: details.submissionId,
         memberHandle: details.memberHandle,
+        memberId: details.memberId,
+        userId: details.userId,
         error: errorMessage,
       });
     }
@@ -167,13 +176,10 @@ export class ScoringCompletionEmailService {
     }
 
     try {
-      const recipientEmail = await this.fetchMemberEmail(
-        token,
-        details.memberHandle,
-      );
-      if (!recipientEmail) {
+      const recipient = await this.fetchMemberEmailRecipient(token, details);
+      if (!recipient) {
         throw new Error(
-          `Member ${details.memberHandle} does not have an email returned by member-api-v6.`,
+          `Member ${this.describeMemberLookup(details)} does not have a handle and email returned by member-api-v6.`,
         );
       }
 
@@ -181,21 +187,22 @@ export class ScoringCompletionEmailService {
         token,
         this.buildSystemEmailPayload(
           details,
-          recipientEmail,
+          recipient.email,
+          recipient.handle,
           sendgridTemplateId,
         ),
       );
       await this.markNotificationSent(
         reservation.id,
-        details.memberHandle,
-        recipientEmail,
+        recipient.handle,
+        recipient.email,
       );
 
       this.logger.log({
         message: 'Sent Marathon Match system scoring email.',
         challengeId: details.challengeId,
         submissionId: details.submissionId,
-        memberHandle: details.memberHandle,
+        memberHandle: recipient.handle,
       });
     } catch (error) {
       const errorMessage =
@@ -206,6 +213,8 @@ export class ScoringCompletionEmailService {
         challengeId: details.challengeId,
         submissionId: details.submissionId,
         memberHandle: details.memberHandle,
+        memberId: details.memberId,
+        userId: details.userId,
         error: errorMessage,
       });
     }
@@ -313,15 +322,65 @@ export class ScoringCompletionEmailService {
   }
 
   /**
-   * Fetches the competitor email from member-api-v6 by handle.
+   * Fetches the competitor handle and email from member-api-v6 by handle or user ID.
+   * @param token M2M token authorized for member-api-v6.
+   * @param details Member identity values from the submission payload.
+   * @returns Member handle and email when member-api-v6 returns both values.
+   */
+  private async fetchMemberEmailRecipient(
+    token: string,
+    details: Pick<
+      SubmissionScoringCompletionEmailDetails,
+      'memberHandle' | 'memberId' | 'userId'
+    >,
+  ): Promise<MemberEmailRecipient | undefined> {
+    const memberHandle = this.asString(details.memberHandle);
+    const userId = this.coalesceString(
+      this.asString(details.userId),
+      this.asString(details.memberId),
+    );
+
+    if (memberHandle) {
+      try {
+        const recipient = await this.fetchMemberEmailRecipientByHandle(
+          token,
+          memberHandle,
+        );
+        if (recipient) {
+          return recipient;
+        }
+      } catch (error) {
+        if (!userId) {
+          throw error;
+        }
+
+        this.logger.warn({
+          message:
+            'Member handle lookup failed while resolving scoring completion email recipient; falling back to userId lookup.',
+          memberHandle,
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (userId) {
+      return this.fetchMemberEmailRecipientByUserId(token, userId);
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Fetches the competitor handle and email from member-api-v6 by handle.
    * @param token M2M token authorized for member-api-v6.
    * @param memberHandle Member handle to look up.
-   * @returns Email address when member-api-v6 returns one.
+   * @returns Member handle and email when member-api-v6 returns both values.
    */
-  private async fetchMemberEmail(
+  private async fetchMemberEmailRecipientByHandle(
     token: string,
     memberHandle: string,
-  ): Promise<string | undefined> {
+  ): Promise<MemberEmailRecipient | undefined> {
     const response = await firstValueFrom(
       this.httpService.get(this.buildMemberUrl(memberHandle), {
         headers: {
@@ -333,7 +392,35 @@ export class ScoringCompletionEmailService {
       }),
     );
 
-    return this.asString(this.extractMemberRecord(response.data).email);
+    return this.toMemberEmailRecipient(
+      this.extractMemberRecord(response.data),
+      memberHandle,
+    );
+  }
+
+  /**
+   * Fetches the competitor handle and email from member-api-v6 by user ID.
+   * @param token M2M token authorized for member-api-v6.
+   * @param userId Topcoder user ID to look up.
+   * @returns Member handle and email when member-api-v6 returns both values.
+   */
+  private async fetchMemberEmailRecipientByUserId(
+    token: string,
+    userId: string,
+  ): Promise<MemberEmailRecipient | undefined> {
+    const response = await firstValueFrom(
+      this.httpService.get(this.buildMembersUrl(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params: {
+          fields: 'handle,email',
+          userId,
+        },
+      }),
+    );
+
+    return this.toMemberEmailRecipient(this.extractMemberRecord(response.data));
   }
 
   /**
@@ -375,12 +462,14 @@ export class ScoringCompletionEmailService {
    * Builds the email payload expected by the `external.action.email` topic.
    * @param details Submission, challenge, member, and score values.
    * @param recipientEmail Email address to receive the notification.
+   * @param memberHandle Resolved member handle for template data.
    * @param sendgridTemplateId SendGrid dynamic template ID.
    * @returns Event bus email payload.
    */
   private buildSubmissionEmailPayload(
     details: SubmissionScoringCompletionEmailDetails,
     recipientEmail: string,
+    memberHandle: string,
     sendgridTemplateId: string,
   ): EventBusEmailPayload {
     const challengeUrl = this.buildChallengeUrl(details.challengeId);
@@ -391,7 +480,7 @@ export class ScoringCompletionEmailService {
       replyTo: fromEmail,
       recipients: [recipientEmail],
       data: {
-        memberHandle: details.memberHandle,
+        memberHandle,
         submissionId: details.submissionId,
         challengeName: details.challengeName,
         challengeId: details.challengeId,
@@ -410,12 +499,14 @@ export class ScoringCompletionEmailService {
    * Builds the SYSTEM result email payload expected by the `external.action.email` topic.
    * @param details Submission, challenge, member, and system score values.
    * @param recipientEmail Email address to receive the notification.
+   * @param memberHandle Resolved member handle for template data.
    * @param sendgridTemplateId SendGrid dynamic template ID.
    * @returns Event bus email payload.
    */
   private buildSystemEmailPayload(
     details: SystemScoringCompletionEmailDetails,
     recipientEmail: string,
+    memberHandle: string,
     sendgridTemplateId: string,
   ): EventBusEmailPayload {
     const challengeUrl = this.buildChallengeUrl(details.challengeId);
@@ -426,7 +517,7 @@ export class ScoringCompletionEmailService {
       replyTo: fromEmail,
       recipients: [recipientEmail],
       data: {
-        memberHandle: details.memberHandle,
+        memberHandle,
         submissionId: details.submissionId,
         challengeName: details.challengeName,
         challengeId: details.challengeId,
@@ -468,13 +559,28 @@ export class ScoringCompletionEmailService {
    * @returns Absolute member API URL.
    */
   private buildMemberUrl(memberHandle: string): string {
+    return `${this.buildMemberApiBaseUrl()}/members/${encodeURIComponent(memberHandle)}`;
+  }
+
+  /**
+   * Builds the member-api-v6 members search URL.
+   * @returns Absolute member API members URL.
+   */
+  private buildMembersUrl(): string {
+    return `${this.buildMemberApiBaseUrl()}/members`;
+  }
+
+  /**
+   * Builds the member-api-v6 base URL from environment configuration.
+   * @returns Absolute member API v6 base URL.
+   */
+  private buildMemberApiBaseUrl(): string {
     const rawBase = (
       process.env.MEMBER_API_URL || 'https://api.topcoder-dev.com/v6'
     )
       .replace(/\/+$/, '')
       .replace(/\/members$/, '');
-    const baseUrl = rawBase.endsWith('/v6') ? rawBase : `${rawBase}/v6`;
-    return `${baseUrl}/members/${encodeURIComponent(memberHandle)}`;
+    return rawBase.endsWith('/v6') ? rawBase : `${rawBase}/v6`;
   }
 
   /**
@@ -504,22 +610,96 @@ export class ScoringCompletionEmailService {
    * @returns Member record or an empty object.
    */
   private extractMemberRecord(data: unknown): Record<string, unknown> {
+    const records = this.extractMemberRecords(data);
+    return records[0] ?? {};
+  }
+
+  /**
+   * Extracts member objects from direct, array, and wrapped member-api-v6 responses.
+   * @param data Raw response body from member-api-v6.
+   * @returns Member records found in the response.
+   */
+  private extractMemberRecords(data: unknown): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
     const direct = this.asRecord(data);
     if (Object.keys(direct).length === 0) {
-      return {};
+      return [];
+    }
+
+    if (Array.isArray(direct.content)) {
+      return direct.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(direct.data)) {
+      return direct.data.map((entry) => this.asRecord(entry));
     }
 
     const result = this.asRecord(direct.result);
+    if (Array.isArray(result.content)) {
+      return result.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(result.data)) {
+      return result.data.map((entry) => this.asRecord(entry));
+    }
+
     if (Object.keys(result).length > 0) {
-      return result;
+      return [result];
     }
 
     const dataRecord = this.asRecord(direct.data);
     if (Object.keys(dataRecord).length > 0) {
-      return dataRecord;
+      return [dataRecord];
     }
 
-    return direct;
+    return [direct];
+  }
+
+  /**
+   * Converts a member-api-v6 record into the recipient shape required for email.
+   * @param memberRecord Member record returned by member-api-v6.
+   * @param fallbackHandle Handle from the submission payload, if available.
+   * @returns Recipient details when both handle and email are available.
+   */
+  private toMemberEmailRecipient(
+    memberRecord: Record<string, unknown>,
+    fallbackHandle?: string,
+  ): MemberEmailRecipient | undefined {
+    const email = this.asString(memberRecord.email);
+    const handle =
+      this.asString(memberRecord.handle) ?? this.asString(fallbackHandle);
+
+    if (!email || !handle) {
+      return undefined;
+    }
+
+    return {
+      email,
+      handle,
+    };
+  }
+
+  /**
+   * Formats a member lookup description for diagnostic errors.
+   * @param details Member identity values from the submission payload.
+   * @returns Human-readable lookup description.
+   */
+  private describeMemberLookup(
+    details: Pick<
+      SubmissionScoringCompletionEmailDetails,
+      'memberHandle' | 'memberId' | 'userId'
+    >,
+  ): string {
+    return (
+      this.coalesceString(
+        this.asString(details.memberHandle),
+        this.asString(details.userId),
+        this.asString(details.memberId),
+      ) ?? 'unknown'
+    );
   }
 
   /**
@@ -555,5 +735,16 @@ export class ScoringCompletionEmailService {
 
     const stringValue = `${value}`.trim();
     return stringValue.length > 0 ? stringValue : undefined;
+  }
+
+  /**
+   * Returns the first non-empty string from the provided values.
+   * @param values Candidate string values.
+   * @returns First non-empty value, otherwise undefined.
+   */
+  private coalesceString(
+    ...values: Array<string | undefined>
+  ): string | undefined {
+    return values.find((value) => value !== undefined && value.trim() !== '');
   }
 }
