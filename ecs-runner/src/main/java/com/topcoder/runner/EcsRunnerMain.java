@@ -86,7 +86,8 @@ public class EcsRunnerMain {
         ".py",
         ".cs",
         ".cs_net10",
-        ".cs_net7"
+        ".cs_net7",
+        ".rs"
     );
     private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
         "(?m)^\\s*package\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)\\s*;"
@@ -3100,7 +3101,7 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, or .NET 10 C# submissions.
+     * @return {@code true} for C++, Java, Python, Mono C#, .NET 10 C#, or Rust submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -3240,6 +3241,7 @@ public class EcsRunnerMain {
                     "g++",
                     "-std=gnu++23",
                     "-O3",
+                    "-march=native",
                     normalizedSource.getFileName().toString(),
                     "-o",
                     binaryPath
@@ -3259,6 +3261,32 @@ public class EcsRunnerMain {
         if (".py".equals(extension)) {
             return new CompiledSubmission(
                 "python3 " + normalizedSource.toAbsolutePath(),
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".rs".equals(extension)) {
+            String binaryPath = workDir
+                .resolve(GENERIC_SOLUTION_BASE_NAME)
+                .toAbsolutePath()
+                .toString();
+            runCommand(
+                Arrays.asList(
+                    "rustc",
+                    "--edition=2024",
+                    "-O",
+                    normalizedSource.getFileName().toString(),
+                    "-o",
+                    binaryPath
+                ),
+                workDir,
+                compileTimeoutMs,
+                "Rust compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                binaryPath,
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3356,6 +3384,9 @@ public class EcsRunnerMain {
         }
         if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
             return "csharp-net10";
+        }
+        if (".rs".equals(extension)) {
+            return "rust";
         }
         return "unknown";
     }

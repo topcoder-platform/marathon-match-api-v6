@@ -95,6 +95,9 @@ static void sanitize_environment(void) {
     const char *tmpdir = getenv("TMPDIR");
     const char *dotnet_root = getenv("DOTNET_ROOT");
     const char *java_tool_options = getenv("JAVA_TOOL_OPTIONS");
+    const char *rustup_home = getenv("RUSTUP_HOME");
+    const char *cargo_home = getenv("CARGO_HOME");
+    const char *rustup_toolchain = getenv("RUSTUP_TOOLCHAIN");
 
     clearenv();
 
@@ -102,7 +105,7 @@ static void sanitize_environment(void) {
         "PATH",
         path != NULL && path[0] != '\0'
             ? path
-            : "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            : "/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         1
     );
     setenv("HOME", "/home/runner", 1);
@@ -118,6 +121,9 @@ static void sanitize_environment(void) {
     copy_env_if_present("TZ", tz);
     copy_env_if_present("DOTNET_ROOT", dotnet_root);
     copy_env_if_present("JAVA_TOOL_OPTIONS", java_tool_options);
+    copy_env_if_present("RUSTUP_HOME", rustup_home);
+    copy_env_if_present("CARGO_HOME", cargo_home);
+    copy_env_if_present("RUSTUP_TOOLCHAIN", rustup_toolchain);
 }
 
 int main(int argc, char **argv) {

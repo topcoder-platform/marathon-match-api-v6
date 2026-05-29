@@ -32,6 +32,7 @@ Supported source extensions are:
 | `.cs` | C# using Mono |
 | `.cs_net10` | C# using .NET 10 / C# 14 |
 | `.cs_net7` | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
+| `.rs` | Rust latest stable |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
@@ -40,7 +41,7 @@ The runner normalizes the selected source file into a temporary compile workspac
 C++ submissions are compiled with `g++` using GNU++23:
 
 ```bash
-g++ -std=gnu++23 -O3 Solution.cpp -o Solution
+g++ -std=gnu++23 -O3 -march=native Solution.cpp -o Solution
 ./Solution
 ```
 
@@ -62,6 +63,17 @@ Python submissions are executed with Python 3.12:
 ```bash
 python3 Solution.py
 ```
+
+### Rust
+
+Rust submissions use the `.rs` extension and are compiled as a single source file with the latest stable Rust compiler:
+
+```bash
+rustc --edition=2024 -O Solution.rs -o Solution
+./Solution
+```
+
+The ECS runner installs Rust through `rustup` with `RUSTUP_TOOLCHAIN=stable`, so the exact compiler patch version advances when the runner image is rebuilt. As of the verification date above, the stable channel resolves to `rustc 1.96.0`.
 
 ### C# with Mono
 
@@ -114,6 +126,7 @@ Tool versions verified from a local build of the current runner image:
 | Mono runtime | `6.8.0.105` |
 | Mono C# compiler | `mcs 6.8.0.105` |
 | .NET SDK | `10.0.108` |
+| Rust compiler | `rustc 1.96.0` |
 | Bash | `5.2.21` |
 
 The runner image includes:
@@ -123,6 +136,7 @@ The runner image includes:
 - `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
 - .NET 10 SDK for `.cs_net10` submissions and backward-compatible `.cs_net7` submissions
+- `rustc` from the Rust stable channel for `.rs` submissions
 - `zip` and `unzip` for artifact handling
 - a native isolation helper that runs untrusted tester/submission execution as a restricted user
 
@@ -140,6 +154,11 @@ The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
 FROM eclipse-temurin:8-jdk-noble
+
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_TOOLCHAIN=stable
+ENV PATH=/usr/local/cargo/bin:${PATH}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -159,7 +178,11 @@ RUN apt-get update \
         zip \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
-    && rm -rf /var/lib/apt/lists/*
+    && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+    && rm -rf /var/lib/apt/lists/* \
+    && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
+    && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
+    && rustc --version >/dev/null
 
 ENV DOTNET_ROOT=/usr/lib/dotnet
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
@@ -192,6 +215,13 @@ For interpreted submissions, pass the interpreter command:
 
 ```bash
 java -jar Tester.jar -exec "python3 /workdir/Solution.py" -seed 1
+```
+
+For Rust submissions, compile first and pass the compiled binary:
+
+```bash
+rustc --edition=2024 -O Solution.rs -o Solution
+java -jar Tester.jar -exec "./Solution" -seed 1
 ```
 
 Members may print debug information to standard error. The tester captures solution output and error text and the processor includes relevant output in the scoring artifacts.

@@ -11,6 +11,11 @@ RUN mvn -B -ntp clean package -DskipTests
 # Runtime stage
 FROM eclipse-temurin:8-jdk-noble
 
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_TOOLCHAIN=stable
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -29,8 +34,12 @@ RUN apt-get update \
         zip \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
+    && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
     && rm -rf /var/lib/apt/lists/* \
-    && dotnet --info >/dev/null
+    && dotnet --info >/dev/null \
+    && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
+    && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
+    && rustc --version >/dev/null
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin runner
 WORKDIR /app
