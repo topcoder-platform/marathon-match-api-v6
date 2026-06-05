@@ -46,6 +46,14 @@
 #define MM_SKIP_USER_DROP 0
 #endif
 
+#ifndef MM_INSTALL_SOCKET_FILTER
+#define MM_INSTALL_SOCKET_FILTER 1
+#endif
+
+#ifndef MM_DROP_SUPERVISOR_PRIVS
+#define MM_DROP_SUPERVISOR_PRIVS 0
+#endif
+
 #if defined(__x86_64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_X86_64
 #elif defined(__aarch64__)
@@ -77,6 +85,7 @@ static void close_extra_fds(void) {
     }
 }
 
+#if MM_INSTALL_SOCKET_FILTER
 static int install_socket_filter(void) {
     struct sock_filter filter[] = {
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, arch)),
@@ -113,6 +122,7 @@ static int install_socket_filter(void) {
 
     return 0;
 }
+#endif
 
 static void sanitize_environment(void) {
     const char *path = getenv("PATH");
@@ -193,7 +203,7 @@ static int drop_to_isolated_user(void) {
 }
 
 /**
- * Enters the low-privilege socket-restricted execution context.
+ * Enters the low-privilege execution context.
  *
  * Returns 0 on success and 1 when the user drop or seccomp setup fails.
  */
@@ -202,9 +212,11 @@ static int enter_isolated_execution(void) {
         return 1;
     }
 
+#if MM_INSTALL_SOCKET_FILTER
     if (install_socket_filter() != 0) {
         return 1;
     }
+#endif
 
     return 0;
 }
@@ -219,7 +231,9 @@ static void forward_signal_to_child(int signo) {
     pid_t child_pid = (pid_t) supervised_child_pid;
     if (child_pid > 0) {
         if (kill(-child_pid, signo) != 0) {
-            kill(child_pid, signo);
+            if (kill(child_pid, signo) != 0 && errno == EPERM) {
+                _exit(128 + signo);
+            }
         }
     }
 }
@@ -252,6 +266,38 @@ static int wait_status_to_exit_code(int status) {
     }
 
     return 1;
+}
+
+/**
+ * Drops the supervising wrapper back to the real user that invoked the setuid
+ * scorer helper. The already-forked child keeps the temporary root privilege it
+ * needs to switch to the configured isolated UID before exec.
+ */
+static int drop_supervisor_to_invoker(void) {
+#if MM_DROP_SUPERVISOR_PRIVS
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+
+    if (uid == 0 && gid == 0) {
+        return 0;
+    }
+
+    if (setgroups(0, NULL) != 0) {
+        perror("supervisor setgroups");
+        return 1;
+    }
+
+    if (setgid(gid) != 0) {
+        perror("supervisor setgid");
+        return 1;
+    }
+
+    if (setuid(uid) != 0) {
+        perror("supervisor setuid");
+        return 1;
+    }
+#endif
+    return 0;
 }
 
 /**
@@ -299,6 +345,10 @@ static int run_supervised(int argc, char **argv) {
 
     supervised_child_pid = child_pid;
     setpgid(child_pid, child_pid);
+    if (drop_supervisor_to_invoker() != 0) {
+        kill(-child_pid, SIGKILL);
+        return 1;
+    }
     install_supervisor_signal_handlers();
 
     while (waitpid(child_pid, &status, 0) < 0) {
