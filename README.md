@@ -149,10 +149,11 @@ Optional debug vars (set on API service env to be forwarded to runner):
 
 The ECS task still needs trusted outbound access to fetch challenge config, download submission artifacts, upload artifacts, and post the scoring callback. Untrusted tester/submission execution is therefore split from that bootstrap logic inside the container:
 
-- The container starts as `root` and must not have its ECS task-definition `user` overridden.
+- The container starts as `root`. Do not override the ECS task-definition `user`; the trusted runner needs root only to drop submitted solution commands to `scorer`.
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
-- The parent launches a separate child JVM as the `runner` user with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
-- A native wrapper blocks creation of non-`AF_UNIX` sockets for that child JVM and all descendant submission processes, so submissions cannot open live outbound network connections.
+- The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
+- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept root-only, so submitted code cannot read them from `/tmp`.
+- Native wrappers block creation of non-`AF_UNIX` sockets for the child JVM and submitted solution processes, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
 ## Exit code 137 (OOM) mitigation

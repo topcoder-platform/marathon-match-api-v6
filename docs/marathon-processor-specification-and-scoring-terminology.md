@@ -138,7 +138,7 @@ The runner image includes:
 - .NET 10 SDK for `.cs_net10` submissions and backward-compatible `.cs_net7` submissions
 - `rustc` from the Rust stable channel for `.rs` submissions
 - `zip` and `unzip` for artifact handling
-- a native isolation helper that runs untrusted tester/submission execution as a restricted user
+- native isolation helpers that scrub the tester child environment and run generic submitted solution commands as the restricted `scorer` user
 
 ## Setup Local Environment Similar to the Runner
 
@@ -383,7 +383,7 @@ The ECS task parent process has trusted network access so it can:
 - upload artifacts
 - post scoring callbacks
 
-The tester and submitted solution run in a separate isolated child process as an unprivileged `runner` user. The child process receives a scrubbed environment that does not include the runner access token. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
+The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain readable only by the trusted root runner process. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
 
 ## Multithreading and Resource Notes
 

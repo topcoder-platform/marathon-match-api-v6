@@ -137,6 +137,11 @@ export class EcsService {
       runnerEnvironment,
       'DEBUG_LOG_FULL_ACCESS_TOKEN',
     );
+    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_URL');
+    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_AUDIENCE');
+    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_PROXY_SERVER_URL');
+    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_ID');
+    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_SECRET');
 
     try {
       const response = await this.ecsClient.send(

@@ -12,14 +12,16 @@ This image is the runtime container for marathon match scoring tasks launched by
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
 - C# (.NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
 - Rust latest stable compiler support for tester-side submission compilation (`rustc`)
-- native `mm-net-isolate` helper that drops untrusted execution to the `runner` user and blocks non-`AF_UNIX` sockets
+- native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run submitted solutions as the separate non-root `scorer` user, and block non-`AF_UNIX` sockets
 
 ## Isolation model
 
-- The container entrypoint starts as `root`. Do not override the ECS task-definition `user` for this container.
+- The container entrypoint starts as `root`. Do not override the ECS task-definition `user` for this container; root is needed only for the trusted runner to drop submitted solution commands to `scorer`.
 - The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback.
-- The tester and submission execute in a separate child JVM as the `runner` user with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
-- The child JVM and all descendant submission processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
+- The tester executes in a separate child JVM launched through `mm-runner-isolate` with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
+- Generic submitted solution commands execute through `mm-scorer-isolate` as the separate non-root `scorer` user. The helper supervises the solution process group so tester timeouts can still terminate lower-privilege processes.
+- Downloaded tester JARs and serialized scorer config are mode `0600` root-owned files. Submitted code running as `scorer` cannot read them even if it can guess their `/tmp` paths.
+- The child JVM and submitted solution processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
 - The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
 
 ## Recommended ECR naming and tags
