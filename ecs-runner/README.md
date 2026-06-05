@@ -4,7 +4,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 
 ## What this image includes
 
-- Java 8 JDK/runtime (`eclipse-temurin:8-jdk-noble`) for runner execution and Java submission compilation (`javac`, `java`)
+- Java 11 JDK/runtime (`eclipse-temurin:11-jdk-noble`) for runner execution and Java submission compilation (`javac --release 11`, `java`)
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
 - C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)

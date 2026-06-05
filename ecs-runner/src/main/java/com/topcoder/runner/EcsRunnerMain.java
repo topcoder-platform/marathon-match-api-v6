@@ -82,6 +82,7 @@ public class EcsRunnerMain {
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final String JAVA_SUBMISSION_RELEASE = "11";
     private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
         ".cpp",
         ".java",
@@ -3711,7 +3712,12 @@ public class EcsRunnerMain {
             Files.copy(sourceFile, normalizedSource, StandardCopyOption.REPLACE_EXISTING);
 
             runCommand(
-                Arrays.asList("javac", workDir.relativize(normalizedSource).toString()),
+                Arrays.asList(
+                    "javac",
+                    "--release",
+                    JAVA_SUBMISSION_RELEASE,
+                    workDir.relativize(normalizedSource).toString()
+                ),
                 workDir,
                 compileTimeoutMs,
                 "Java compilation failed.",
