@@ -148,6 +148,17 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-issue-75-relative-scoring-lock.zip",
+      "source": {
+        "fileName": "submission-issue-75-relative-scoring-lock.zip",
+        "regressionIssue": 75,
+        "copiedFrom": "submission-winner.zip",
+        "validates": "Adds a successful Blocks scorer callback to the relative-scoring fixture so concurrent callback validation exercises serialized review summation recomputation."
+      }
     }
   ]
 }

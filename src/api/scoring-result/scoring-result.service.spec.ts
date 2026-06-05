@@ -45,11 +45,23 @@ describe('ScoringResultService', () => {
     const m2mService = {
       getM2MToken: jest.fn(),
     };
-    const prisma = {
+    const prisma: {
+      $queryRaw: jest.Mock;
+      $transaction: jest.Mock;
+      marathonMatchConfig: {
+        findUnique: jest.Mock;
+      };
+    } = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn(),
       marathonMatchConfig: {
         findUnique: jest.fn(),
       },
     };
+    prisma.$transaction.mockImplementation(
+      async (callback: (client: typeof prisma) => Promise<unknown>) =>
+        callback(prisma),
+    );
     const ecsService = {};
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
@@ -77,6 +89,9 @@ describe('ScoringResultService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
+
+  const flushAsyncWork = () =>
+    new Promise<void>((resolve) => setImmediate(resolve));
 
   it('rejects scorer callbacks when the challengeId has no Marathon Match config', async () => {
     const { service, m2mService, prisma } = createService();
@@ -194,6 +209,141 @@ describe('ScoringResultService', () => {
         scorecardId: undefined,
         submissionId: payloadWithSeedMetadata.submissionId,
       },
+    );
+  });
+
+  it('serializes concurrent relative scoring recomputations for the same challenge phase', async () => {
+    const { service, m2mService, prisma } = createService();
+    const firstPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      submissionId: 'submission-a',
+      score: 90,
+      currentReview: {
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 90 }],
+        },
+      },
+    };
+    const secondPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      submissionId: 'submission-b',
+      score: 85,
+      currentReview: {
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 85 }],
+        },
+      },
+    };
+    let transactionChain = Promise.resolve();
+    let resolveFirstWriteStarted!: () => void;
+    let releaseFirstWrite!: () => void;
+    const firstWriteStarted = new Promise<void>((resolve) => {
+      resolveFirstWriteStarted = resolve;
+    });
+    const firstWriteCanFinish = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.$transaction.mockImplementation(
+      (callback: (client: typeof prisma) => Promise<unknown>) => {
+        const run = transactionChain
+          .catch(() => undefined)
+          .then(() => callback(prisma));
+        transactionChain = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return run;
+      },
+    );
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const fetchChallengeSubmissionsSpy = jest
+      .spyOn(service as any, 'fetchChallengeSubmissions')
+      .mockResolvedValueOnce([
+        {
+          id: 'submission-a',
+          memberId: 'member-a',
+          submittedDate: '2026-05-01T00:00:00.000Z',
+          reviewSummation: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'submission-a',
+          memberId: 'member-a',
+          submittedDate: '2026-05-01T00:00:00.000Z',
+          reviewSummation: [
+            {
+              id: 'review-a',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '1', score: 90 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'submission-b',
+          memberId: 'member-b',
+          submittedDate: '2026-05-01T00:00:01.000Z',
+          reviewSummation: [],
+        },
+      ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockImplementationOnce(async () => {
+        resolveFirstWriteStarted();
+        await firstWriteCanFinish;
+      })
+      .mockResolvedValue(undefined);
+
+    const firstResult = service.processScoringResult(firstPayload);
+    await firstWriteStarted;
+
+    const secondResult = service.processScoringResult(secondPayload);
+    await flushAsyncWork();
+
+    expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(1);
+
+    releaseFirstWrite();
+    await expect(Promise.all([firstResult, secondResult])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw.mock.calls[0][1]).toBe(
+      prisma.$queryRaw.mock.calls[1][1],
+    );
+    expect(prisma.$queryRaw.mock.calls[0][2]).toBe(
+      prisma.$queryRaw.mock.calls[1][2],
+    );
+    expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(2);
+    expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(3);
+
+    const secondSubmissionPayload = upsertReviewSummationSpy.mock
+      .calls[2][2] as
+      | { aggregateScore: number; submissionId: string }
+      | undefined;
+
+    expect(secondSubmissionPayload).toEqual(
+      expect.objectContaining({
+        submissionId: 'submission-b',
+      }),
+    );
+    expect(secondSubmissionPayload?.aggregateScore).toBeCloseTo(
+      (85 / 90) * 100,
+      10,
     );
   });
 

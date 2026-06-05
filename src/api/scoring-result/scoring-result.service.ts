@@ -10,6 +10,7 @@ import {
   PhaseConfigType,
   ScoreDirection,
 } from '@prisma/client';
+import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 import { EcsService } from 'src/shared/modules/global/ecs.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
@@ -83,6 +84,11 @@ interface RelativeScoringSettings {
   submissionApiUrl?: string;
   enabled: boolean;
   scoreDirection: ScoreDirection;
+}
+
+interface RelativeScoringLockIds {
+  classId: number;
+  objectId: number;
 }
 
 interface ScoringResultConfigSummary {
@@ -429,9 +435,10 @@ export class ScoringResultService {
   }
 
   /**
-   * Recomputes relative scores for the latest submission from each member.
-   * Returns false when relative scoring cannot be applied and the caller should
-   * fall back to direct review upserts.
+   * Recomputes relative scores for the latest submission from each member while
+   * holding a challenge/phase advisory lock for the read-compute-write cycle.
+   * Returns undefined when relative scoring cannot be applied and the caller
+   * should fall back to direct review upserts.
    */
   private async processRelativeScoring(
     token: string,
@@ -441,18 +448,58 @@ export class ScoringResultService {
     fallbackScorecardId: string | undefined,
     settings: RelativeScoringSettings,
   ): Promise<number | undefined> {
-    if (!settings.challengeId || !settings.submissionApiUrl) {
+    const challengeId = settings.challengeId;
+    const submissionApiUrl = settings.submissionApiUrl;
+    if (!challengeId || !submissionApiUrl) {
       this.logger.warn({
         message:
           'Relative scoring is enabled but challenge context is incomplete. Falling back to direct review upsert.',
-        challengeId: settings.challengeId ?? null,
-        submissionApiUrl: settings.submissionApiUrl ?? null,
+        challengeId: challengeId ?? null,
+        submissionApiUrl: submissionApiUrl ?? null,
         submissionId: payload.submissionId,
         testPhase,
       });
       return undefined;
     }
+    const lockedSettings: Required<RelativeScoringSettings> = {
+      ...settings,
+      challengeId,
+      submissionApiUrl,
+    };
 
+    return this.withRelativeScoringLock(challengeId, testPhase, async () =>
+      this.recomputeRelativeScoring(
+        token,
+        payload,
+        testPhase,
+        fallbackMetadata,
+        fallbackScorecardId,
+        lockedSettings,
+      ),
+    );
+  }
+
+  /**
+   * Runs the relative scoring read-compute-write sequence after the caller has
+   * acquired the challenge/phase lock.
+   * @param token M2M token for submission-api and review-api requests.
+   * @param payload Scorer callback payload for the completed submission.
+   * @param testPhase Normalized scoring phase.
+   * @param fallbackMetadata Metadata built from the callback body.
+   * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
+   * @param settings Relative scoring configuration for the challenge.
+   * @returns The current submission's recomputed aggregate score, or undefined
+   * when relative scoring cannot be applied.
+   * @throws Error when submission-api or review-api calls fail.
+   */
+  private async recomputeRelativeScoring(
+    token: string,
+    payload: ScoringResultCallbackPayload,
+    testPhase: string,
+    fallbackMetadata: Record<string, unknown>,
+    fallbackScorecardId: string | undefined,
+    settings: Required<RelativeScoringSettings>,
+  ): Promise<number | undefined> {
     const submissions = await this.fetchChallengeSubmissions(
       token,
       settings.submissionApiUrl,
@@ -539,6 +586,55 @@ export class ScoringResultService {
     }
 
     return currentReviewPayload?.payload.aggregateScore;
+  }
+
+  /**
+   * Serializes relative-score recomputation for one challenge and phase across
+   * API instances sharing the same PostgreSQL database.
+   * @param challengeId Challenge whose relative scores are being recomputed.
+   * @param testPhase Normalized scoring phase.
+   * @param work Async work to run while the transaction-scoped advisory lock is held.
+   * @returns The value returned by the locked work.
+   * @throws Error when the lock transaction or locked work fails.
+   */
+  private async withRelativeScoringLock<T>(
+    challengeId: string,
+    testPhase: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const { classId, objectId } = this.buildRelativeScoringLockIds(
+      challengeId,
+      testPhase,
+    );
+
+    return this.prisma.$transaction(async (prisma) => {
+      await prisma.$queryRaw`
+        SELECT pg_advisory_xact_lock(${classId}::integer, ${objectId}::integer)
+      `;
+      return work();
+    });
+  }
+
+  /**
+   * Builds deterministic PostgreSQL advisory lock identifiers for relative scoring.
+   * @param challengeId Challenge whose score set should be locked.
+   * @param testPhase Scoring phase included so provisional and system callbacks do not block each other.
+   * @returns Two signed 32-bit integers accepted by `pg_advisory_xact_lock`.
+   */
+  private buildRelativeScoringLockIds(
+    challengeId: string,
+    testPhase: string,
+  ): RelativeScoringLockIds {
+    const digest = createHash('sha256')
+      .update(
+        `marathon-match-api-v6:relative-scoring:${challengeId}:${this.normalizeTestPhase(testPhase)}`,
+      )
+      .digest();
+
+    return {
+      classId: digest.readInt32BE(0),
+      objectId: digest.readInt32BE(4),
+    };
   }
 
   /**
