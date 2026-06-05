@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -79,7 +80,8 @@ interface ChallengeResponse {
 
 /**
  * Handles marathon match configuration CRUD operations, default retrieval,
- * and manual rerun dispatching for the latest challenge submissions.
+ * manual rerun dispatching for the latest challenge submissions, and
+ * tester-change reruns for active challenges.
  * Maps persistence records to API response DTOs for challenge config endpoints.
  */
 @Injectable()
@@ -267,12 +269,15 @@ export class MarathonMatchConfigService {
 
   /**
    * Updates a marathon match configuration and upserts requested phase configs.
+   * When the tester changes and the updated config remains active, it also
+   * triggers the existing latest-submission rerun flow so the active challenge is
+   * rescored with the new tester.
    * @param challengeId Challenge ID from path params.
    * @param body Partial update payload from PUT /challenge/:challengeId.
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Updated marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the config or updated tester does not exist.
-   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, or a phase identifier does not exist on the challenge.
+   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, a phase identifier does not exist on the challenge, or tester-change rerun validation fails.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async updateConfig(
@@ -291,6 +296,9 @@ export class MarathonMatchConfigService {
         );
       }
 
+      const testerChanged = Boolean(
+        body.testerId && body.testerId !== existing.testerId,
+      );
       if (body.testerId && body.testerId !== existing.testerId) {
         const testerData = await this.prisma.tester.findUnique({
           where: { id: body.testerId },
@@ -371,12 +379,14 @@ export class MarathonMatchConfigService {
         );
       }
 
-      return this.mapConfigResponse(updatedConfig);
+      const response = this.mapConfigResponse(updatedConfig);
+      if (testerChanged && updatedConfig.active) {
+        await this.rerunLatestSubmissions(challengeId, user);
+      }
+
+      return response;
     } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
+      if (error instanceof HttpException) {
         throw error;
       }
       const errorResponse = this.prismaErrorService.handleError(
