@@ -192,6 +192,80 @@ describe('MarathonMatchConfigService', () => {
     );
   });
 
+  it('reruns latest submissions after an active config tester change', async () => {
+    const { service, prisma } = createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+    const rerunSpy = jest
+      .spyOn(service, 'rerunLatestSubmissions')
+      .mockResolvedValue({
+        challengeId: '30000123',
+        submissionsQueued: 1,
+        results: [
+          {
+            submissionId: 'submission-1',
+            taskId: 'task-1',
+          },
+        ],
+      });
+
+    prisma.marathonMatchConfig.findUnique
+      .mockResolvedValueOnce({
+        id: 'config-1',
+        challengeId: '30000123',
+        active: true,
+        testerId: 'tester-old',
+      })
+      .mockResolvedValueOnce({
+        id: 'config-1',
+        challengeId: '30000123',
+        name: 'Bridge Runners',
+        active: true,
+        relativeScoringEnabled: true,
+        scoreDirection: ScoreDirection.MAXIMIZE,
+        submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+        reviewScorecardId: 'scorecard-1',
+        testerId: 'tester-new',
+        testTimeout: 90000,
+        compileTimeout: 120000,
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+        createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+        createdBy: 'admin',
+        updatedBy: '40051399',
+        phaseConfigs: [],
+      });
+    prisma.tester.findUnique.mockResolvedValue({
+      id: 'tester-new',
+    });
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<void>) => callback(prisma),
+    );
+    prisma.marathonMatchConfig.update.mockResolvedValue({});
+
+    const result = await service.updateConfig(
+      '30000123',
+      {
+        testerId: 'tester-new',
+      },
+      user,
+    );
+
+    expect(result.testerId).toBe('tester-new');
+    expect(prisma.marathonMatchConfig.update).toHaveBeenCalledWith({
+      where: { challengeId: '30000123' },
+      data: {
+        testerId: 'tester-new',
+        updatedBy: '40051399',
+      },
+    });
+    expect(rerunSpy).toHaveBeenCalledTimes(1);
+    expect(rerunSpy).toHaveBeenCalledWith('30000123', user);
+  });
+
   it('normalizes large startSeed strings to BigInt when creating phase configs', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const maxRangeStartSeed = '9223372036854775800';
