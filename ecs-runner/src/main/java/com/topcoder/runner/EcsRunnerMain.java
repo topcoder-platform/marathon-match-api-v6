@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.management.ManagementFactory;
@@ -26,6 +27,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -63,6 +65,7 @@ public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
+    private static final int STREAM_COPY_BUFFER_SIZE = 8192;
     private static final int CHILD_OUTPUT_TAIL_LIMIT = 4000;
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final long TOKEN_REFRESH_SKEW_SECONDS = 60L;
@@ -1424,7 +1427,7 @@ public class EcsRunnerMain {
         String description
     ) {
         Path artifactPath = findArtifactFile(submissionDir, relativePath);
-        if (artifactPath == null || !Files.isRegularFile(artifactPath)) {
+        if (artifactPath == null || !isNonSymlinkRegularFile(artifactPath)) {
             logInfo(
                 "artifacts.preview",
                 "No " + description + " file found at artifacts/" + relativePath
@@ -1433,14 +1436,15 @@ public class EcsRunnerMain {
         }
 
         try {
-            String content = new String(Files.readAllBytes(artifactPath), StandardCharsets.UTF_8);
+            byte[] contentBytes = readRegularFileBytesNoFollow(artifactPath);
+            String content = new String(contentBytes, StandardCharsets.UTF_8);
             logInfo(
                 "artifacts.preview",
                 description
                     + " path="
                     + artifactPath
                     + ", sizeBytes="
-                    + Files.size(artifactPath)
+                    + contentBytes.length
                     + ", content=\n"
                     + truncate(content, ARTIFACT_LOG_PREVIEW_LIMIT)
             );
@@ -2699,7 +2703,7 @@ public class EcsRunnerMain {
         }
 
         Path artifactsDir = artifactBaseDir.resolve("artifacts");
-        if (!Files.isDirectory(artifactsDir)) {
+        if (!isNonSymlinkDirectory(artifactsDir)) {
             logWarn(
                 "artifacts.upload",
                 "Artifact directory does not exist: " + artifactsDir
@@ -2778,8 +2782,8 @@ public class EcsRunnerMain {
         Path publicDir = artifactsDir.resolve("public");
 
         boolean hasPublicArtifacts =
-            Files.isRegularFile(executionLog)
-                || Files.isRegularFile(errorLog)
+            isNonSymlinkRegularFile(executionLog)
+                || isNonSymlinkRegularFile(errorLog)
                 || directoryHasRegularFiles(publicDir);
 
         if (!hasPublicArtifacts) {
@@ -2816,7 +2820,7 @@ public class EcsRunnerMain {
      */
     private static Path createDirectoryZip(Path directoryPath, String artifactName)
         throws Exception {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
                 "artifacts.zip.private",
                 "Directory does not exist, skipping zip: " + directoryPath
@@ -2854,25 +2858,30 @@ public class EcsRunnerMain {
      * @throws IOException when walking the directory fails.
      */
     private static boolean directoryHasRegularFiles(Path directoryPath) throws IOException {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             return false;
         }
 
         try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
-            return stream.anyMatch(Files::isRegularFile);
+            return stream.anyMatch(EcsRunnerMain::isNonSymlinkRegularFile);
         }
     }
 
     /**
-     * Adds a file to zip when it exists.
+     * Adds a file to zip when it exists and is not a symbolic link.
+     *
+     * @param zipOutputStream Destination zip stream receiving the entry.
+     * @param filePath Candidate file path to archive.
+     * @param entryName Zip entry name to use for the file.
+     * @throws Exception when a non-symlink regular file cannot be read or archived.
      */
     private static void addFileToZip(
         ZipOutputStream zipOutputStream,
         Path filePath,
         String entryName
     ) throws Exception {
-        if (!Files.isRegularFile(filePath)) {
-            logInfo("artifacts.zip.add-file", "Skipping missing file: " + filePath);
+        if (!isNonSymlinkRegularFile(filePath)) {
+            logInfo("artifacts.zip.add-file", "Skipping missing or non-regular file: " + filePath);
             return;
         }
 
@@ -2880,20 +2889,30 @@ public class EcsRunnerMain {
             "artifacts.zip.add-file",
             "Adding file to zip entry " + entryName + " from " + filePath
         );
-        zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
-        Files.copy(filePath, zipOutputStream);
-        zipOutputStream.closeEntry();
+        try (InputStream inputStream = openRegularFileInputStreamNoFollow(filePath)) {
+            zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
+            try {
+                copyStream(inputStream, zipOutputStream);
+            } finally {
+                zipOutputStream.closeEntry();
+            }
+        }
     }
 
     /**
-     * Recursively adds directory contents to a zip stream.
+     * Recursively adds non-symlink regular directory contents to a zip stream.
+     *
+     * @param zipOutputStream Destination zip stream receiving directory entries.
+     * @param directoryPath Directory to traverse without following symlinked directories.
+     * @param entryPrefix Prefix prepended to each zip entry name.
+     * @throws Exception when walking the directory or archiving a regular file fails.
      */
     private static void addDirectoryToZip(
         ZipOutputStream zipOutputStream,
         Path directoryPath,
         String entryPrefix
     ) throws Exception {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
                 "artifacts.zip.add-directory",
                 "Skipping missing directory: " + directoryPath
@@ -2906,7 +2925,7 @@ public class EcsRunnerMain {
             stream.forEach(paths::add);
 
             for (Path entryPath : paths) {
-                if (!Files.isRegularFile(entryPath)) {
+                if (!isNonSymlinkRegularFile(entryPath)) {
                     continue;
                 }
 
@@ -2920,10 +2939,89 @@ public class EcsRunnerMain {
                     "artifacts.zip.add-directory",
                     "Adding entry " + entryName + " from " + entryPath
                 );
-                zipOutputStream.putNextEntry(new ZipEntry(entryName));
-                Files.copy(entryPath, zipOutputStream);
-                zipOutputStream.closeEntry();
+                try (InputStream inputStream = openRegularFileInputStreamNoFollow(entryPath)) {
+                    zipOutputStream.putNextEntry(new ZipEntry(entryName));
+                    try {
+                        copyStream(inputStream, zipOutputStream);
+                    } finally {
+                        zipOutputStream.closeEntry();
+                    }
+                }
             }
+        }
+    }
+
+    /**
+     * Checks whether a path is a regular file without dereferencing symlinks.
+     *
+     * @param path Path to inspect.
+     * @return {@code true} only for non-symlink regular files.
+     */
+    private static boolean isNonSymlinkRegularFile(Path path) {
+        return path != null && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Checks whether a path is a directory without dereferencing symlinks.
+     *
+     * @param path Path to inspect.
+     * @return {@code true} only for non-symlink directories.
+     */
+    private static boolean isNonSymlinkDirectory(Path path) {
+        return path != null && Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Reads a regular artifact file without following symbolic links.
+     *
+     * @param filePath Non-symlink regular file path to read.
+     * @return Complete file contents.
+     * @throws IOException when the file is missing, is not a regular file, is a symlink,
+     *                     or cannot be read.
+     */
+    private static byte[] readRegularFileBytesNoFollow(Path filePath) throws IOException {
+        try (
+            InputStream inputStream = openRegularFileInputStreamNoFollow(filePath);
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream()
+        ) {
+            copyStream(inputStream, outputStream);
+            return outputStream.toByteArray();
+        }
+    }
+
+    /**
+     * Opens a regular file for reading without following symbolic links.
+     *
+     * @param filePath Non-symlink regular file path to open.
+     * @return Input stream positioned at the start of the file.
+     * @throws IOException when the path is missing, not regular, a symlink, or unreadable.
+     */
+    private static InputStream openRegularFileInputStreamNoFollow(Path filePath)
+        throws IOException {
+        if (!isNonSymlinkRegularFile(filePath)) {
+            throw new IOException("Artifact is not a non-symlink regular file: " + filePath);
+        }
+
+        return Files.newInputStream(
+            filePath,
+            StandardOpenOption.READ,
+            LinkOption.NOFOLLOW_LINKS
+        );
+    }
+
+    /**
+     * Copies bytes between streams for Java 8 runtimes.
+     *
+     * @param inputStream Source stream.
+     * @param outputStream Destination stream.
+     * @throws IOException when reading or writing fails.
+     */
+    private static void copyStream(InputStream inputStream, OutputStream outputStream)
+        throws IOException {
+        byte[] buffer = new byte[STREAM_COPY_BUFFER_SIZE];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, bytesRead);
         }
     }
 
@@ -3042,7 +3140,7 @@ public class EcsRunnerMain {
     private static Path findArtifactFile(Path submissionDir, String relativePath) {
         for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
             Path candidate = baseDir.resolve("artifacts").resolve(relativePath);
-            if (Files.isRegularFile(candidate)) {
+            if (isNonSymlinkRegularFile(candidate)) {
                 return candidate;
             }
         }
@@ -3055,7 +3153,7 @@ public class EcsRunnerMain {
      */
     private static Path resolveArtifactBaseDir(Path submissionDir) {
         for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
-            if (Files.isDirectory(baseDir.resolve("artifacts"))) {
+            if (isNonSymlinkDirectory(baseDir.resolve("artifacts"))) {
                 return baseDir;
             }
         }
