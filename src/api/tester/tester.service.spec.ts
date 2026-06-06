@@ -58,6 +58,7 @@ describe('TesterService', () => {
     return {
       service,
       prisma,
+      prismaErrorService,
       testerCompilationService,
     };
   };
@@ -147,6 +148,40 @@ describe('TesterService', () => {
     expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
   });
 
+  it('returns a conflict when a concurrent tester create hits the name and version constraint', async () => {
+    const { service, prisma, prismaErrorService, testerCompilationService } =
+      createService();
+
+    prisma.tester.findMany.mockResolvedValue([]);
+    prisma.tester.create.mockRejectedValue(new Error('Unique constraint'));
+    prismaErrorService.handleError.mockReturnValue({
+      message: 'A record with the same name, version already exists.',
+      code: 'UNIQUE_CONSTRAINT_FAILED',
+      details: { duplicateFields: 'name, version' },
+    });
+
+    await expect(
+      service.createTester(
+        {
+          name: testerRecord.name,
+          version: testerRecord.version,
+          sourceCode: testerRecord.sourceCode,
+          className: testerRecord.className,
+        },
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prismaErrorService.handleError).toHaveBeenCalledWith(
+      expect.any(Error),
+      `creating tester with name: ${testerRecord.name}`,
+    );
+    expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
+  });
+
   it('creates a new tester version and omits jar data by default', async () => {
     const { service, prisma, testerCompilationService } = createService();
 
@@ -225,6 +260,47 @@ describe('TesterService', () => {
       'generated-id',
       'public class BridgeRunnersTesterV2 {}',
     );
+  });
+
+  it('returns a conflict when a concurrent tester version create hits the name and version constraint', async () => {
+    const { service, prisma, prismaErrorService, testerCompilationService } =
+      createService();
+
+    prisma.tester.findUnique.mockResolvedValue({
+      id: testerRecord.id,
+      name: testerRecord.name,
+      version: testerRecord.version,
+      className: testerRecord.className,
+      sourceCode: testerRecord.sourceCode,
+    });
+    prisma.tester.findMany.mockResolvedValue([{ version: '1.0.0' }]);
+    prisma.tester.create.mockRejectedValue(new Error('Unique constraint'));
+    prismaErrorService.handleError.mockReturnValue({
+      message: 'A record with the same name, version already exists.',
+      code: 'UNIQUE_CONSTRAINT_FAILED',
+      details: { duplicateFields: 'name, version' },
+    });
+
+    await expect(
+      service.createTesterVersion(
+        'tester-1',
+        {
+          sourceCode: 'public class BridgeRunnersTesterV2 {}',
+          version: '1.0.1',
+          className: 'com.topcoder.BridgeRunnersTesterV2',
+        },
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prismaErrorService.handleError).toHaveBeenCalledWith(
+      expect.any(Error),
+      'creating tester version from tester ID: tester-1',
+    );
+    expect(testerCompilationService.enqueueCompilation).not.toHaveBeenCalled();
   });
 
   it('rejects versions that are not higher than the current max tester version', async () => {

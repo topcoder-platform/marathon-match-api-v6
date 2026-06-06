@@ -119,7 +119,8 @@ export class TesterService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Created tester mapped to `TesterResponseDto` with `PENDING` compile state.
    * @throws ConflictException When the tester family name already exists and
-   * a new version must be published through PUT /testers/:id instead.
+   * a new version must be published through PUT /testers/:id instead, or when
+   * a concurrent request creates the same tester name and version first.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createTester(
@@ -179,6 +180,13 @@ export class TesterService {
         error,
         `creating tester with name: ${body.name}`,
       );
+      if (errorResponse.code === 'UNIQUE_CONSTRAINT_FAILED') {
+        throw new ConflictException({
+          message: `Tester ${body.name} version ${body.version} already exists.`,
+          code: errorResponse.code,
+          details: errorResponse.details,
+        });
+      }
       this.logger.error(errorResponse.message);
       throw new InternalServerErrorException({
         message: errorResponse.message,
@@ -197,6 +205,7 @@ export class TesterService {
    * @returns Created tester-version response DTO plus compile trigger metadata.
    * @throws NotFoundException When the referenced tester does not exist.
    * @throws BadRequestException When the requested version is not higher than the current max version.
+   * @throws ConflictException When a concurrent request creates the same tester name and version first.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createTesterVersion(
@@ -273,6 +282,13 @@ export class TesterService {
         error,
         `creating tester version from tester ID: ${id}`,
       );
+      if (errorResponse.code === 'UNIQUE_CONSTRAINT_FAILED') {
+        throw new ConflictException({
+          message: `Tester version ${body.version} already exists for the tester family.`,
+          code: errorResponse.code,
+          details: errorResponse.details,
+        });
+      }
       this.logger.error(errorResponse.message);
       throw new InternalServerErrorException({
         message: errorResponse.message,
