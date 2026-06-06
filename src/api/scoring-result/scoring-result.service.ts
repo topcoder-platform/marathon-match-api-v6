@@ -74,6 +74,7 @@ interface SummationBuildInput {
   score: number;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
+  preserveReviewedDate?: boolean;
   reviewObject?: Record<string, unknown>;
   testPhase: string;
 }
@@ -339,9 +340,11 @@ export class ScoringResultService {
       },
     );
 
+    const placeholderScore =
+      payload.status === ScoringTestStatus.Failed ? -1 : 0;
     const reviewPayload = this.buildSummationPayload({
       submissionId: payload.submissionId,
-      score: payload.status === ScoringTestStatus.Success ? 0 : -1,
+      score: placeholderScore,
       scorecardId: fallbackScorecardId,
       metadata,
       testPhase: normalizedPhase,
@@ -502,14 +505,16 @@ export class ScoringResultService {
       settings.scoreDirection,
     );
 
-    const relativeReviewPayloads = reviewsToRecompute.map((reviewRecord) =>
-      this.buildRelativeReviewPayload(
-        reviewRecord,
-        bestScores,
-        settings.scoreDirection,
-        fallbackScorecardId,
-        testPhase,
-      ),
+    const relativeReviewPayloads = reviewsToRecompute.map(
+      (reviewRecord, index) =>
+        this.buildRelativeReviewPayload(
+          reviewRecord,
+          bestScores,
+          settings.scoreDirection,
+          fallbackScorecardId,
+          testPhase,
+          index < impactedReviews.length,
+        ),
     );
 
     const currentReviewPayload =
@@ -1489,6 +1494,7 @@ export class ScoringResultService {
     scoreDirection: ScoreDirection,
     fallbackScorecardId: string | undefined,
     testPhase: string,
+    preserveReviewedDate = false,
   ): {
     reviewObject: Record<string, unknown>;
     payload: ReviewSummationPayload;
@@ -1573,6 +1579,7 @@ export class ScoringResultService {
         score: aggregateScore,
         scorecardId,
         metadata,
+        preserveReviewedDate,
         reviewObject,
         testPhase,
       }),
@@ -1715,6 +1722,9 @@ export class ScoringResultService {
     input: SummationBuildInput,
   ): ReviewSummationPayload {
     const metadata = this.asRecord(input.metadata);
+    const existingReviewedDate = input.preserveReviewedDate
+      ? this.asString(input.reviewObject?.reviewedDate)
+      : undefined;
 
     const normalizedTestType = this.normalizeTestPhase(
       this.coalesceString(this.asString(metadata.testType), input.testPhase),
@@ -1747,7 +1757,7 @@ export class ScoringResultService {
         input.score >= 0 &&
         testStatus !== ScoringTestStatus.InProgress &&
         testStatus !== ScoringTestStatus.Failed,
-      reviewedDate: new Date().toISOString(),
+      reviewedDate: existingReviewedDate ?? new Date().toISOString(),
       ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
       ...(shouldSetFinal ? { isFinal: true } : {}),
       ...(shouldSetProvisional ? { isProvisional: true } : {}),

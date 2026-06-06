@@ -860,7 +860,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('persists scoring progress as review summation metadata', async () => {
+  it('persists in-progress scoring metadata without marking the submission failed', async () => {
     const { service, m2mService, prisma } = createService();
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
@@ -906,7 +906,7 @@ describe('ScoringResultService', () => {
       'm2m-token',
       'summation-1',
       expect.objectContaining({
-        aggregateScore: -1,
+        aggregateScore: 0,
         isPassing: false,
         isProvisional: true,
         metadata: expect.objectContaining({
@@ -924,6 +924,106 @@ describe('ScoringResultService', () => {
         }),
       }),
     );
+  });
+
+  it('keeps the failed score sentinel for failed scoring progress', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-1',
+          metadata: {
+            testProcess: 'provisional',
+            testType: 'provisional',
+          },
+        },
+      ]);
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 4,
+        failedTests: 1,
+        progress: 0.2,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.Failed,
+        message: 'Seed 753388861 failed',
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        totalTests: 20,
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'summation-1',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        isProvisional: true,
+        metadata: expect.objectContaining({
+          testProgress: 0.2,
+          testStatus: ScoringTestStatus.Failed,
+        }),
+      }),
+    );
+  });
+
+  it('preserves reviewedDate for impacted relative review payloads', () => {
+    const { service } = createService();
+    const buildRelativeReviewPayload = (
+      service as any
+    ).buildRelativeReviewPayload.bind(service) as (
+      reviewRecord: {
+        submissionId: string;
+        reviewObject: Record<string, unknown>;
+        metadata: Record<string, unknown>;
+        rawTestScores: Array<{ testcase: string; score: number }>;
+      },
+      bestScores: Map<string, number>,
+      scoreDirection: ScoreDirection,
+      fallbackScorecardId: string | undefined,
+      testPhase: string,
+      preserveReviewedDate: boolean,
+    ) => { payload: { reviewedDate: string } };
+    const reviewedDate = '2026-05-28T15:21:12.605Z';
+
+    const result = buildRelativeReviewPayload(
+      {
+        submissionId: 'impacted-submission',
+        reviewObject: {
+          id: 'review-summation-1',
+          isProvisional: true,
+          reviewedDate,
+        },
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 10 }],
+          testType: 'provisional',
+        },
+        rawTestScores: [{ testcase: '753388858', score: 10 }],
+      },
+      new Map([['753388858', 20]]),
+      ScoreDirection.MAXIMIZE,
+      undefined,
+      'provisional',
+      true,
+    );
+
+    expect(result.payload.reviewedDate).toBe(reviewedDate);
   });
 
   it('does not award relative scoring credit for zero-score ties', () => {
