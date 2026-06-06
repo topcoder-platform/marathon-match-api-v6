@@ -95,8 +95,15 @@ Set these in the API service environment:
 - `AWS_REGION`
 - `MARATHON_MATCH_API_URL`
 - `REVIEW_TYPE_ID`
+- `AUTH0_URL`
+- `AUTH0_AUDIENCE`
+- `AUTH0_CLIENT_ID`
+- `AUTH0_CLIENT_SECRET`
+- `AUTH0_PROXY_SERVER_URL` (optional)
 - `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
 - `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
+
+Long-running SYSTEM scorer tasks refresh their parent-runner M2M bearer token before expiry and retry once with a fresh token after an API `401`. The API injects the launch token plus the Auth0 settings above into the trusted parent runner. The isolated child JVM and submitted solution processes still receive a scrubbed environment and do not inherit `ACCESS_TOKEN`, `AUTH0_CLIENT_SECRET`, or other runner env vars.
 
 Keep `ECS_SECURITY_GROUPS` least-privilege. The isolated child blocks untrusted submission egress, but the parent runner still needs trusted access to Marathon Match API and Submission API endpoints.
 
