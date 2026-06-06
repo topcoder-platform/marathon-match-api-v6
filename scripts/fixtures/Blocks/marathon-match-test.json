@@ -148,6 +148,17 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770101",
+      "memberHandle": "issue101ctypes",
+      "file": "submissions/submission-issue-101-ctypes-syscall.zip",
+      "source": {
+        "fileName": "submission-issue-101-ctypes-syscall.zip",
+        "issue": 101,
+        "language": "python",
+        "purpose": "Regression probe for Issue #101: calls libc.syscall(SYS_socket, AF_INET, SOCK_STREAM, 0) through Python ctypes and fails if a non-AF_UNIX socket can be created."
+      }
     }
   ]
 }

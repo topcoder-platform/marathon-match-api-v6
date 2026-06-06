@@ -48,11 +48,16 @@
 
 #if defined(__x86_64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_X86_64
+#define MM_BLOCK_X32_SYSCALLS 1
+#define MM_X32_SYSCALL_BIT 0x40000000U
 #elif defined(__aarch64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_AARCH64
+#define MM_BLOCK_X32_SYSCALLS 0
 #else
 #error "Unsupported architecture for mm-net-isolate"
 #endif
+
+#define MM_SOCKET_DENY (SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
 
 #if MM_SUPERVISE_CHILD
 static volatile sig_atomic_t supervised_child_pid = -1;
@@ -83,15 +88,21 @@ static int install_socket_filter(void) {
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, MM_AUDIT_ARCH, 1, 0),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_KILL_PROCESS),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
+#if MM_BLOCK_X32_SYSCALLS
+        BPF_STMT(BPF_ALU + BPF_AND + BPF_K, MM_X32_SYSCALL_BIT),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 0, 1, 0),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
+#endif
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socket, 0, 4),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, args[0])),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AF_UNIX, 1, 0),
-        BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketpair, 0, 4),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, args[0])),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AF_UNIX, 1, 0),
-        BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
     };
