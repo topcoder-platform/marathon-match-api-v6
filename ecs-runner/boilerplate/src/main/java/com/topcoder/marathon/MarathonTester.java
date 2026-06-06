@@ -111,7 +111,7 @@ public abstract class MarathonTester {
                                 synchronized (timeLock) {
                                     if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
                                     lastStart = 0;
-                                    if (process != null) process.destroy();
+                                    if (process != null) process.destroyForcibly();
                                     if (!timeout) {
                                         timeout = true;
                                         timeout();
