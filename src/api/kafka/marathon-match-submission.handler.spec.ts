@@ -1,4 +1,5 @@
 import { CompilationStatus } from '@prisma/client';
+import { of } from 'rxjs';
 jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
@@ -27,6 +28,8 @@ describe('MarathonMatchSubmissionHandler', () => {
     };
     const httpService = {
       get: jest.fn(),
+      post: jest.fn(),
+      put: jest.fn(),
     };
     const ecsService = {
       launchScorerTask: jest.fn(),
@@ -46,6 +49,8 @@ describe('MarathonMatchSubmissionHandler', () => {
     return {
       handler,
       prisma,
+      m2mService,
+      httpService,
       ecsService,
     };
   };
@@ -154,6 +159,95 @@ describe('MarathonMatchSubmissionHandler', () => {
         startSeed: BigInt(500),
         numberOfTests: 20,
       },
+    );
+  });
+
+  it('marks configured submissions failed when no open phase matches the stored phase config', async () => {
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: 'challenge-1',
+      active: true,
+      testerId: 'tester-1',
+      reviewScorecardId: 'scorecard-1',
+      taskDefinitionName: 'mm-ecs-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-system',
+          configType: 'SYSTEM',
+          phaseId: 'review-phase',
+          startSeed: BigInt(900),
+          numberOfTests: 30,
+        },
+      ],
+    });
+
+    (handler as any).getOpenPhaseResolution = jest.fn().mockResolvedValue({
+      phaseIds: ['submission-phase'],
+      phaseIdentifiers: ['submission-phase'],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+
+    await handler.handle({
+      submissionId: 'submission-1',
+      challengeId: 'challenge-1',
+      submissionUrl: 'https://example.com/submission.zip',
+      memberHandle: 'tester',
+      memberId: 'member-1',
+      submittedDate: '2026-03-26T01:27:22.829Z',
+    });
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
+    expect(httpService.get).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+        params: {
+          metadata: 'true',
+          provisional: 'true',
+          submissionId: 'submission-1',
+        },
+      }),
+    );
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        isProvisional: true,
+        scorecardId: 'scorecard-1',
+        submissionId: 'submission-1',
+        metadata: expect.objectContaining({
+          challengeId: 'challenge-1',
+          marathonMatchScoringSkipped: true,
+          testProcess: 'provisional',
+          testProgress: 1,
+          testStatus: 'FAILED',
+          testType: 'provisional',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
     );
   });
 });
