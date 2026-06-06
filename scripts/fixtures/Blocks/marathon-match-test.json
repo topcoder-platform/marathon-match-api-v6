@@ -148,6 +148,16 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-189-delayed-timeout.zip",
+      "source": {
+        "fileName": "submission-issue-189-delayed-timeout.zip",
+        "issue": "#189",
+        "behavior": "Reads the Blocks setup, waits 25 ms, then returns a benign end-of-game response so low-timeout fixture runs can validate MarathonTester.runTest() timeout enforcement."
+      }
     }
   ]
 }

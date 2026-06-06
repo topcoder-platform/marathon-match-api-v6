@@ -149,7 +149,7 @@ public abstract class MarathonTester {
             start();
             score = getErrorScore();
             score = run();
-            if (timeLimit > 0 && getRunTime() > timeLimit) {
+            if (timeLimit > 0 && elapsedTime > timeLimit) {
                 synchronized (timeLock) {
                     if (!timeout) {
                         timeout = true;
