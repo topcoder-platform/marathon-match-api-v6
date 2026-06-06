@@ -148,6 +148,21 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-24-tmp-persistence.zip",
+      "expectedScores": {
+        "provisional": 0,
+        "system": 0
+      },
+      "source": {
+        "fileName": "submission-issue-24-tmp-persistence.zip",
+        "issue": 24,
+        "purpose": "Benign regression probe that writes a marker to /tmp and fails if a later seed can read it.",
+        "expectedBehavior": "Every seed starts with no prior scorer-owned /tmp marker, so the submission terminates immediately with score 0."
+      }
     }
   ]
 }

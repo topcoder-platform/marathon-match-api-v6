@@ -21,11 +21,16 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -76,6 +81,12 @@ public class EcsRunnerMain {
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
     private static final String SCORER_EXECUTION_USER = "scorer";
+    private static final List<String> SCORER_WRITABLE_STATE_DIRS = Arrays.asList(
+        "/tmp",
+        "/var/tmp",
+        "/dev/shm",
+        "/home/scorer"
+    );
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
@@ -1099,15 +1110,27 @@ public class EcsRunnerMain {
      * that survive until the isolated child JVM exits.
      */
     private static void killLingeringIsolatedProcesses() {
+        killLingeringIsolatedProcesses(false);
+    }
+
+    /**
+     * Cleans up scorer-owned processes after isolated execution.
+     *
+     * @param quietWhenNone Suppresses the normal "none found" log for per-test cleanup.
+     * @return {@code true} when at least one lingering scorer process was killed.
+     */
+    private static boolean killLingeringIsolatedProcesses(boolean quietWhenNone) {
         if (!"root".equals(System.getProperty("user.name", ""))) {
-            logInfo(
-                "tester.isolated",
-                "Skipping scorer process cleanup from non-root runner. User="
-                    + System.getProperty("user.name", "")
-                    + ", target="
-                    + SCORER_EXECUTION_USER
-            );
-            return;
+            if (!quietWhenNone) {
+                logInfo(
+                    "tester.isolated",
+                    "Skipping scorer process cleanup from non-root runner. User="
+                        + System.getProperty("user.name", "")
+                        + ", target="
+                        + SCORER_EXECUTION_USER
+                );
+            }
+            return false;
         }
 
         try {
@@ -1133,17 +1156,19 @@ public class EcsRunnerMain {
                         + SCORER_EXECUTION_USER
                         + "."
                 );
-                return;
+                return true;
             }
 
             if (exitCode == 1) {
-                logInfo(
-                    "tester.isolated",
-                    "No lingering processes found for user "
-                        + SCORER_EXECUTION_USER
-                        + "."
-                );
-                return;
+                if (!quietWhenNone) {
+                    logInfo(
+                        "tester.isolated",
+                        "No lingering processes found for user "
+                            + SCORER_EXECUTION_USER
+                            + "."
+                    );
+                }
+                return false;
             }
 
             logWarn(
@@ -1159,6 +1184,167 @@ public class EcsRunnerMain {
                     + error.getMessage()
             );
         }
+        return false;
+    }
+
+    /**
+     * Removes untrusted scorer process and filesystem state around one seed execution.
+     *
+     * <p>Standard Marathon testers run each seed as a separate submitted solution process, but
+     * those processes share container filesystem locations such as {@code /tmp}. Resetting
+     * scorer-owned writable entries before and after every seed prevents a submission from
+     * passing information to later seeds through files it created.
+     *
+     * @param boundary Text describing whether cleanup is running before or after the test case.
+     * @param testCaseNumber Member-visible ordinal for the seed being isolated.
+     */
+    private static void resetScorerWritableStateForTestCase(
+        String boundary,
+        int testCaseNumber
+    ) {
+        killLingeringIsolatedProcesses(true);
+        int deletedEntries = deleteScorerOwnedWritableStateEntries();
+        if (deletedEntries > 0) {
+            logInfo(
+                "tester.tmp-isolation",
+                "Deleted "
+                    + deletedEntries
+                    + " scorer-owned writable entries "
+                    + boundary
+                    + " testCase="
+                    + testCaseNumber
+            );
+        }
+    }
+
+    /**
+     * Deletes top-level entries owned by the low-privilege scorer user from writable locations.
+     *
+     * <p>Runner-owned files remain root-owned and are not removed. Each selected entry is deleted
+     * with symlink-safe traversal so a malicious submission cannot redirect cleanup outside the
+     * selected writable directory.
+     *
+     * @return Number of top-level scorer-owned entries deleted.
+     */
+    private static int deleteScorerOwnedWritableStateEntries() {
+        int deletedEntries = 0;
+        for (String directory : SCORER_WRITABLE_STATE_DIRS) {
+            deletedEntries += deleteScorerOwnedDirectoryEntries(Paths.get(directory));
+        }
+        return deletedEntries;
+    }
+
+    /**
+     * Deletes top-level entries owned by scorer under one writable directory.
+     *
+     * @param directory Writable directory to reset.
+     * @return Number of top-level scorer-owned entries deleted.
+     */
+    private static int deleteScorerOwnedDirectoryEntries(Path directory) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+
+        int deletedEntries = 0;
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+            for (Path entry : stream) {
+                if (!isScorerOwnedPath(entry)) {
+                    continue;
+                }
+
+                try {
+                    deleteUntrustedPathRecursively(entry);
+                    deletedEntries += 1;
+                } catch (NoSuchFileException ignored) {
+                    // Entry disappeared between listing and deletion.
+                } catch (IOException cleanupError) {
+                    logWarn(
+                        "tester.tmp-isolation",
+                        "Failed to delete scorer-owned entry "
+                            + entry
+                            + ": "
+                            + cleanupError.getMessage()
+                    );
+                }
+            }
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Failed to list scorer-owned entries under "
+                    + directory
+                    + ": "
+                    + error.getMessage()
+            );
+        }
+
+        return deletedEntries;
+    }
+
+    /**
+     * Checks ownership without following symlinks.
+     *
+     * @param path Candidate writable-state entry.
+     * @return {@code true} when the entry is owned by the scorer user.
+     */
+    private static boolean isScorerOwnedPath(Path path) {
+        try {
+            return SCORER_EXECUTION_USER.equals(
+                Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName()
+            );
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Unable to read owner for writable entry "
+                    + path
+                    + ": "
+                    + error.getMessage()
+            );
+            return false;
+        }
+    }
+
+    /**
+     * Deletes an untrusted path tree without following symbolic links.
+     *
+     * @param path Top-level scorer-owned writable-state entry to remove.
+     * @throws IOException When deletion fails.
+     */
+    private static void deleteUntrustedPathRecursively(Path path) throws IOException {
+        Files.walkFileTree(
+            path,
+            new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(
+                    Path file,
+                    BasicFileAttributes attributes
+                ) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(
+                    Path directory,
+                    IOException error
+                ) throws IOException {
+                    if (error != null) {
+                        throw error;
+                    }
+
+                    Files.deleteIfExists(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(
+                    Path file,
+                    IOException error
+                ) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+            }
+        );
     }
 
     /**
@@ -3350,12 +3536,18 @@ public class EcsRunnerMain {
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
                 int testCaseNumber = testScores.size() + 1;
-                MarathonTestResult testResult = controller.run(
-                    testerClassName,
-                    seed,
-                    compiledSubmission.getExecutionCommand(),
-                    timeLimitMs
-                );
+                resetScorerWritableStateForTestCase("before", testCaseNumber);
+                MarathonTestResult testResult;
+                try {
+                    testResult = controller.run(
+                        testerClassName,
+                        seed,
+                        compiledSubmission.getExecutionCommand(),
+                        timeLimitMs
+                    );
+                } finally {
+                    resetScorerWritableStateForTestCase("after", testCaseNumber);
+                }
 
                 double seedScore = testResult.getScore();
                 totalScore += seedScore;
