@@ -95,6 +95,7 @@ Set these in the API service environment:
 - `AWS_REGION`
 - `MARATHON_MATCH_API_URL`
 - `REVIEW_TYPE_ID`
+- `MM_RUNNER_MAX_OUTPUT_BYTES` (optional, defaults to `10000000`; caps runner output and artifact archives before upload)
 - `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
 - `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
 
@@ -126,6 +127,10 @@ curl -X PUT "https://api.topcoder-dev.com/v6/marathon-match/challenge/<challenge
 ```
 
 Once this is saved and the config is active, new scoring launches use the new ECR image through that ECS task definition revision.
+
+## Output and artifact size limit
+
+The runner rejects output once generated public `output.txt` content or a public/private artifact archive would exceed `MM_RUNNER_MAX_OUTPUT_BYTES`. The default is `10000000` bytes. The trusted parent runner passes the resolved limit into the isolated tester child, so generated generic-runner output and uploaded artifact zips use the same cap.
 
 ## Local smoke test
 
