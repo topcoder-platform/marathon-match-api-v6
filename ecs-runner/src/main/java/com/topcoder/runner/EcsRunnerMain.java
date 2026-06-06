@@ -21,6 +21,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -2494,7 +2495,8 @@ public class EcsRunnerMain {
 
     /**
      * Writes the private review payload consumed by internal Marathon Match tooling.
-     * Existing non-empty tester-provided {@code reviews.json} files are preserved.
+     * Any existing {@code reviews.json} path is replaced with the trusted parent
+     * payload because this filename is reserved for canonical internal reviews.
      *
      * @param submissionDir Extracted submission directory or workspace root.
      * @param submissionId Submission whose review payload is being archived.
@@ -2516,13 +2518,6 @@ public class EcsRunnerMain {
     ) throws IOException {
         Path privateArtifactsDir = ensurePrivateArtifactsDir(submissionDir);
         Path reviewsJsonPath = privateArtifactsDir.resolve("reviews.json");
-        if (Files.isRegularFile(reviewsJsonPath) && Files.size(reviewsJsonPath) > 0L) {
-            logInfo(
-                "artifacts.internal-review",
-                "Preserving tester-provided internal reviews artifact " + reviewsJsonPath
-            );
-            return;
-        }
 
         Map<String, Object> payload = buildInternalReviewArtifactPayload(
             submissionId,
@@ -2533,13 +2528,74 @@ public class EcsRunnerMain {
             callbackMetadata
         );
 
-        OBJECT_MAPPER
-            .writerWithDefaultPrettyPrinter()
-            .writeValue(reviewsJsonPath.toFile(), payload);
+        Path tempReviewsJsonPath = Files.createTempFile(
+            privateArtifactsDir,
+            ".reviews-",
+            ".json"
+        );
+        try {
+            OBJECT_MAPPER
+                .writerWithDefaultPrettyPrinter()
+                .writeValue(tempReviewsJsonPath.toFile(), payload);
+            replaceReservedInternalReviewArtifact(tempReviewsJsonPath, reviewsJsonPath);
+        } finally {
+            Files.deleteIfExists(tempReviewsJsonPath);
+        }
+
         logInfo(
             "artifacts.internal-review",
             "Wrote internal reviews artifact " + reviewsJsonPath
         );
+    }
+
+    /**
+     * Replaces the reserved internal reviews artifact with the trusted payload.
+     *
+     * <p>Submitted code can write inside {@code artifacts/private}, so the parent
+     * must not append to or preserve an existing path at this reserved filename.
+     * Symlinks are replaced by the move operation, and real directories are
+     * removed without following nested symlinks before the final replace.
+     *
+     * @param sourcePath Parent-created temporary file containing canonical JSON.
+     * @param targetPath Reserved {@code reviews.json} artifact path.
+     * @throws IOException when an existing reserved path cannot be removed or replaced.
+     */
+    private static void replaceReservedInternalReviewArtifact(
+        Path sourcePath,
+        Path targetPath
+    ) throws IOException {
+        if (Files.isDirectory(targetPath, LinkOption.NOFOLLOW_LINKS)) {
+            deleteDirectoryTreeNoFollow(targetPath);
+        }
+
+        try {
+            Files.move(
+                sourcePath,
+                targetPath,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            );
+        } catch (AtomicMoveNotSupportedException error) {
+            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /**
+     * Deletes a real directory tree without following symlinks inside it.
+     *
+     * @param directoryPath Directory to delete.
+     * @throws IOException when walking or deleting the directory fails.
+     */
+    private static void deleteDirectoryTreeNoFollow(Path directoryPath) throws IOException {
+        List<Path> paths = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            stream.forEach(paths::add);
+        }
+
+        paths.sort(Comparator.reverseOrder());
+        for (Path path : paths) {
+            Files.deleteIfExists(path);
+        }
     }
 
     /**
