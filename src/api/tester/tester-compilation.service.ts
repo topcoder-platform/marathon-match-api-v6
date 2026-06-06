@@ -31,6 +31,7 @@ export class TesterCompilationService {
   private readonly logger = LoggerService.forRoot('TesterCompilationService');
   private readonly compileTimeoutMs = this.getCompileTimeoutMs();
   private readonly mavenBinary = process.env.MVN_BINARY?.trim() || 'mvn';
+  private readonly jarBinary = process.env.JAR_BINARY?.trim() || 'jar';
   private readonly boilerplateDir =
     process.env.BOILERPLATE_DIR?.trim() ||
     path.resolve(process.cwd(), 'ecs-runner/boilerplate');
@@ -155,7 +156,10 @@ export class TesterCompilationService {
       const compileResult = await this.executeMavenBuild(pomPath, tempDir);
 
       if (!compileResult.timedOut && compileResult.exitCode === 0) {
-        const jarBytes = await this.readCompiledJar(tempDir);
+        const jarBytes = await this.readCompiledJar(
+          tempDir,
+          testerRecord.className,
+        );
 
         const successUpdate = await this.prisma.tester.updateMany({
           where: { id: testerId, sourceCode: sourceSnapshot },
@@ -439,10 +443,7 @@ export class TesterCompilationService {
     tempDir: string,
     testerRecord: tester,
   ): Promise<void> {
-    const classNameParts = testerRecord.className
-      .split('.')
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
+    const classNameParts = this.getClassNameParts(testerRecord.className);
 
     const className = classNameParts.at(-1);
 
@@ -462,6 +463,18 @@ export class TesterCompilationService {
 
     const testerFilePath = path.join(packagePath, `${className}.java`);
     await fs.writeFile(testerFilePath, testerRecord.sourceCode, 'utf8');
+  }
+
+  /**
+   * Splits a configured Java class name into non-empty package and class parts.
+   * @param className Configured Java class name.
+   * @returns Trimmed package and class name parts.
+   */
+  private getClassNameParts(className: string): string[] {
+    return className
+      .split('.')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
   }
 
   /**
@@ -528,12 +541,17 @@ export class TesterCompilationService {
   }
 
   /**
-   * Reads the produced fat JAR from Maven target output.
+   * Reads the produced fat JAR from Maven target output after verifying it
+   * contains the configured tester class.
    * @param tempDir Temp compilation workspace root.
+   * @param className Configured Java tester class name expected in the JAR.
    * @returns Jar bytes to persist in the tester record.
-   * @throws Error When no jar artifact is found.
+   * @throws Error When no jar artifact is found or the configured class is absent.
    */
-  private async readCompiledJar(tempDir: string): Promise<Buffer> {
+  private async readCompiledJar(
+    tempDir: string,
+    className: string,
+  ): Promise<Buffer> {
     const targetDir = path.join(tempDir, 'target');
     const targetFiles = await fs.readdir(targetDir);
 
@@ -554,6 +572,112 @@ export class TesterCompilationService {
       throw new Error('Compilation succeeded but no JAR artifact was found.');
     }
 
-    return await fs.readFile(path.join(targetDir, jarFile));
+    const jarPath = path.join(targetDir, jarFile);
+    await this.verifyCompiledJarContainsClass(jarPath, className);
+
+    return await fs.readFile(jarPath);
+  }
+
+  /**
+   * Verifies the Maven-produced JAR contains the class configured for scoring.
+   * @param jarPath Absolute path to the compiled JAR.
+   * @param className Configured Java tester class name expected in the JAR.
+   * @returns Promise that resolves when the class entry exists.
+   * @throws Error When the JAR cannot be listed or the class entry is absent.
+   */
+  private async verifyCompiledJarContainsClass(
+    jarPath: string,
+    className: string,
+  ): Promise<void> {
+    const expectedClassEntry = this.getExpectedClassEntryPath(className);
+    const jarEntries = await this.listJarEntries(jarPath);
+
+    if (!jarEntries.includes(expectedClassEntry)) {
+      throw new Error(
+        `Compilation succeeded but compiled JAR does not contain configured class '${className}' (expected entry: ${expectedClassEntry}).`,
+      );
+    }
+  }
+
+  /**
+   * Converts a configured Java class name to the matching JAR entry path.
+   * @param className Configured Java tester class name.
+   * @returns Expected `<package>/<ClassName>.class` JAR entry path.
+   * @throws Error When className cannot be mapped to a Java class entry.
+   */
+  private getExpectedClassEntryPath(className: string): string {
+    const classNameParts = this.getClassNameParts(className);
+
+    if (classNameParts.length === 0) {
+      throw new Error(`Invalid className '${className}'.`);
+    }
+
+    return `${classNameParts.join('/')}.class`;
+  }
+
+  /**
+   * Lists entries from a compiled JAR using the JDK jar tool.
+   * @param jarPath Absolute path to the compiled JAR.
+   * @returns JAR entry names.
+   * @throws Error When the jar tool cannot list the archive.
+   */
+  private async listJarEntries(jarPath: string): Promise<string[]> {
+    return await new Promise<string[]>((resolve, reject) => {
+      const child = spawn(this.jarBinary, ['tf', jarPath], {
+        env: process.env,
+      });
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let settled = false;
+
+      const fail = (error: Error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        reject(error);
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdoutBuffer += chunk.toString();
+      });
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderrBuffer += chunk.toString();
+      });
+
+      child.on('error', (error: Error) => {
+        fail(
+          new Error(`Failed to list compiled JAR contents: ${error.message}`),
+        );
+      });
+
+      child.on('close', (code: number | null) => {
+        if (settled) {
+          return;
+        }
+
+        if ((code ?? -1) === 0) {
+          settled = true;
+          resolve(
+            stdoutBuffer
+              .split(/\r?\n/)
+              .map((entry) => entry.trim())
+              .filter((entry) => entry.length > 0),
+          );
+          return;
+        }
+
+        const detail = stderrBuffer.trim();
+        fail(
+          new Error(
+            detail
+              ? `Failed to list compiled JAR contents with code ${code}: ${detail}`
+              : `Failed to list compiled JAR contents with code ${code}`,
+          ),
+        );
+      });
+    });
   }
 }
