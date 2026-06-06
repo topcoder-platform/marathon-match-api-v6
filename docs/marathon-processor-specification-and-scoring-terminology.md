@@ -348,7 +348,8 @@ When relative scoring is enabled, the system recalculates the latest submission 
 
 For each testcase:
 
-- failed, missing, negative, or zero raw scores receive `0`
+- failed, missing, negative, or zero raw scores receive `0`, except for the `MINIMIZE` tied-zero case
+- a `MINIMIZE` raw score of `0` tied with a best score of `0` receives `100`
 - the best raw score receives `100`
 - all other valid scores receive `(lower score / higher score) * 100`
 

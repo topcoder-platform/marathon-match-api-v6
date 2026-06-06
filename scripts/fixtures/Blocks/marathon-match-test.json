@@ -46,6 +46,30 @@
     {
       "memberId": "88770025",
       "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-94-zero-score.zip",
+      "source": {
+        "fileName": "submission-issue-94-zero-score.zip",
+        "issue": 94,
+        "scenario": "Establishes a zero raw-score baseline for relative scoring division-by-zero regression coverage.",
+        "expectedRawScore": 0,
+        "expectedRelativeScore": 0
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-issue-94-zero-score.zip",
+      "source": {
+        "fileName": "submission-issue-94-zero-score.zip",
+        "issue": 94,
+        "scenario": "Submits a second zero raw score while the best testcase score is still zero.",
+        "expectedRawScore": 0,
+        "expectedRelativeScore": 0
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
       "file": "submissions/submission-3G9RNcDiRX4ioW.zip",
       "source": {
         "fileName": "submission-3G9RNcDiRX4ioW.zip"
