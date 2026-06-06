@@ -148,6 +148,17 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-283-clean-termination.zip",
+      "source": {
+        "fileName": "submission-issue-283-clean-termination.zip",
+        "issue": 283,
+        "language": "python",
+        "validates": "Clean Blocks submission lifecycle when the solution flushes stderr, prints -1 immediately, and exits before runner artifact upload."
+      }
     }
   ]
 }

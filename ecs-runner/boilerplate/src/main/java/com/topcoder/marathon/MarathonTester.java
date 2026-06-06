@@ -33,11 +33,15 @@ public abstract class MarathonTester {
     private long elapsedTime, timeLimit, lastStart;
     private final Object timeLock = new Object();
     private final List<BufferedWriter> solInputWriters = new ArrayList<BufferedWriter>();
+    private static final int maxSolutionOutputLength = 10_000_000;
+    private static final long processDrainTimeoutMillis = 250;
+    private static final long errorReaderDrainTimeoutMillis = 250;
     private BufferedWriter solOutputWriter;
     private BufferedWriter solErrorWriter;
     private BufferedReader solOutputReader;
     private ErrorReader solErrorReader;
     private Process process;
+    private final StringBuilder solutionOutput = new StringBuilder();
     private String solutionError = "";
     private String errorMessage = "";
     private String lastLine = "";
@@ -242,6 +246,7 @@ public abstract class MarathonTester {
             solOutputWriter.write(lastLine);
             solOutputWriter.newLine();
         }
+        appendSolutionOutput(lastLine + "\n");
         return lastLine;
     }
 
@@ -327,6 +332,7 @@ public abstract class MarathonTester {
             } catch (Exception e) {
             }
         }
+        waitForProcessExit();
         if (solOutputReader != null) {
             try {
                 solOutputReader.close();
@@ -339,24 +345,64 @@ public abstract class MarathonTester {
             } catch (Exception e) {
             }
         }
-        if (solErrorWriter != null) {
+        if (solErrorReader != null) {
+            solErrorReader.closeAndWait(errorReaderDrainTimeoutMillis);
+            solutionError = solErrorReader.getOutput();
+        } else if (solErrorWriter != null) {
             try {
                 solErrorWriter.close();
             } catch (Exception e) {
             }
         }
-        if (solErrorReader != null) {
-            solErrorReader.close();
-            solutionError = solErrorReader.getOutput();
-        }
-        if (process != null) {
+    }
+
+    /**
+     * Gives the submitted solution a short window to exit after stdin closes before termination.
+     */
+    private void waitForProcessExit() {
+        if (process == null) return;
+        try {
+            if (process.waitFor(processDrainTimeoutMillis, TimeUnit.MILLISECONDS)) return;
+            process.destroy();
+            if (!process.waitFor(processDrainTimeoutMillis, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+        } catch (Exception e) {
             try {
                 process.destroy();
-            } catch (Exception e) {
+            } catch (Exception ignored) {
             }
         }
     }
 
+    /**
+     * Appends one stdout fragment to the bounded captured stdout buffer.
+     *
+     * @param text Text read from the submitted solution stdout stream.
+     */
+    private void appendSolutionOutput(String text) {
+        if (text == null || solutionOutput.length() >= maxSolutionOutputLength) return;
+        int remaining = maxSolutionOutputLength - solutionOutput.length();
+        solutionOutput.append(text, 0, Math.min(text.length(), remaining));
+    }
+
+    /**
+     * Returns stdout lines consumed from the submitted solution process.
+     *
+     * @return Bounded stdout text read by the tester, including protocol lines.
+     */
+    public final String getSolutionOutput() {
+        return solutionOutput.toString();
+    }
+
+    /**
+     * Returns stderr text consumed from the submitted solution process.
+     *
+     * @return Bounded stderr text captured by the asynchronous stderr reader.
+     */
     public final String getSolutionError() {
         return solutionError;
     }

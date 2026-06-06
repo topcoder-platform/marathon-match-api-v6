@@ -3383,10 +3383,20 @@ public class EcsRunnerMain {
                     outputText.append(testResult.getError().trim()).append('\n');
                 }
                 if (
-                    testResult.getOutput() != null
-                        && !testResult.getOutput().trim().isEmpty()
+                    testResult.getStdout() != null
+                        && !testResult.getStdout().trim().isEmpty()
                 ) {
-                    outputText.append(testResult.getOutput().trim()).append('\n');
+                    outputText.append("stdout:\n")
+                        .append(testResult.getStdout().trim())
+                        .append('\n');
+                }
+                if (
+                    testResult.getStderr() != null
+                        && !testResult.getStderr().trim().isEmpty()
+                ) {
+                    outputText.append("stderr:\n")
+                        .append(testResult.getStderr().trim())
+                        .append('\n');
                 }
                 outputText.append('\n');
 
