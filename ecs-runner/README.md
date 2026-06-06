@@ -21,7 +21,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - The tester executes in a separate child JVM launched through `mm-runner-isolate` with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
 - Generic submitted solution commands execute through `mm-scorer-isolate` as the separate non-root `scorer` user. The helper supervises the solution process group so tester timeouts can still terminate lower-privilege processes.
 - Downloaded tester JARs and serialized scorer config are mode `0600` root-owned files. Submitted code running as `scorer` cannot read them even if it can guess their `/tmp` paths.
-- The child JVM and submitted solution processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
+- The child JVM and submitted solution processes can create only `AF_UNIX` sockets. These restrictions are kernel seccomp filters inherited across fork/exec, so clearing `LD_PRELOAD` in a spawned child process does not restore INET or INET6 socket access. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
 - The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
 
 ## Recommended ECR naming and tags
