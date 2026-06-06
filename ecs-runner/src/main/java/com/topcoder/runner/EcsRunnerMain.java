@@ -547,7 +547,7 @@ public class EcsRunnerMain {
         if (submissionDir == null || !Files.isDirectory(submissionDir)) {
             throw new IOException("Submission directory is not available: " + submissionDir);
         }
-        secureRunnerOnlyFile(testerJarPath);
+        secureRunnerReadOnlyFile(testerJarPath);
     }
 
     /**
@@ -991,27 +991,53 @@ public class EcsRunnerMain {
     /**
      * Restricts a sensitive root-owned file to the trusted Java runner process.
      *
-     * <p>This is used for downloaded tester JARs and serialized scorer config.
-     * The submitted solution process runs as {@code scorer}, so owner-only
-     * permissions prevent shell probes from reading those files even when they
-     * can guess the path.
+     * <p>This is used for serialized scorer config and similar temporary files
+     * that the trusted runner may still need to update. The submitted solution
+     * process runs as {@code scorer}, so owner-only permissions prevent shell
+     * probes from reading those files even when they can guess the path.
      *
      * @param path Sensitive regular file to restrict.
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
     private static void secureRunnerOnlyFile(Path path) throws IOException {
+        setRunnerOnlyPermissions(path, true);
+    }
+
+    /**
+     * Restricts a sensitive root-owned file to runner read access only.
+     *
+     * <p>This is used for downloaded tester JARs. The trusted runner can load
+     * the tester class, while same-owner submitted solution processes cannot
+     * modify the scoring artifact after download.
+     *
+     * @param path Sensitive regular file to make read-only for the runner.
+     * @throws IOException When permissions cannot be applied on POSIX filesystems.
+     */
+    private static void secureRunnerReadOnlyFile(Path path) throws IOException {
+        setRunnerOnlyPermissions(path, false);
+    }
+
+    /**
+     * Applies root-only POSIX permissions to a sensitive runner file.
+     *
+     * @param path Sensitive regular file to restrict.
+     * @param ownerWritable Whether the trusted runner owner should retain write access.
+     * @throws IOException When permissions cannot be applied on POSIX filesystems.
+     */
+    private static void setRunnerOnlyPermissions(Path path, boolean ownerWritable)
+        throws IOException {
         if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
 
         try {
-            Files.setPosixFilePermissions(
-                path,
-                EnumSet.of(
-                    PosixFilePermission.OWNER_READ,
-                    PosixFilePermission.OWNER_WRITE
-                )
+            EnumSet<PosixFilePermission> permissions = EnumSet.of(
+                PosixFilePermission.OWNER_READ
             );
+            if (ownerWritable) {
+                permissions.add(PosixFilePermission.OWNER_WRITE);
+            }
+            Files.setPosixFilePermissions(path, permissions);
         } catch (UnsupportedOperationException ignored) {
             logWarn(
                 "filesystem.permissions",
@@ -3087,7 +3113,7 @@ public class EcsRunnerMain {
         throws IOException {
         Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
         Files.write(jarPath, jarBytes);
-        secureRunnerOnlyFile(jarPath);
+        secureRunnerReadOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
             "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"
