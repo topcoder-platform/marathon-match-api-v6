@@ -47,6 +47,8 @@ sequenceDiagram
         H-->>C: Throw error
       else Tester ready
         loop Once per matching phase config
+          H->>ECS: Check active scorer tasks for dedupe/cap
+          ECS->>F: Stop older same-member task when superseded
           H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
           ECS->>F: RunTask with env overrides
           F->>MM: GET /challenge/:id
@@ -73,6 +75,12 @@ sequenceDiagram
 ## Retry and DLQ behavior
 
 Kafka consumption retries with exponential backoff. When `KAFKA_DLQ_ENABLED=true`, messages that still fail after `KAFKA_DLQ_MAX_RETRIES` are published to the configured DLQ topic suffix and the original offset is committed.
+
+## Scorer task launch limits
+
+Before each `RunTask`, `EcsService.launchScorerTask(...)` lists pending/running scorer tasks for the configured ECS task family. It skips duplicate active launches for the same challenge, submission, and phase config type; stops older active tasks for the same challenge/member when a newer submission arrives; and enforces `ECS_SCORER_MAX_CONCURRENT_TASKS` before launching another task. The cap defaults to `20`.
+
+When the cap is reached, the handler throws before calling `RunTask`. Kafka retry/backoff then provides back-pressure instead of committing the offset and creating unbounded ECS work.
 
 ## Submission network isolation
 

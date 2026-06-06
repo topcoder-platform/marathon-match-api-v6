@@ -943,6 +943,7 @@ export class MarathonMatchConfigService {
         })
         .map((submission) => ({
           submissionId: submission.submissionId,
+          memberId: submission.memberId,
           submittedDate: submission.submittedDate,
         }));
 
@@ -961,7 +962,7 @@ export class MarathonMatchConfigService {
       }
 
       const launchResults = await Promise.allSettled(
-        submissions.map(({ submissionId }) =>
+        submissions.map(({ submissionId, memberId }) =>
           this.ecsService.launchScorerTask(
             challengeId,
             submissionId,
@@ -974,6 +975,8 @@ export class MarathonMatchConfigService {
               startSeed: provisionalPhaseConfig.startSeed,
               numberOfTests: provisionalPhaseConfig.numberOfTests,
             },
+            undefined,
+            { memberId },
           ),
         ),
       );

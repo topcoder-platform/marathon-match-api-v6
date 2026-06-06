@@ -3,7 +3,9 @@ import {
   DescribeTasksCommand,
   DescribeTaskDefinitionCommand,
   ECSClient,
+  ListTasksCommand,
   RunTaskCommand,
+  StopTaskCommand,
   Task,
 } from '@aws-sdk/client-ecs';
 import { PhaseConfigType } from '@prisma/client';
@@ -28,10 +30,29 @@ export interface MarathonMatchScorerTaskLaunchResult {
   cluster: string;
   containerName: string;
   taskDefinition: string;
+  reusedExistingTask?: boolean;
   logGroup?: string;
   logStreamPrefix?: string;
   logStreamName?: string;
   cloudWatchLogsConsoleUrl?: string;
+}
+
+export interface MarathonMatchScorerTaskLaunchOptions {
+  memberId?: string;
+}
+
+interface ActiveScorerTask {
+  taskArn: string;
+  taskId: string;
+  cluster: string;
+  containerName: string;
+  taskDefinition?: string;
+  lastStatus?: string;
+  desiredStatus?: string;
+  challengeId?: string;
+  submissionId?: string;
+  memberId?: string;
+  phaseConfigType?: string;
 }
 
 interface PersistSubmissionRunnerLogInput {
@@ -50,6 +71,7 @@ interface PersistSubmissionRunnerLogInput {
 export class EcsService {
   private readonly logger = LoggerService.forRoot('EcsService');
   private readonly ecsClient: ECSClient;
+  private scorerLaunchLock: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly m2mService: M2MService,
@@ -67,10 +89,13 @@ export class EcsService {
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
    * @param reviewId Optional review-api review id that should be marked completed after callback processing.
+   * @param launchOptions Optional submission owner metadata used for per-member in-flight task cancellation.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
-   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID.
-   * @throws Error when required ENV vars are missing, token fetch fails, or ECS launch fails.
+   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID. Optional ECS_SCORER_MAX_CONCURRENT_TASKS
+   * controls the global pending/running scorer task cap and defaults to 20.
+   * @throws Error when required ENV vars are missing, token fetch fails, the scorer task cap is reached,
+   * or ECS launch/cancellation fails.
    */
   async launchScorerTask(
     challengeId: string,
@@ -78,6 +103,7 @@ export class EcsService {
     mmConfig: MarathonMatchTaskConfig,
     scoringPhase: MarathonMatchScoringPhase,
     reviewId?: string,
+    launchOptions: MarathonMatchScorerTaskLaunchOptions = {},
   ): Promise<MarathonMatchScorerTaskLaunchResult> {
     const cluster = this.getRequiredEnv('ECS_CLUSTER');
     const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
@@ -88,6 +114,7 @@ export class EcsService {
     const taskDefinitionName = mmConfig.taskDefinitionName?.trim();
     const taskDefinitionVersion = mmConfig.taskDefinitionVersion?.trim();
     const testPhase = this.mapConfigTypeToTestPhase(scoringPhase.configType);
+    const memberId = launchOptions.memberId?.trim();
 
     if (!taskDefinitionName) {
       throw new Error('Missing required task definition name in mmConfig.');
@@ -97,154 +124,211 @@ export class EcsService {
       throw new Error('Missing required task definition version in mmConfig.');
     }
 
-    let token: string;
-    try {
-      token = await this.m2mService.getM2MToken();
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Failed to get M2M token for ECS task launch: ${errorMessage}`,
-      );
-    }
-
-    if (!token) {
-      throw new Error('Failed to get M2M token for ECS task launch.');
-    }
-
     const taskDefinition = `${taskDefinitionName}:${taskDefinitionVersion}`;
-    const runnerEnvironment = [
-      { name: 'TESTER_CONFIG_ID', value: challengeId },
-      { name: 'SUBMISSION_ID', value: submissionId },
-      { name: 'ACCESS_TOKEN', value: token },
-      { name: 'MARATHON_MATCH_API_URL', value: marathonMatchApiUrl },
-      { name: 'REVIEW_TYPE_ID', value: reviewTypeId },
-      { name: 'TEST_PHASE', value: testPhase },
-      { name: 'PHASE_CONFIG_TYPE', value: scoringPhase.configType },
-      { name: 'PHASE_START_SEED', value: String(scoringPhase.startSeed) },
-      {
-        name: 'PHASE_NUMBER_OF_TESTS',
-        value: String(scoringPhase.numberOfTests),
-      },
-    ];
-
-    if (reviewId?.trim()) {
-      runnerEnvironment.push({ name: 'REVIEW_ID', value: reviewId.trim() });
-    }
-
-    this.appendOptionalEnvOverride(runnerEnvironment, 'DEBUG_LOG_ACCESS_TOKEN');
-    this.appendOptionalEnvOverride(
-      runnerEnvironment,
-      'DEBUG_LOG_FULL_ACCESS_TOKEN',
-    );
-    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_URL');
-    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_AUDIENCE');
-    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_PROXY_SERVER_URL');
-    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_ID');
-    this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_SECRET');
 
     try {
-      const response = await this.ecsClient.send(
-        new RunTaskCommand({
+      return await this.runWithScorerLaunchLock(async () => {
+        const activeTasks = await this.listActiveScorerTasks(
           cluster,
-          taskDefinition,
-          launchType: 'FARGATE',
-          networkConfiguration: {
-            awsvpcConfiguration: {
-              subnets,
-              securityGroups,
-              assignPublicIp: 'DISABLED',
-            },
+          taskDefinitionName,
+          containerName,
+        );
+        const launchableActiveTasks =
+          await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
+            challengeId,
+            submissionId,
+            memberId,
+          });
+        const duplicateTask = this.findDuplicateActiveScorerTask(
+          launchableActiveTasks,
+          challengeId,
+          submissionId,
+          scoringPhase.configType,
+        );
+
+        if (duplicateTask) {
+          const launchResult = await this.buildLaunchResultFromActiveTask(
+            duplicateTask,
+            taskDefinition,
+            containerName,
+          );
+          await this.persistSubmissionRunnerLogMapping({
+            challengeId,
+            submissionId,
+            scoringPhase,
+            launchResult,
+          });
+          this.logger.log({
+            message: 'Skipped duplicate ECS scorer task launch',
+            challengeId,
+            submissionId,
+            memberId: memberId ?? null,
+            phaseConfigType: scoringPhase.configType,
+            taskArn: launchResult.taskArn,
+            taskId: launchResult.taskId,
+          });
+          return launchResult;
+        }
+
+        const maxConcurrentScorerTasks = this.getMaxConcurrentScorerTasks();
+        if (launchableActiveTasks.length >= maxConcurrentScorerTasks) {
+          throw new Error(
+            `ECS scorer task concurrency limit reached (${launchableActiveTasks.length}/${maxConcurrentScorerTasks}). Deferring submission ${submissionId} to Kafka retry/back-pressure instead of launching another task.`,
+          );
+        }
+
+        const token = await this.getM2MTokenForScorerLaunch();
+        const runnerEnvironment = [
+          { name: 'TESTER_CONFIG_ID', value: challengeId },
+          { name: 'SUBMISSION_ID', value: submissionId },
+          { name: 'ACCESS_TOKEN', value: token },
+          { name: 'MARATHON_MATCH_API_URL', value: marathonMatchApiUrl },
+          { name: 'REVIEW_TYPE_ID', value: reviewTypeId },
+          { name: 'TEST_PHASE', value: testPhase },
+          { name: 'PHASE_CONFIG_TYPE', value: scoringPhase.configType },
+          { name: 'PHASE_START_SEED', value: String(scoringPhase.startSeed) },
+          {
+            name: 'PHASE_NUMBER_OF_TESTS',
+            value: String(scoringPhase.numberOfTests),
           },
-          overrides: {
-            containerOverrides: [
-              {
-                name: containerName,
-                environment: runnerEnvironment,
+        ];
+
+        if (memberId) {
+          runnerEnvironment.push({ name: 'MEMBER_ID', value: memberId });
+        }
+
+        if (reviewId?.trim()) {
+          runnerEnvironment.push({
+            name: 'REVIEW_ID',
+            value: reviewId.trim(),
+          });
+        }
+
+        this.appendOptionalEnvOverride(
+          runnerEnvironment,
+          'DEBUG_LOG_ACCESS_TOKEN',
+        );
+        this.appendOptionalEnvOverride(
+          runnerEnvironment,
+          'DEBUG_LOG_FULL_ACCESS_TOKEN',
+        );
+        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_URL');
+        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_AUDIENCE');
+        this.appendOptionalEnvOverride(
+          runnerEnvironment,
+          'AUTH0_PROXY_SERVER_URL',
+        );
+        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_ID');
+        this.appendOptionalEnvOverride(
+          runnerEnvironment,
+          'AUTH0_CLIENT_SECRET',
+        );
+
+        const response = await this.ecsClient.send(
+          new RunTaskCommand({
+            cluster,
+            taskDefinition,
+            launchType: 'FARGATE',
+            networkConfiguration: {
+              awsvpcConfiguration: {
+                subnets,
+                securityGroups,
+                assignPublicIp: 'DISABLED',
               },
-            ],
-          },
-        }),
-      );
-
-      if (!response.tasks || response.tasks.length === 0) {
-        throw new Error(
-          'ECS RunTask returned no tasks for marathon match scorer launch.',
+            },
+            overrides: {
+              containerOverrides: [
+                {
+                  name: containerName,
+                  environment: runnerEnvironment,
+                },
+              ],
+            },
+          }),
         );
-      }
 
-      const taskArn = response.tasks[0]?.taskArn;
-      if (!taskArn) {
-        throw new Error(
-          'ECS RunTask returned a task without taskArn for marathon match scorer launch.',
+        if (!response.tasks || response.tasks.length === 0) {
+          throw new Error(
+            'ECS RunTask returned no tasks for marathon match scorer launch.',
+          );
+        }
+
+        const taskArn = response.tasks[0]?.taskArn;
+        if (!taskArn) {
+          throw new Error(
+            'ECS RunTask returned a task without taskArn for marathon match scorer launch.',
+          );
+        }
+
+        const taskId = this.extractTaskId(taskArn);
+        const logConfiguration = await this.resolveAwsLogsConfiguration(
+          taskDefinition,
+          containerName,
         );
-      }
+        const logGroup = logConfiguration.logGroup;
+        const logStreamPrefix = logConfiguration.logStreamPrefix;
+        const logStreamName = this.buildAwsLogsStreamName(
+          logStreamPrefix,
+          containerName,
+          taskId,
+        );
+        const cloudWatchLogsConsoleUrl = this.buildCloudWatchLogsConsoleUrl(
+          logGroup,
+          logStreamName,
+        );
 
-      const taskId = this.extractTaskId(taskArn);
-      const logConfiguration = await this.resolveAwsLogsConfiguration(
-        taskDefinition,
-        containerName,
-      );
-      const logGroup = logConfiguration.logGroup;
-      const logStreamPrefix = logConfiguration.logStreamPrefix;
-      const logStreamName = this.buildAwsLogsStreamName(
-        logStreamPrefix,
-        containerName,
-        taskId,
-      );
-      const cloudWatchLogsConsoleUrl = this.buildCloudWatchLogsConsoleUrl(
-        logGroup,
-        logStreamName,
-      );
+        const launchResult: MarathonMatchScorerTaskLaunchResult = {
+          taskArn,
+          taskId,
+          cluster,
+          containerName,
+          taskDefinition,
+          logGroup,
+          logStreamPrefix,
+          logStreamName,
+          cloudWatchLogsConsoleUrl,
+        };
 
-      const launchResult: MarathonMatchScorerTaskLaunchResult = {
-        taskArn,
-        taskId,
-        cluster,
-        containerName,
-        taskDefinition,
-        logGroup,
-        logStreamPrefix,
-        logStreamName,
-        cloudWatchLogsConsoleUrl,
-      };
+        this.logger.log({
+          message: 'Launched ECS scorer task',
+          challengeId,
+          submissionId,
+          memberId: memberId ?? null,
+          taskDefinition,
+          cluster,
+          taskArn,
+          taskId,
+          logGroup: logGroup ?? null,
+          logStreamPrefix: logStreamPrefix ?? null,
+          logStreamName: logStreamName ?? null,
+          cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
+          activeScorerTaskCountBeforeLaunch: launchableActiveTasks.length,
+          maxConcurrentScorerTasks,
+        });
 
-      this.logger.log({
-        message: 'Launched ECS scorer task',
-        challengeId,
-        submissionId,
-        taskDefinition,
-        cluster,
-        taskArn,
-        taskId,
-        logGroup: logGroup ?? null,
-        logStreamPrefix: logStreamPrefix ?? null,
-        logStreamName: logStreamName ?? null,
-        cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
+        this.logger.log({
+          message: 'Submission to ECS runner log mapping',
+          submissionId,
+          challengeId,
+          taskArn,
+          taskId,
+          cluster,
+          containerName,
+          logGroup: logGroup ?? null,
+          logStreamPrefix: logStreamPrefix ?? null,
+          logStreamName: logStreamName ?? null,
+          cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
+        });
+
+        await this.persistSubmissionRunnerLogMapping({
+          challengeId,
+          submissionId,
+          scoringPhase,
+          launchResult,
+        });
+
+        return launchResult;
       });
-
-      this.logger.log({
-        message: 'Submission to ECS runner log mapping',
-        submissionId,
-        challengeId,
-        taskArn,
-        taskId,
-        cluster,
-        containerName,
-        logGroup: logGroup ?? null,
-        logStreamPrefix: logStreamPrefix ?? null,
-        logStreamName: logStreamName ?? null,
-        cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
-      });
-
-      await this.persistSubmissionRunnerLogMapping({
-        challengeId,
-        submissionId,
-        scoringPhase,
-        launchResult,
-      });
-
-      return launchResult;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -314,6 +398,359 @@ export class EcsService {
         `Failed to describe ECS task ${normalizedTaskArn}: ${errorMessage}`,
       );
     }
+  }
+
+  /**
+   * Serializes scorer task launch decisions in this API process so concurrent
+   * requests cannot all pass the active-task check before calling ECS RunTask.
+   * @param operation Launch decision and side effects to run under the lock.
+   * @returns Operation result.
+   */
+  private async runWithScorerLaunchLock<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previousLock = this.scorerLaunchLock;
+    let releaseLock: () => void = () => undefined;
+    this.scorerLaunchLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+
+    await previousLock;
+    try {
+      return await operation();
+    } finally {
+      releaseLock();
+    }
+  }
+
+  /**
+   * Retrieves the M2M token injected into trusted ECS runner container env.
+   * @returns Access token for downstream API calls made by the runner.
+   * @throws Error when token retrieval fails or returns an empty token.
+   */
+  private async getM2MTokenForScorerLaunch(): Promise<string> {
+    let token: string;
+    try {
+      token = await this.m2mService.getM2MToken();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to get M2M token for ECS task launch: ${errorMessage}`,
+      );
+    }
+
+    if (!token) {
+      throw new Error('Failed to get M2M token for ECS task launch.');
+    }
+
+    return token;
+  }
+
+  /**
+   * Resolves the configured global pending/running scorer task cap.
+   * @returns Positive integer cap. Defaults to 20.
+   * @throws Error when ECS_SCORER_MAX_CONCURRENT_TASKS is not a positive integer.
+   */
+  private getMaxConcurrentScorerTasks(): number {
+    const rawLimit = process.env.ECS_SCORER_MAX_CONCURRENT_TASKS?.trim();
+    if (!rawLimit) {
+      return 20;
+    }
+
+    const parsedLimit = Number(rawLimit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+      throw new Error(
+        'ECS_SCORER_MAX_CONCURRENT_TASKS must be a positive integer.',
+      );
+    }
+
+    return parsedLimit;
+  }
+
+  /**
+   * Lists active scorer tasks for the configured task family and container.
+   * @param cluster ECS cluster name or ARN.
+   * @param taskDefinitionName Task definition family configured for scoring.
+   * @param containerName Runner container name whose overrides identify scorer tasks.
+   * @returns Active scorer task summaries parsed from ECS task overrides.
+   */
+  private async listActiveScorerTasks(
+    cluster: string,
+    taskDefinitionName: string,
+    containerName: string,
+  ): Promise<ActiveScorerTask[]> {
+    const taskArns = new Set<string>();
+
+    for (const desiredStatus of ['PENDING', 'RUNNING'] as const) {
+      let nextToken: string | undefined;
+      do {
+        const response = await this.ecsClient.send(
+          new ListTasksCommand({
+            cluster,
+            family: taskDefinitionName,
+            desiredStatus,
+            nextToken,
+          }),
+        );
+
+        for (const taskArn of response.taskArns ?? []) {
+          taskArns.add(taskArn);
+        }
+
+        nextToken = response.nextToken;
+      } while (nextToken);
+    }
+
+    if (taskArns.size === 0) {
+      return [];
+    }
+
+    const activeTasks: ActiveScorerTask[] = [];
+    const taskArnList = Array.from(taskArns);
+    for (let index = 0; index < taskArnList.length; index += 100) {
+      const taskArnBatch = taskArnList.slice(index, index + 100);
+      const response = await this.ecsClient.send(
+        new DescribeTasksCommand({
+          cluster,
+          tasks: taskArnBatch,
+        }),
+      );
+
+      for (const task of response.tasks ?? []) {
+        const activeTask = this.extractActiveScorerTask(
+          cluster,
+          task,
+          containerName,
+        );
+        if (activeTask) {
+          activeTasks.push(activeTask);
+        }
+      }
+    }
+
+    return activeTasks;
+  }
+
+  /**
+   * Converts an ECS task description into active scorer task metadata.
+   * @param cluster ECS cluster used for the task.
+   * @param task ECS task description.
+   * @param containerName Runner container name whose env overrides are inspected.
+   * @returns Active scorer task metadata, or null for stopped/non-scorer tasks.
+   */
+  private extractActiveScorerTask(
+    cluster: string,
+    task: Task,
+    containerName: string,
+  ): ActiveScorerTask | null {
+    if (!task.taskArn || this.isStoppedTaskStatus(task)) {
+      return null;
+    }
+
+    const containerOverrides = task.overrides?.containerOverrides ?? [];
+    const containerOverride =
+      containerOverrides.find((override) => override.name === containerName) ??
+      (containerOverrides.length === 1 ? containerOverrides[0] : undefined);
+    if (!containerOverride) {
+      return null;
+    }
+
+    const environment = this.mapContainerOverrideEnvironment(
+      containerOverride.environment,
+    );
+    const challengeId = environment.get('TESTER_CONFIG_ID');
+    const activeSubmissionId = environment.get('SUBMISSION_ID');
+    if (!challengeId || !activeSubmissionId) {
+      return null;
+    }
+
+    return {
+      taskArn: task.taskArn,
+      taskId: this.extractTaskId(task.taskArn),
+      cluster,
+      containerName,
+      taskDefinition: task.taskDefinitionArn,
+      lastStatus: task.lastStatus,
+      desiredStatus: task.desiredStatus,
+      challengeId,
+      submissionId: activeSubmissionId,
+      memberId: environment.get('MEMBER_ID'),
+      phaseConfigType: environment.get('PHASE_CONFIG_TYPE'),
+    };
+  }
+
+  /**
+   * Determines whether an ECS task has already begun or completed shutdown.
+   * @param task ECS task description.
+   * @returns True when the task should no longer count against launch capacity.
+   */
+  private isStoppedTaskStatus(task: Task): boolean {
+    const desiredStatus = task.desiredStatus?.trim().toUpperCase();
+    const lastStatus = task.lastStatus?.trim().toUpperCase();
+    return desiredStatus === 'STOPPED' || lastStatus === 'STOPPED';
+  }
+
+  /**
+   * Builds a name/value lookup from ECS container override environment entries.
+   * @param environment Container override environment from ECS DescribeTasks.
+   * @returns Map keyed by environment variable name.
+   */
+  private mapContainerOverrideEnvironment(
+    environment?: Array<{ name?: string; value?: string }>,
+  ): Map<string, string> {
+    const values = new Map<string, string>();
+    for (const entry of environment ?? []) {
+      const name = entry.name?.trim();
+      const value = entry.value?.trim();
+      if (name && value) {
+        values.set(name, value);
+      }
+    }
+    return values;
+  }
+
+  /**
+   * Stops older active scorer tasks for the same challenge/member before the
+   * new submission is launched.
+   * @param cluster ECS cluster name or ARN.
+   * @param activeTasks Currently active scorer tasks.
+   * @param input New submission identity.
+   * @returns Active task list excluding tasks that were asked to stop.
+   */
+  private async stopSupersededMemberScorerTasks(
+    cluster: string,
+    activeTasks: ActiveScorerTask[],
+    input: { challengeId: string; submissionId: string; memberId?: string },
+  ): Promise<ActiveScorerTask[]> {
+    const memberId = input.memberId?.trim();
+    if (!memberId) {
+      return activeTasks;
+    }
+
+    const supersededTasks = activeTasks.filter(
+      (task) =>
+        task.challengeId === input.challengeId &&
+        task.memberId === memberId &&
+        task.submissionId !== input.submissionId,
+    );
+
+    if (supersededTasks.length === 0) {
+      return activeTasks;
+    }
+
+    for (const task of supersededTasks) {
+      await this.ecsClient.send(
+        new StopTaskCommand({
+          cluster,
+          task: task.taskArn,
+          reason: `Superseded by newer Marathon Match submission ${input.submissionId} for challenge ${input.challengeId}.`,
+        }),
+      );
+      this.logger.log({
+        message: 'Stopped superseded ECS scorer task',
+        challengeId: input.challengeId,
+        memberId,
+        supersededSubmissionId: task.submissionId,
+        replacementSubmissionId: input.submissionId,
+        taskArn: task.taskArn,
+        taskId: task.taskId,
+      });
+    }
+
+    const stoppedTaskArns = new Set(
+      supersededTasks.map((task) => task.taskArn),
+    );
+    return activeTasks.filter((task) => !stoppedTaskArns.has(task.taskArn));
+  }
+
+  /**
+   * Finds an active scorer task for the same challenge, submission, and phase.
+   * @param activeTasks Currently active scorer tasks.
+   * @param challengeId Challenge ID about to be launched.
+   * @param submissionId Submission ID about to be launched.
+   * @param phaseConfigType Phase config type about to be launched.
+   * @returns Matching active task when a duplicate launch should be skipped.
+   */
+  private findDuplicateActiveScorerTask(
+    activeTasks: ActiveScorerTask[],
+    challengeId: string,
+    submissionId: string,
+    phaseConfigType: string,
+  ): ActiveScorerTask | undefined {
+    const normalizedPhaseConfigType =
+      this.normalizePhaseConfigTypeValue(phaseConfigType);
+    return activeTasks.find((task) => {
+      if (
+        task.challengeId !== challengeId ||
+        task.submissionId !== submissionId
+      ) {
+        return false;
+      }
+
+      const activePhaseConfigType = this.normalizePhaseConfigTypeValue(
+        task.phaseConfigType,
+      );
+      return (
+        !activePhaseConfigType ||
+        activePhaseConfigType === normalizedPhaseConfigType
+      );
+    });
+  }
+
+  /**
+   * Builds launch metadata for an already-running duplicate scorer task.
+   * @param activeTask Existing active scorer task.
+   * @param fallbackTaskDefinition Configured task definition name:revision.
+   * @param containerName Runner container name.
+   * @returns Launch result-compatible metadata with reusedExistingTask set.
+   */
+  private async buildLaunchResultFromActiveTask(
+    activeTask: ActiveScorerTask,
+    fallbackTaskDefinition: string,
+    containerName: string,
+  ): Promise<MarathonMatchScorerTaskLaunchResult> {
+    const taskDefinitionForLogLookup =
+      activeTask.taskDefinition ?? fallbackTaskDefinition;
+    const logConfiguration = await this.resolveAwsLogsConfiguration(
+      taskDefinitionForLogLookup,
+      containerName,
+    );
+    const logGroup = logConfiguration.logGroup;
+    const logStreamPrefix = logConfiguration.logStreamPrefix;
+    const logStreamName = this.buildAwsLogsStreamName(
+      logStreamPrefix,
+      containerName,
+      activeTask.taskId,
+    );
+
+    return {
+      taskArn: activeTask.taskArn,
+      taskId: activeTask.taskId,
+      cluster: activeTask.cluster,
+      containerName,
+      taskDefinition: fallbackTaskDefinition,
+      reusedExistingTask: true,
+      logGroup,
+      logStreamPrefix,
+      logStreamName,
+      cloudWatchLogsConsoleUrl: this.buildCloudWatchLogsConsoleUrl(
+        logGroup,
+        logStreamName,
+      ),
+    };
+  }
+
+  /**
+   * Normalizes scorer phase config types for duplicate-task comparisons.
+   * @param configType Raw phase config type.
+   * @returns Uppercase config type, or undefined when absent.
+   */
+  private normalizePhaseConfigTypeValue(
+    configType?: string,
+  ): string | undefined {
+    const normalized = configType?.trim().toUpperCase();
+    return normalized || undefined;
   }
 
   private getRequiredEnv(envName: string): string {

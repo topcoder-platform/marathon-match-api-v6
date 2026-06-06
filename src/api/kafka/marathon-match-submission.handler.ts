@@ -110,6 +110,7 @@ export class MarathonMatchSubmissionHandler
       const submissionPayload = this.resolveSubmissionPayload(message);
       const submissionId = (submissionPayload.submissionId ?? '').trim();
       const challengeId = (submissionPayload.challengeId ?? '').trim();
+      const memberId = (submissionPayload.memberId ?? '').trim();
       if (!submissionId || !challengeId) {
         throw new Error(
           'Missing required message fields: submissionId and challengeId are required.',
@@ -179,6 +180,8 @@ export class MarathonMatchSubmissionHandler
             startSeed: matchingPhaseConfig.startSeed,
             numberOfTests: matchingPhaseConfig.numberOfTests,
           },
+          undefined,
+          { memberId },
         );
         this.logSubmissionRunnerMapping(
           challengeId,

@@ -1,0 +1,306 @@
+import {
+  DescribeTaskDefinitionCommand,
+  DescribeTasksCommand,
+  ListTasksCommand,
+  RunTaskCommand,
+  StopTaskCommand,
+} from '@aws-sdk/client-ecs';
+jest.mock('./prisma.service', () => ({
+  PrismaService: class PrismaService {},
+}));
+
+import { EcsService } from './ecs.service';
+import { LoggerService } from './logger.service';
+
+describe('EcsService', () => {
+  const originalEnv = process.env;
+  const mockLogger = {
+    log: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  };
+
+  const createService = () => {
+    const m2mService = {
+      getM2MToken: jest.fn().mockResolvedValue('m2m-token'),
+    };
+    const prisma = {
+      submissionRunnerLog: {
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+    };
+
+    jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
+
+    const service = new EcsService(m2mService as never, prisma as never);
+    const send = jest.fn();
+    (service as any).ecsClient.send = send;
+
+    return {
+      service,
+      m2mService,
+      prisma,
+      send,
+    };
+  };
+
+  const baseTaskConfig = {
+    taskDefinitionName: 'mm-ecs-runner',
+    taskDefinitionVersion: '7',
+  };
+
+  const basePhaseConfig = {
+    configType: 'PROVISIONAL',
+    startSeed: BigInt(1),
+    numberOfTests: 10,
+  };
+
+  const activeTask = (overrides: {
+    taskArn?: string;
+    challengeId?: string;
+    submissionId?: string;
+    memberId?: string;
+    phaseConfigType?: string;
+  }) => ({
+    taskArn:
+      overrides.taskArn ??
+      'arn:aws:ecs:us-east-1:123456789012:task/cluster/active-task',
+    taskDefinitionArn:
+      'arn:aws:ecs:us-east-1:123456789012:task-definition/mm-ecs-runner:7',
+    lastStatus: 'RUNNING',
+    desiredStatus: 'RUNNING',
+    overrides: {
+      containerOverrides: [
+        {
+          name: 'tc-mm-runner',
+          environment: [
+            {
+              name: 'TESTER_CONFIG_ID',
+              value: overrides.challengeId ?? 'challenge-1',
+            },
+            {
+              name: 'SUBMISSION_ID',
+              value: overrides.submissionId ?? 'submission-1',
+            },
+            {
+              name: 'MEMBER_ID',
+              value: overrides.memberId ?? 'member-1',
+            },
+            {
+              name: 'PHASE_CONFIG_TYPE',
+              value: overrides.phaseConfigType ?? 'PROVISIONAL',
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env = {
+      ...originalEnv,
+      AWS_REGION: 'us-east-1',
+      ECS_CLUSTER: 'cluster-1',
+      ECS_CONTAINER_NAME: 'tc-mm-runner',
+      ECS_SUBNETS: 'subnet-1,subnet-2',
+      ECS_SECURITY_GROUPS: 'sg-1',
+      MARATHON_MATCH_API_URL: 'https://api.example.com',
+      REVIEW_TYPE_ID: 'review-type-1',
+      ECS_SCORER_MAX_CONCURRENT_TASKS: '20',
+    };
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    process.env = originalEnv;
+  });
+
+  it('reuses an active task for the same challenge, submission, and phase', async () => {
+    const { service, m2mService, prisma, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/active-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [activeTask({})],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({
+          taskDefinition: {
+            containerDefinitions: [
+              {
+                name: 'tc-mm-runner',
+                logConfiguration: {
+                  options: {
+                    'awslogs-group': '/ecs/mm-runner',
+                    'awslogs-stream-prefix': 'ecs',
+                  },
+                },
+              },
+            ],
+          },
+        });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    const result = await service.launchScorerTask(
+      'challenge-1',
+      'submission-1',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+
+    expect(result.reusedExistingTask).toBe(true);
+    expect(result.taskId).toBe('active-task');
+    expect(result.logStreamName).toBe('ecs/tc-mm-runner/active-task');
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(
+      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
+    ).toBe(false);
+    expect(prisma.submissionRunnerLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          taskArn:
+            'arn:aws:ecs:us-east-1:123456789012:task/cluster/active-task',
+        },
+      }),
+    );
+  });
+
+  it('stops older active tasks for the same challenge and member before launching', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+              submissionId: 'old-submission',
+            }),
+          ],
+        });
+      }
+      if (command instanceof StopTaskCommand) {
+        return Promise.resolve({});
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/new-task',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({ taskDefinition: {} });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await service.launchScorerTask(
+      'challenge-1',
+      'new-submission',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+
+    const sentCommands = send.mock.calls.map((call) => call[0] as unknown);
+    const stopCommand = sentCommands.find(
+      (command): command is StopTaskCommand =>
+        command instanceof StopTaskCommand,
+    );
+    expect(stopCommand?.input).toEqual(
+      expect.objectContaining({
+        cluster: 'cluster-1',
+        task: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+      }),
+    );
+
+    const runCommand = sentCommands.find(
+      (command): command is RunTaskCommand => command instanceof RunTaskCommand,
+    );
+    expect(
+      runCommand?.input.overrides?.containerOverrides?.[0]?.environment,
+    ).toEqual(
+      expect.arrayContaining([{ name: 'MEMBER_ID', value: 'member-1' }]),
+    );
+  });
+
+  it('blocks new launches when the global scorer task cap is reached', async () => {
+    process.env.ECS_SCORER_MAX_CONCURRENT_TASKS = '1';
+    const { service, m2mService, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/active-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [
+            activeTask({
+              memberId: 'member-2',
+              submissionId: 'other-submission',
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await expect(
+      service.launchScorerTask(
+        'challenge-1',
+        'submission-1',
+        baseTaskConfig,
+        basePhaseConfig,
+        undefined,
+        { memberId: 'member-1' },
+      ),
+    ).rejects.toThrow('ECS scorer task concurrency limit reached (1/1)');
+
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(
+      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
+    ).toBe(false);
+  });
+});

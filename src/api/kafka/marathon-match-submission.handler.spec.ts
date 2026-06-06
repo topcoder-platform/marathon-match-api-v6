@@ -140,6 +140,8 @@ describe('MarathonMatchSubmissionHandler', () => {
         startSeed: BigInt(1),
         numberOfTests: 10,
       },
+      undefined,
+      { memberId: 'member-1' },
     );
     expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
       2,
@@ -154,6 +156,8 @@ describe('MarathonMatchSubmissionHandler', () => {
         startSeed: BigInt(500),
         numberOfTests: 20,
       },
+      undefined,
+      { memberId: 'member-1' },
     );
   });
 });
