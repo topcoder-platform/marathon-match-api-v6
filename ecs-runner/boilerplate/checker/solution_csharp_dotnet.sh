@@ -12,9 +12,18 @@ if test -z "${SOURCE_EXTENSION}"; then
   fi
 fi
 
+if test "${SOURCE_EXTENSION}" = "cs_net7"; then
+  TARGET_FRAMEWORK=net7.0
+elif test "${SOURCE_EXTENSION}" = "cs_net10"; then
+  TARGET_FRAMEWORK=net10.0
+else
+  echo "Unsupported .NET C# source extension: ${SOURCE_EXTENSION}"
+  exit 1
+fi
+
 echo '<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>'${TARGET_FRAMEWORK}'</TargetFramework>
     <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

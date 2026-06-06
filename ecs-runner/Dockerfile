@@ -11,6 +11,8 @@ RUN mvn -B -ntp clean package -DskipTests
 # Runtime stage
 FROM eclipse-temurin:8-jdk-noble
 
+ARG DOTNET_7_SDK_VERSION=7.0.410
+
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_TOOLCHAIN=stable
@@ -35,6 +37,9 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_7_SDK_VERSION}" --install-dir /usr/lib/dotnet --no-path \
+    && rm /tmp/dotnet-install.sh \
     && rm -rf /var/lib/apt/lists/* \
     && dotnet --info >/dev/null \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
