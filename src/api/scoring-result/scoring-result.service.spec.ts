@@ -1066,4 +1066,136 @@ describe('ScoringResultService', () => {
       }),
     );
   });
+
+  it('groups relative reviews by extracted submission ID and member identity', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          submissionId: 'member-latest',
+          member: {
+            id: 'member-1',
+            handle: 'competitor',
+          },
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          reviewSummations: [
+            {
+              id: 'member-latest-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          submissionId: 'member-older',
+          member: {
+            id: 'member-1',
+            handle: 'competitor',
+          },
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummations: [
+            {
+              id: 'member-older-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'member-latest',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
+
+  it('prefers explicitly latest relative reviews before timestamp fallback', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'newer-by-date',
+          memberId: 'member-1',
+          isLatest: false,
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          reviewSummation: [
+            {
+              id: 'newer-by-date-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'marked-latest',
+          memberId: 'member-1',
+          isLatest: true,
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'marked-latest-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'marked-latest',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
 });
