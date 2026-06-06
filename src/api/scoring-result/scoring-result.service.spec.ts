@@ -1066,4 +1066,136 @@ describe('ScoringResultService', () => {
       }),
     );
   });
+
+  it('excludes the current member from relative scoring by handle when memberId is missing', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'older-current-member-submission',
+          memberHandle: 'eulerscheZahl',
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'older-current-member-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'other-member-submission',
+          memberHandle: 'other',
+          submittedDate: '2026-05-28T15:22:12.605Z',
+          reviewSummation: [
+            {
+              id: 'other-member-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 50 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+      'eulerscheZahl',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'other-member-submission',
+        rawTestScores: [expect.objectContaining({ score: 50 })],
+      }),
+    );
+  });
+
+  it('collapses relative scoring candidates by nested submitter identity', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'older-gaha-submission',
+          submitter: {
+            id: 'gaha-member-id',
+            handle: 'gaha',
+          },
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'older-gaha-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+        {
+          submissionId: 'latest-gaha-submission',
+          submitter: {
+            id: 'gaha-member-id',
+            handle: 'gaha',
+          },
+          createdAt: '2026-05-28T15:23:32.878Z',
+          isLatest: true,
+          reviewSummations: [
+            {
+              id: 'latest-gaha-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'latest-gaha-submission',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
 });
