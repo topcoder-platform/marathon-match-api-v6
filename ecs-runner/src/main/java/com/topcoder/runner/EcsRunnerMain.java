@@ -112,6 +112,8 @@ public class EcsRunnerMain {
     private static final Pattern MEMBER_ARTIFACT_TEST_CASE_SEED_PATTERN = Pattern.compile(
         "(?i)(\\btest\\s*case\\s*#)\\d+"
     );
+    private static final ThreadLocal<List<Path>> DEFERRED_ISOLATED_CLEANUP_PATHS =
+        new ThreadLocal<List<Path>>();
 
     private static String logChallengeId = "<unset>";
     private static String logSubmissionId = "<unset>";
@@ -484,6 +486,8 @@ public class EcsRunnerMain {
      * result back to the trusted parent process over stdout.
      */
     private static int runIsolatedTesterChild(String[] args) {
+        List<Path> deferredCleanupPaths = new ArrayList<Path>();
+        DEFERRED_ISOLATED_CLEANUP_PATHS.set(deferredCleanupPaths);
         try {
             if (args.length != 8) {
                 throw new IllegalArgumentException(
@@ -532,6 +536,9 @@ public class EcsRunnerMain {
                 error
             );
             return 1;
+        } finally {
+            cleanupDeferredIsolatedChildPaths(deferredCleanupPaths);
+            DEFERRED_ISOLATED_CLEANUP_PATHS.remove();
         }
     }
 
@@ -3329,6 +3336,7 @@ public class EcsRunnerMain {
             );
         }
         Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
+        boolean cleanupDeferred = deferIsolatedChildCleanup(compileWorkDir);
         Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
 
         try {
@@ -3433,7 +3441,53 @@ public class EcsRunnerMain {
                 new ArrayList<Map<String, Object>>()
             );
         } finally {
-            deletePathRecursively(compileWorkDir);
+            if (!cleanupDeferred) {
+                deletePathRecursively(compileWorkDir);
+            }
+        }
+    }
+
+    /**
+     * Defers an isolated child temporary path until the child has emitted its
+     * final success or failure output.
+     *
+     * <p>Compiler start failures include the working directory in the JVM error
+     * message. Cleaning that directory from the generic runner's inner
+     * {@code finally} block before the child reports the failure makes logs look
+     * like cleanup raced ahead of compilation. Deferring child-scoped paths keeps
+     * cleanup after compilation/execution and after the child has reported its
+     * result.
+     *
+     * @param path Temporary file or directory to delete at child process exit.
+     * @return {@code true} when cleanup was registered with the child scope;
+     *         {@code false} when no child cleanup scope is active.
+     */
+    private static boolean deferIsolatedChildCleanup(Path path) {
+        if (path == null) {
+            return false;
+        }
+
+        List<Path> cleanupPaths = DEFERRED_ISOLATED_CLEANUP_PATHS.get();
+        if (cleanupPaths == null) {
+            return false;
+        }
+
+        cleanupPaths.add(path);
+        return true;
+    }
+
+    /**
+     * Deletes temporary paths registered for the isolated child process.
+     *
+     * @param cleanupPaths Child-scoped paths collected during tester execution.
+     */
+    private static void cleanupDeferredIsolatedChildPaths(List<Path> cleanupPaths) {
+        if (cleanupPaths == null || cleanupPaths.isEmpty()) {
+            return;
+        }
+
+        for (int index = cleanupPaths.size() - 1; index >= 0; index--) {
+            deletePathRecursively(cleanupPaths.get(index));
         }
     }
 
