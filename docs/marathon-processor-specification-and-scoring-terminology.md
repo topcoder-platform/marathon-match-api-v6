@@ -38,10 +38,13 @@ The runner normalizes the selected source file into a temporary compile workspac
 
 ### C++
 
-C++ submissions are compiled with `g++` using GNU++23:
+C++ submissions are compiled with `g++` using GNU++23 and a fixed
+`x86-64` architecture target with generic tuning. The runner does not use
+`-march=native`, so binaries do not depend on the specific Fargate host that
+compiled the submission.
 
 ```bash
-g++ -std=gnu++23 -O3 -march=native Solution.cpp -o Solution
+g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic Solution.cpp -o Solution
 ./Solution
 ```
 
