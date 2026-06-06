@@ -148,6 +148,17 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-77-io-uring.zip",
+      "source": {
+        "fileName": "submission-issue-77-io-uring.zip",
+        "language": "cpp",
+        "securityRegression": "Issue #77",
+        "validates": "The submitted solution exits with failure if io_uring_setup succeeds; a scored run means the ECS runner blocks io_uring before solution execution."
+      }
     }
   ]
 }
