@@ -150,7 +150,6 @@ public class EcsRunnerMain {
             accessToken = getRequiredEnv("ACCESS_TOKEN");
             accessTokenProvider = buildAccessTokenProvider(accessToken);
             boolean debugLogAccessToken = isTruthyEnv("DEBUG_LOG_ACCESS_TOKEN");
-            boolean debugLogFullAccessToken = isTruthyEnv("DEBUG_LOG_FULL_ACCESS_TOKEN");
             marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
@@ -183,7 +182,7 @@ public class EcsRunnerMain {
             );
 
             if (debugLogAccessToken) {
-                logAccessTokenDebug(accessToken, debugLogFullAccessToken);
+                logAccessTokenDebug(accessToken);
             }
 
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
@@ -1641,47 +1640,28 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Emits token debugging information for auth troubleshooting.
+     * Emits redacted token debugging information for auth troubleshooting.
      * @param accessToken Access token provided to the ECS runner.
-     * @param logFullToken Whether to print the full token value.
      */
-    private static void logAccessTokenDebug(String accessToken, boolean logFullToken) {
+    private static void logAccessTokenDebug(String accessToken) {
         logInfo("auth.token", "ACCESS_TOKEN length=" + accessToken.length());
         logInfo(
             "auth.token",
-            "ACCESS_TOKEN value=" + (logFullToken ? accessToken : redactToken(accessToken))
+            "ACCESS_TOKEN value=" + redactToken(accessToken)
         );
-
-        String headerJson = decodeJwtSection(accessToken, 0);
-        if (headerJson != null) {
-            logInfo("auth.token", "ACCESS_TOKEN header=" + headerJson);
-        } else {
-            logWarn("auth.token", "ACCESS_TOKEN header=<unavailable>");
-        }
-
-        String payloadJson = decodeJwtSection(accessToken, 1);
-        if (payloadJson != null) {
-            logInfo("auth.token", "ACCESS_TOKEN payload=" + payloadJson);
-        } else {
-            logWarn("auth.token", "ACCESS_TOKEN payload=<unavailable>");
-        }
     }
 
     /**
-     * Produces a partially redacted token string suitable for logs.
+     * Produces a token redaction marker that exposes no credential characters.
      * @param token Raw token value.
-     * @returns Token preview with middle characters masked.
+     * @returns Redaction marker with token length only.
      */
     private static String redactToken(String token) {
         if (token == null || token.isEmpty()) {
             return "<empty>";
         }
 
-        if (token.length() <= 24) {
-            return "<redacted-length-" + token.length() + ">";
-        }
-
-        return token.substring(0, 12) + "..." + token.substring(token.length() - 8);
+        return "<redacted-length-" + token.length() + ">";
     }
 
     /**
