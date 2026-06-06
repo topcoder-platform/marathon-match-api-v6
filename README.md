@@ -29,7 +29,7 @@ The service is configured via environment variables.
 | --------------------------- | -------- | -------------------------------------- | ------------------------------------------------------------- |
 | `PORT`                      | No       | `3000`                                 | HTTP listen port                                              |
 | `NODE_ENV`                  | No       | (unset)                                | Token-expiration behavior and Prisma logging behavior         |
-| `CORS_ALLOWED_ORIGIN`       | No       | Built-in localhost/topcoder regex list | CORS origin matching                                          |
+| `CORS_ALLOWED_ORIGIN`       | No       | Built-in localhost/topcoder regex list | Exact CORS matching for a full browser Origin value           |
 | `DATABASE_URL`              | Yes      | None                                   | Prisma + pg-boss Postgres connection                          |
 | `POSTGRES_SCHEMA`           | No       | `public`                               | Prisma schema name used in runtime logging/connection context |
 | `MM_SERVICE_PRISMA_TIMEOUT` | No       | `10000`                                | Prisma transaction timeout (ms)                               |
