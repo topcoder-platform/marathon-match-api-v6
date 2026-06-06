@@ -108,6 +108,11 @@ interface RelativeReviewRecord {
   rawTestScores: RelativeTestScoreEntry[];
 }
 
+interface RelativeReviewPayload {
+  reviewObject: Record<string, unknown>;
+  payload: ReviewSummationPayload;
+}
+
 interface SystemReviewCompletionContext {
   challengeId: string;
   submissionId: string;
@@ -502,23 +507,29 @@ export class ScoringResultService {
       settings.scoreDirection,
     );
 
-    const relativeReviewPayloads = reviewsToRecompute.map((reviewRecord) =>
-      this.buildRelativeReviewPayload(
-        reviewRecord,
-        bestScores,
-        settings.scoreDirection,
-        fallbackScorecardId,
-        testPhase,
-      ),
-    );
+    const relativeReviewPayloads =
+      this.sortRelativeReviewPayloadsForLeaderboard(
+        reviewsToRecompute.map((reviewRecord) =>
+          this.buildRelativeReviewPayload(
+            reviewRecord,
+            bestScores,
+            settings.scoreDirection,
+            fallbackScorecardId,
+            testPhase,
+          ),
+        ),
+      );
 
-    const currentReviewPayload =
-      relativeReviewPayloads[relativeReviewPayloads.length - 1];
+    const currentReviewPayload = relativeReviewPayloads.find(
+      (reviewPayload) =>
+        reviewPayload.payload.submissionId === payload.submissionId,
+    );
 
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
       const reviewId = this.asString(reviewPayload.reviewObject.id);
-      const isCurrentReview = index === relativeReviewPayloads.length - 1;
+      const isCurrentReview =
+        reviewPayload.payload.submissionId === payload.submissionId;
 
       if (!reviewId && !isCurrentReview) {
         this.logger.warn({
@@ -1489,10 +1500,7 @@ export class ScoringResultService {
     scoreDirection: ScoreDirection,
     fallbackScorecardId: string | undefined,
     testPhase: string,
-  ): {
-    reviewObject: Record<string, unknown>;
-    payload: ReviewSummationPayload;
-  } {
+  ): RelativeReviewPayload {
     let totalTests = 0;
     let failedTests = 0;
     let aggregateScore = 0;
@@ -1577,6 +1585,25 @@ export class ScoringResultService {
         testPhase,
       }),
     };
+  }
+
+  /**
+   * Orders recomputed relative review summation writes to match leaderboard order.
+   * Review API derives rank values from persisted summation order, so passing
+   * higher aggregate scores must be written before lower or failed results.
+   * @param reviewPayloads Recomputed relative review summation payloads.
+   * @returns A new payload list sorted by leaderboard position.
+   */
+  private sortRelativeReviewPayloadsForLeaderboard(
+    reviewPayloads: RelativeReviewPayload[],
+  ): RelativeReviewPayload[] {
+    return [...reviewPayloads].sort((left, right) => {
+      if (left.payload.isPassing !== right.payload.isPassing) {
+        return left.payload.isPassing ? -1 : 1;
+      }
+
+      return right.payload.aggregateScore - left.payload.aggregateScore;
+    });
   }
 
   /**
