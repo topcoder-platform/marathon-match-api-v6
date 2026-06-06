@@ -40,6 +40,9 @@ The service is configured via environment variables.
 | ------------------------ | ---------------------------- | --------------------------------------- | -------------------------------- |
 | `AUTH_SECRET`            | Yes (for JWT validation)     | None                                    | tc-core JWT authenticator secret |
 | `VALID_ISSUERS`          | No                           | Topcoder/Auth0 issuer JSON array string | Accepted JWT issuers             |
+| `AUTHORIZATION_SESSION_VALIDATION_ENABLED` | No                           | `true`                                  | Enables Identity API active-session validation for user JWTs |
+| `AUTHORIZATION_VALIDATION_URL`             | No                           | Derived from `https://api.topcoder(-dev).com` token issuers | Full Identity API `authorizations/1` URL used to reject logged-out user tokens |
+| `AUTHORIZATION_VALIDATION_TIMEOUT_MS`      | No                           | `3000`                                  | Timeout for active-session validation requests |
 | `AUTH0_ISSUER`           | No                           | `https://topcoder-dev.auth0.com/`       | Legacy JWT config field          |
 | `TOKEN_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | Legacy JWT config field          |
 | `AUTH0_URL`              | No                           | `http://localhost:4000/oauth/token`     | M2M token endpoint               |
