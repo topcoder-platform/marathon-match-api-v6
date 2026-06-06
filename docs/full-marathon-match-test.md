@@ -76,7 +76,7 @@ The tester source can be a standard Topcoder Marathon tester with a `main(...)` 
 
 For advanced create payload fields, add `challenge.createPayload` with any valid `POST /v6/challenges` body fields. The script still applies the configured Registration and Submission duration overrides.
 
-This repo includes a `scripts/fixtures/Blocks` example fixture for the TCO22 Blocks Marathon Match. Its manifest includes all sample submissions from the fixture set, including `submission-winner.zip`.
+This repo includes a `scripts/fixtures/Blocks` example fixture for the TCO22 Blocks Marathon Match. Its manifest includes all sample submissions from the fixture set, including `submission-winner.zip`, plus focused runner regression submissions such as `submission-issue-21-filesystem-leak.zip`.
 
 ## Create Fixtures from Production
 

@@ -153,6 +153,7 @@ The ECS task still needs trusted outbound access to fetch challenge config, down
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
 - Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept root-only, so submitted code cannot read them from `/tmp`.
+- Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
 - Native wrappers block creation of non-`AF_UNIX` sockets for the child JVM and submitted solution processes, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
