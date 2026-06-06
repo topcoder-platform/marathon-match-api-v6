@@ -82,6 +82,9 @@ public class EcsRunnerMain {
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final double FAILED_TEST_SCORE = -1.0;
+    private static final double MAX_SCORE_VALUE = Long.MAX_VALUE;
+    private static final String MAX_SCORE_VALUE_LABEL = Long.toString(Long.MAX_VALUE);
     private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
         ".cpp",
         ".java",
@@ -3358,8 +3361,17 @@ public class EcsRunnerMain {
                 );
 
                 double seedScore = testResult.getScore();
-                totalScore += seedScore;
                 String seedError = testResult.getError();
+                String scoreValidationError = validateScoreValue(
+                    seedScore,
+                    "Test Case #" + testCaseNumber + " score"
+                );
+                if (scoreValidationError != null) {
+                    logWarn("tester.score", scoreValidationError);
+                    seedScore = FAILED_TEST_SCORE;
+                    seedError = appendErrorMessage(seedError, scoreValidationError);
+                }
+                totalScore += seedScore;
                 if (seedScore < 0 || (seedError != null && !seedError.trim().isEmpty())) {
                     failedTests += 1;
                 }
@@ -3402,6 +3414,14 @@ public class EcsRunnerMain {
             double averageScore = testScores.isEmpty()
                 ? 0.0
                 : totalScore / testScores.size();
+            String averageScoreValidationError = validateScoreValue(
+                averageScore,
+                "Aggregate score"
+            );
+            if (averageScoreValidationError != null) {
+                logWarn("tester.score", averageScoreValidationError);
+                averageScore = FAILED_TEST_SCORE;
+            }
 
             try (BufferedWriter writer = Files.newBufferedWriter(
                 artifactsPublicDir.resolve("output.txt"),
@@ -4087,6 +4107,53 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Validates a score before it is included in runner output or callback JSON.
+     *
+     * <p>Negative values are preserved because Marathon Match uses negative scores as failed
+     * test sentinels. Non-finite values and values larger than Java {@code Long.MAX_VALUE}
+     * cannot be safely persisted by review summations.
+     *
+     * @param score Score value to validate.
+     * @param label Human-readable score context for diagnostics.
+     * @return Error message when invalid, otherwise {@code null}.
+     */
+    private static String validateScoreValue(double score, String label) {
+        if (Double.isNaN(score) || Double.isInfinite(score)) {
+            return label
+                + " is invalid: "
+                + score
+                + ". Scores must be finite and no greater than "
+                + MAX_SCORE_VALUE_LABEL
+                + ".";
+        }
+
+        if (score > MAX_SCORE_VALUE) {
+            return label
+                + " is invalid: "
+                + score
+                + ". Scores must be no greater than "
+                + MAX_SCORE_VALUE_LABEL
+                + ".";
+        }
+
+        return null;
+    }
+
+    /**
+     * Appends a validation error to an existing testcase error string.
+     *
+     * @param existing Existing tester error text, possibly blank.
+     * @param addition Validation error to append.
+     * @return Combined error text.
+     */
+    private static String appendErrorMessage(String existing, String addition) {
+        if (existing == null || existing.trim().isEmpty()) {
+            return addition;
+        }
+        return existing.trim() + "\n" + addition;
+    }
+
+    /**
      * Parses tester return values. Supports numeric score, ScoringResult, and map payloads.
      */
     @SuppressWarnings("unchecked")
@@ -4102,16 +4169,20 @@ public class EcsRunnerMain {
 
         if (runResult instanceof Number) {
             logInfo("tester.result", "runTester returned Number score.");
+            double score = ((Number) runResult).doubleValue();
+            requireValidScoreValue(score, "runTester Number score");
             return new TesterExecutionResult(
-                ((Number) runResult).doubleValue(),
+                score,
                 new LinkedHashMap<String, Object>()
             );
         }
 
         if (runResult instanceof ScoringResult) {
             logInfo("tester.result", "runTester returned ScoringResult object.");
+            double score = ((ScoringResult) runResult).getScore();
+            requireValidScoreValue(score, "runTester ScoringResult score");
             return new TesterExecutionResult(
-                ((ScoringResult) runResult).getScore(),
+                score,
                 new LinkedHashMap<String, Object>()
             );
         }
@@ -4129,6 +4200,7 @@ public class EcsRunnerMain {
                         + testerClassName
                 );
             }
+            requireValidScoreValue(mapScore.doubleValue(), "runTester map score");
 
             logInfo(
                 "tester.result",
@@ -4155,6 +4227,20 @@ public class EcsRunnerMain {
                 + " for class "
                 + testerClassName
         );
+    }
+
+    /**
+     * Throws when a score cannot be safely serialized and persisted.
+     *
+     * @param score Score to validate.
+     * @param label Human-readable score context for diagnostics.
+     * @throws RuntimeException When the score is non-finite or larger than {@code Long.MAX_VALUE}.
+     */
+    private static void requireValidScoreValue(double score, String label) {
+        String validationError = validateScoreValue(score, label);
+        if (validationError != null) {
+            throw new RuntimeException(validationError);
+        }
     }
 
     /**
@@ -4800,6 +4886,7 @@ public class EcsRunnerMain {
             Map<String, Object> currentReview,
             List<Map<String, Object>> impactedReviews
         ) {
+            requireValidScoreValue(score, "TesterExecutionResult score");
             this.score = score;
             this.metadata = metadata == null
                 ? new LinkedHashMap<String, Object>()

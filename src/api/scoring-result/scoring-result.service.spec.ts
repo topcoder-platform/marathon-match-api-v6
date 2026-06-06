@@ -78,6 +78,27 @@ describe('ScoringResultService', () => {
     jest.restoreAllMocks();
   });
 
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['above Long.MAX_VALUE', 1e29],
+  ])(
+    'rejects scorer callbacks with invalid %s scores before writing summations',
+    async (_label, score) => {
+      const { service, m2mService, prisma } = createService();
+
+      await expect(
+        service.processScoringResult({
+          ...basePayload,
+          score,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.marathonMatchConfig.findUnique).not.toHaveBeenCalled();
+      expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects scorer callbacks when the challengeId has no Marathon Match config', async () => {
     const { service, m2mService, prisma } = createService();
 

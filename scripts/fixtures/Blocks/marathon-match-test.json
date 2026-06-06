@@ -148,6 +148,20 @@
         "fileName": "submission-rust-sample.zip",
         "language": "rust"
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-100-invalid-score.zip",
+      "expectedScores": {
+        "provisional": -1,
+        "system": -1
+      },
+      "source": {
+        "fileName": "submission-issue-100-invalid-score.zip",
+        "issue": 100,
+        "behavior": "prints NaN as the first Blocks move to verify invalid scorer output is converted to a failed testcase instead of corrupting review summations"
+      }
     }
   ]
 }
