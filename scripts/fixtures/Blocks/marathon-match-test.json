@@ -143,6 +143,17 @@
     {
       "memberId": "88770029",
       "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-18-config-probe.zip",
+      "submittedDate": "2026-01-01T00:00:00.000Z",
+      "source": {
+        "fileName": "submission-issue-18-config-probe.zip",
+        "issue": "https://github.com/topcoder-platform/marathon-match-api-v6/issues/18",
+        "securityRegression": "Attempts to read /tmp/mm-isolated-scorer-*.json and reports only whether the file is readable, unreadable, or absent."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
       "file": "submissions/submission-rust-sample.zip",
       "source": {
         "fileName": "submission-rust-sample.zip",

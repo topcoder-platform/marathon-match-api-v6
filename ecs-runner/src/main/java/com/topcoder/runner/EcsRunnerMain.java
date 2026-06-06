@@ -505,9 +505,8 @@ public class EcsRunnerMain {
                 "Running isolated tester child for testerClass=" + testerClassName
             );
 
-            ScorerConfig scorerConfig = OBJECT_MAPPER.readValue(
-                scorerConfigPath.toFile(),
-                ScorerConfig.class
+            ScorerConfig scorerConfig = loadAndDeleteIsolatedScorerConfig(
+                scorerConfigPath
             );
             logScorerConfig(scorerConfig);
 
@@ -533,6 +532,28 @@ public class EcsRunnerMain {
             );
             return 1;
         }
+    }
+
+    /**
+     * Loads the short-lived scorer config handoff file and removes it before any
+     * tester or submitted solution code can execute.
+     *
+     * @param scorerConfigPath Root-only scorer config file written by the parent runner.
+     * @return Parsed scorer configuration for the isolated child JVM.
+     * @throws IOException When the config cannot be read or deleted.
+     */
+    private static ScorerConfig loadAndDeleteIsolatedScorerConfig(Path scorerConfigPath)
+        throws IOException {
+        ScorerConfig scorerConfig = OBJECT_MAPPER.readValue(
+            scorerConfigPath.toFile(),
+            ScorerConfig.class
+        );
+        Files.delete(scorerConfigPath);
+        logInfo(
+            "tester.isolated",
+            "Deleted isolated scorer config before tester execution."
+        );
+        return scorerConfig;
     }
 
     /**
