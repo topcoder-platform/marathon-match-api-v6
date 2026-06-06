@@ -1447,6 +1447,8 @@ export class ScoringResultService {
 
   /**
    * Calculates the best raw testcase score currently achieved for each seed.
+   * Error scores, negative sentinel scores, and MINIMIZE zero scores are excluded
+   * so invalid/no-credit results cannot become normalization baselines.
    */
   private computeBestScores(
     reviewRecords: RelativeReviewRecord[],
@@ -1456,7 +1458,11 @@ export class ScoringResultService {
 
     for (const reviewRecord of reviewRecords) {
       for (const testScore of reviewRecord.rawTestScores) {
-        if (testScore.score < 0) {
+        if (
+          testScore.score < 0 ||
+          testScore.error ||
+          (scoreDirection === ScoreDirection.MINIMIZE && testScore.score === 0)
+        ) {
           continue;
         }
 
