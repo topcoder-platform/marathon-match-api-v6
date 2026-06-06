@@ -989,12 +989,13 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Restricts a sensitive root-owned file to the trusted Java runner process.
+     * Restricts a sensitive root-owned file to read-only access by the trusted
+     * Java runner process.
      *
      * <p>This is used for downloaded tester JARs and serialized scorer config.
-     * The submitted solution process runs as {@code scorer}, so owner-only
-     * permissions prevent shell probes from reading those files even when they
-     * can guess the path.
+     * The submitted solution process runs as {@code scorer}, so owner read-only
+     * permissions prevent shell probes from reading or modifying those files
+     * even when they can guess the path.
      *
      * @param path Sensitive regular file to restrict.
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
@@ -1008,8 +1009,7 @@ public class EcsRunnerMain {
             Files.setPosixFilePermissions(
                 path,
                 EnumSet.of(
-                    PosixFilePermission.OWNER_READ,
-                    PosixFilePermission.OWNER_WRITE
+                    PosixFilePermission.OWNER_READ
                 )
             );
         } catch (UnsupportedOperationException ignored) {
