@@ -18,7 +18,7 @@ export interface CompileTesterJobData {
 
 interface MavenCompileResult {
   exitCode: number;
-  stderr: string;
+  output: string;
   timedOut: boolean;
 }
 
@@ -175,11 +175,12 @@ export class TesterCompilationService {
         return;
       }
 
+      const compilerOutput = compileResult.output.trim();
       const timeoutMessage = `Compilation timed out after ${this.compileTimeoutMs}ms.`;
+      const exitCodeMessage = `Compilation failed with exit code ${compileResult.exitCode}.`;
       const failureMessage = compileResult.timedOut
-        ? [timeoutMessage, compileResult.stderr].filter(Boolean).join('\n')
-        : compileResult.stderr ||
-          `Compilation failed with exit code ${compileResult.exitCode}.`;
+        ? [timeoutMessage, compilerOutput].filter(Boolean).join('\n')
+        : [exitCodeMessage, compilerOutput].filter(Boolean).join('\n');
 
       const failedUpdate = await this.prisma.tester.updateMany({
         where: { id: testerId, sourceCode: sourceSnapshot },
@@ -465,10 +466,11 @@ export class TesterCompilationService {
   }
 
   /**
-   * Runs Maven package for the prepared boilerplate project and captures stderr.
+   * Runs Maven package for the prepared boilerplate project and captures
+   * combined stdout/stderr compiler output for user-facing failure details.
    * @param pomPath Absolute path to the temporary `pom.xml` file.
    * @param compileTempDir Writable temp directory used for Maven/JVM temp files.
-   * @returns Compile result including exit code, stderr and timeout state.
+   * @returns Compile result including exit code, combined compiler output, and timeout state.
    */
   private async executeMavenBuild(
     pomPath: string,
@@ -501,12 +503,17 @@ export class TesterCompilationService {
         },
       );
 
+      let stdoutBuffer = '';
       let stderrBuffer = '';
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill('SIGKILL');
       }, this.compileTimeoutMs);
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdoutBuffer += chunk.toString();
+      });
 
       child.stderr.on('data', (chunk: Buffer) => {
         stderrBuffer += chunk.toString();
@@ -518,9 +525,14 @@ export class TesterCompilationService {
 
       child.on('close', (code: number | null) => {
         clearTimeout(timer);
+        const output = [stdoutBuffer, stderrBuffer]
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .join('\n');
+
         resolve({
           exitCode: code ?? -1,
-          stderr: stderrBuffer.trim(),
+          output,
           timedOut,
         });
       });
