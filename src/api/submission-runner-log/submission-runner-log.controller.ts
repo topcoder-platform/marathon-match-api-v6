@@ -4,7 +4,13 @@ import {
   Get,
   Param,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import {
+  RunnerLogAccessRequest,
+  SubmissionRunnerLogAccessGuard,
+} from 'src/shared/guards/submission-runner-log-access.guard';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -62,15 +68,17 @@ export class SubmissionRunnerLogController {
    * Retrieves ECS runner logs for a submission ID.
    * @param submissionId Submission ID.
    * @param query Optional task selection + CloudWatch pagination query.
+   * @param request Request carrying the challenge scope resolved by `SubmissionRunnerLogAccessGuard`.
    * @returns Mapping metadata and CloudWatch log events.
    */
   @Get('/:submissionId/runner-logs')
   @Roles(UserRole.Admin, UserRole.Copilot, UserRole.ProjectManager)
   @Scopes(Scope.ReadMarathonMatch)
+  @UseGuards(SubmissionRunnerLogAccessGuard)
   @ApiOperation({
     summary: 'Get ECS runner logs for a submission',
     description:
-      'Roles: Admin, Copilot, Manager | Scopes: read:marathon-match. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
+      'Roles: Admin, challenge-assigned Copilot/Manager | Scopes: read:marathon-match. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
   })
   @ApiParam({
     name: 'submissionId',
@@ -120,12 +128,14 @@ export class SubmissionRunnerLogController {
   async getRunnerLogs(
     @Param('submissionId') submissionId: string,
     @Query() query: SubmissionRunnerLogsQueryDto,
+    @Req() request: RunnerLogAccessRequest,
   ): Promise<SubmissionRunnerLogsResponse> {
     const options: GetSubmissionRunnerLogsOptions = {
       taskArn: query.taskArn,
       nextToken: query.nextToken,
       startFromHead: this.parseOptionalBoolean(query.startFromHead),
       limit: query.limit,
+      authorizedChallengeId: request.runnerLogAccess?.challengeId,
     };
 
     return this.submissionRunnerLogService.getLogsForSubmission(
