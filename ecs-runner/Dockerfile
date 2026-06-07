@@ -41,13 +41,31 @@ RUN apt-get update \
     && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
     && rustc --version >/dev/null
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin runner
+RUN groupadd --gid 10001 runner \
+    && useradd --create-home --uid 10001 --gid runner --shell /usr/sbin/nologin runner \
+    && groupadd --gid 10002 scorer \
+    && useradd --create-home --uid 10002 --gid scorer --shell /usr/sbin/nologin scorer
 WORKDIR /app
 
 COPY --from=builder /workspace/target/mm-ecs-runner-1.0.0.jar /app/mm-ecs-runner.jar
 COPY scripts/ /app/scripts/
-RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/mm-net-isolate /app/scripts/mm-net-isolate.c \
-    && chmod +x /app/scripts/*.sh /usr/local/bin/mm-net-isolate
+RUN gcc -O2 -Wall -Wextra \
+        -DMM_SKIP_USER_DROP=1 \
+        -DMM_ISOLATED_HOME=\"/root\" \
+        -DMM_ISOLATED_NAME=\"runner-child\" \
+        -o /usr/local/bin/mm-runner-isolate \
+        /app/scripts/mm-net-isolate.c \
+    && gcc -O2 -Wall -Wextra \
+        -DMM_ISOLATED_UID=10002 \
+        -DMM_ISOLATED_GID=10002 \
+        -DMM_ISOLATED_HOME=\"/home/scorer\" \
+        -DMM_ISOLATED_NAME=\"scorer\" \
+        -DMM_SUPERVISE_CHILD=1 \
+        -o /usr/local/bin/mm-scorer-isolate \
+        /app/scripts/mm-net-isolate.c \
+    && chown root:root /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate \
+    && chmod 755 /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate \
+    && chmod +x /app/scripts/*.sh
 
 ENV DOTNET_ROOT=/usr/lib/dotnet
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1

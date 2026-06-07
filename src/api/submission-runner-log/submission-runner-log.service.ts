@@ -12,6 +12,7 @@ export interface GetSubmissionRunnerLogsOptions {
   nextToken?: string;
   limit?: number;
   startFromHead?: boolean;
+  authorizedChallengeId?: string;
 }
 
 export interface SubmissionRunnerLogMapping {
@@ -79,7 +80,7 @@ export class SubmissionRunnerLogService {
   /**
    * Fetches CloudWatch log events for a submission using persisted mapping rows.
    * @param submissionId Submission ID to look up.
-   * @param options Optional paging/task selection options.
+   * @param options Optional paging/task selection and challenge scope options.
    * @returns Mapping metadata and fetched log events.
    * @throws NotFoundException when mapping rows do not exist for the submission.
    */
@@ -92,14 +93,22 @@ export class SubmissionRunnerLogService {
       throw new NotFoundException('submissionId is required.');
     }
 
+    const normalizedChallengeId = options.authorizedChallengeId?.trim();
     const mappings = await this.prisma.submissionRunnerLog.findMany({
-      where: { submissionId: normalizedSubmissionId },
+      where: {
+        submissionId: normalizedSubmissionId,
+        ...(normalizedChallengeId
+          ? { challengeId: normalizedChallengeId }
+          : {}),
+      },
       orderBy: [{ createdAt: 'desc' }],
     });
 
     if (!mappings.length) {
       throw new NotFoundException(
-        `No ECS runner log mapping found for submission ${normalizedSubmissionId}.`,
+        normalizedChallengeId
+          ? `No ECS runner log mapping found for submission ${normalizedSubmissionId} in authorized challenge ${normalizedChallengeId}.`
+          : `No ECS runner log mapping found for submission ${normalizedSubmissionId}.`,
       );
     }
 

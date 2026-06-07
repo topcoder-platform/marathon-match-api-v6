@@ -26,15 +26,13 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.GroupPrincipal;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.UserPrincipal;
-import java.nio.file.attribute.UserPrincipalLookupService;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -66,14 +64,18 @@ public class EcsRunnerMain {
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
     private static final int CHILD_OUTPUT_TAIL_LIMIT = 4000;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final long TOKEN_REFRESH_SKEW_SECONDS = 60L;
     private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
     private static final String ISOLATED_TESTER_RESULT_MARKER =
         "__MM_ISOLATED_TESTER_RESULT__:";
     private static final String ISOLATED_TESTER_PROGRESS_MARKER =
         "__MM_ISOLATED_TESTER_PROGRESS__:";
-    private static final String ISOLATION_WRAPPER_PATH = "/usr/local/bin/mm-net-isolate";
-    private static final String ISOLATED_EXECUTION_USER = "runner";
-    private static final String ISOLATED_EXECUTION_GROUP = "runner";
+    private static final String RUNNER_ISOLATION_WRAPPER_PATH =
+        "/usr/local/bin/mm-runner-isolate";
+    private static final String SCORER_ISOLATION_WRAPPER_PATH =
+        "/usr/local/bin/mm-scorer-isolate";
+    private static final String SCORER_EXECUTION_USER = "scorer";
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
@@ -136,6 +138,7 @@ public class EcsRunnerMain {
         String testPhase = "provisional";
         String reviewId = null;
         String accessToken = null;
+        AccessTokenProvider accessTokenProvider = null;
         String marathonMatchBaseUrl = null;
         String reviewTypeId = null;
         String scorecardId = null;
@@ -145,8 +148,8 @@ public class EcsRunnerMain {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
             submissionId = getRequiredEnv("SUBMISSION_ID");
             accessToken = getRequiredEnv("ACCESS_TOKEN");
+            accessTokenProvider = buildAccessTokenProvider(accessToken);
             boolean debugLogAccessToken = isTruthyEnv("DEBUG_LOG_ACCESS_TOKEN");
-            boolean debugLogFullAccessToken = isTruthyEnv("DEBUG_LOG_FULL_ACCESS_TOKEN");
             marathonMatchBaseUrl = buildMarathonMatchBaseUrl(
                 getRequiredEnv("MARATHON_MATCH_API_URL")
             );
@@ -179,7 +182,7 @@ public class EcsRunnerMain {
             );
 
             if (debugLogAccessToken) {
-                logAccessTokenDebug(accessToken, debugLogFullAccessToken);
+                logAccessTokenDebug(accessToken);
             }
 
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
@@ -190,7 +193,7 @@ public class EcsRunnerMain {
                 MarathonMatchConfigResponse config = fetchJson(
                     httpClient,
                     marathonMatchBaseUrl + "/challenge/" + challengeId,
-                    accessToken,
+                    accessTokenProvider,
                     MarathonMatchConfigResponse.class
                 );
                 submissionApiUrl = config.getSubmissionApiUrl();
@@ -219,7 +222,7 @@ public class EcsRunnerMain {
                 byte[] testerJarBytes = fetchBinary(
                     httpClient,
                     marathonMatchBaseUrl + "/challenge/" + challengeId + "/tester-jar",
-                    accessToken
+                    accessTokenProvider
                 );
                 logInfo(
                     "api.fetch-tester-jar",
@@ -236,7 +239,7 @@ public class EcsRunnerMain {
                 TesterResponse tester = fetchJson(
                     httpClient,
                     marathonMatchBaseUrl + "/testers/" + config.getTesterId(),
-                    accessToken,
+                    accessTokenProvider,
                     TesterResponse.class
                 );
                 logInfo(
@@ -254,7 +257,7 @@ public class EcsRunnerMain {
                 submissionDir = Paths.get("/tmp/submission-" + submissionId);
                 SubmissionService submissionService = new SubmissionService(
                     config.getSubmissionApiUrl(),
-                    accessToken
+                    accessTokenProvider.getToken(httpClient)
                 );
                 logInfo(
                     "api.download-submission",
@@ -283,7 +286,7 @@ public class EcsRunnerMain {
                     postScoringProgressSafely(
                         httpClient,
                         marathonMatchBaseUrl,
-                        accessToken,
+                        accessTokenProvider,
                         new ScoringProgressRequest(
                             challengeId,
                             submissionId,
@@ -322,7 +325,7 @@ public class EcsRunnerMain {
                         testerJarPath,
                         httpClient,
                         marathonMatchBaseUrl,
-                        accessToken,
+                        accessTokenProvider,
                         reviewTypeId,
                         reviewId,
                         scorecardId
@@ -376,7 +379,7 @@ public class EcsRunnerMain {
                 uploadArtifacts(
                     httpClient,
                     config.getSubmissionApiUrl(),
-                    accessToken,
+                    accessTokenProvider,
                     submissionId,
                     testPhase,
                     submissionDir
@@ -413,7 +416,7 @@ public class EcsRunnerMain {
                 postScoringCallback(
                     httpClient,
                     marathonMatchBaseUrl,
-                    accessToken,
+                    accessTokenProvider,
                     callbackRequest
                 );
                 logInfo("api.callback", "Scoring callback completed successfully");
@@ -433,7 +436,7 @@ public class EcsRunnerMain {
             writeFailureArtifactLog(submissionDir, submissionId, error);
             uploadFailureArtifactsSafely(
                 submissionApiUrl,
-                accessToken,
+                accessTokenProvider,
                 submissionId,
                 testPhase,
                 submissionDir
@@ -443,7 +446,7 @@ public class EcsRunnerMain {
                 submissionId,
                 testPhase,
                 reviewId,
-                accessToken,
+                accessTokenProvider,
                 marathonMatchBaseUrl,
                 reviewTypeId,
                 scorecardId,
@@ -539,17 +542,11 @@ public class EcsRunnerMain {
         Path submissionDir,
         Path testerJarPath
     ) throws Exception {
-        requireRootParentProcess();
-        setPathOwnerRecursively(
-            submissionDir,
-            ISOLATED_EXECUTION_USER,
-            ISOLATED_EXECUTION_GROUP
-        );
-        setPathOwnerRecursively(
-            testerJarPath,
-            ISOLATED_EXECUTION_USER,
-            ISOLATED_EXECUTION_GROUP
-        );
+        requireTrustedRunnerProcess();
+        if (submissionDir == null || !Files.isDirectory(submissionDir)) {
+            throw new IOException("Submission directory is not available: " + submissionDir);
+        }
+        secureRunnerOnlyFile(testerJarPath);
     }
 
     /**
@@ -567,7 +564,7 @@ public class EcsRunnerMain {
         Path testerJarPath,
         CloseableHttpClient httpClient,
         String marathonMatchBaseUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         String reviewTypeId,
         String reviewId,
         String scorecardId
@@ -576,11 +573,7 @@ public class EcsRunnerMain {
         try {
             scorerConfigPath = Files.createTempFile("mm-isolated-scorer-", ".json");
             OBJECT_MAPPER.writeValue(scorerConfigPath.toFile(), scorerConfig);
-            setPathOwnerRecursively(
-                scorerConfigPath,
-                ISOLATED_EXECUTION_USER,
-                ISOLATED_EXECUTION_GROUP
-            );
+            secureRunnerOnlyFile(scorerConfigPath);
 
             List<String> command = buildIsolatedTesterCommand(
                 challengeId,
@@ -632,7 +625,7 @@ public class EcsRunnerMain {
                             postScoringProgressSafely(
                                 httpClient,
                                 marathonMatchBaseUrl,
-                                accessToken,
+                                accessTokenProvider,
                                 new ScoringProgressRequest(
                                     challengeId,
                                     submissionId,
@@ -739,13 +732,6 @@ public class EcsRunnerMain {
         Path artifactsDir = artifactBaseDir.resolve("artifacts");
         Files.createDirectories(artifactsDir.resolve("public"));
         Files.createDirectories(artifactsDir.resolve("private"));
-        if ("root".equals(System.getProperty("user.name", ""))) {
-            setPathOwnerRecursively(
-                artifactsDir,
-                ISOLATED_EXECUTION_USER,
-                ISOLATED_EXECUTION_GROUP
-            );
-        }
         return artifactsDir;
     }
 
@@ -813,21 +799,21 @@ public class EcsRunnerMain {
      * Uploads any artifacts produced before a runner failure.
      *
      * @param submissionApiUrl Submission API base URL used for artifact uploads.
-     * @param accessToken Bearer token.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param submissionId Submission ID.
      * @param testPhase Scoring phase.
      * @param submissionDir Extracted submission directory.
      */
     private static void uploadFailureArtifactsSafely(
         String submissionApiUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         String submissionId,
         String testPhase,
         Path submissionDir
     ) {
         if (
             isBlank(submissionApiUrl)
-                || isBlank(accessToken)
+                || accessTokenProvider == null
                 || isBlank(submissionId)
                 || "<missing>".equals(submissionId)
                 || submissionDir == null
@@ -840,7 +826,7 @@ public class EcsRunnerMain {
             uploadArtifacts(
                 httpClient,
                 submissionApiUrl,
-                accessToken,
+                accessTokenProvider,
                 submissionId,
                 testPhase,
                 submissionDir
@@ -914,7 +900,7 @@ public class EcsRunnerMain {
         Path scorerConfigPath
     ) throws Exception {
         List<String> command = new ArrayList<String>();
-        command.add(ISOLATION_WRAPPER_PATH);
+        command.add(RUNNER_ISOLATION_WRAPPER_PATH);
         command.add(getCurrentJavaBinaryPath());
         command.addAll(getIsolatedChildJvmArguments());
         command.add("-cp");
@@ -979,16 +965,22 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Fails fast when the trusted parent process is not running as root. The
-     * isolation wrapper relies on a root parent so the child can be demoted to
-     * the untrusted runner user and blocked from inspecting parent secrets.
+     * Fails fast when the trusted parent process is not running as root.
+     *
+     * <p>The runner helper installs socket restrictions for the child JVM. The
+     * child then invokes the scorer helper to drop generic submitted solution
+     * commands to the unprivileged {@code scorer} user. Starting the trusted
+     * parent as root avoids relying on nested setuid behavior after
+     * {@code no_new_privs} has been enabled for the child JVM.
+     *
+     * @throws IllegalStateException When the runner process is not root.
      */
-    private static void requireRootParentProcess() {
+    private static void requireTrustedRunnerProcess() {
         String currentUser = System.getProperty("user.name", "");
         if (!"root".equals(currentUser)) {
             throw new IllegalStateException(
-                "Runner must start as root so isolated execution can drop to "
-                    + ISOLATED_EXECUTION_USER
+                "Runner must start as root so submitted solution commands can drop to "
+                    + SCORER_EXECUTION_USER
                     + ". Current user: "
                     + currentUser
             );
@@ -996,71 +988,133 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Changes ownership recursively so the untrusted runner user can write only
-     * to the isolated execution workspace.
+     * Restricts a sensitive root-owned file to the trusted Java runner process.
+     *
+     * <p>This is used for downloaded tester JARs and serialized scorer config.
+     * The submitted solution process runs as {@code scorer}, so owner-only
+     * permissions prevent shell probes from reading those files even when they
+     * can guess the path.
+     *
+     * @param path Sensitive regular file to restrict.
+     * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
-    private static void setPathOwnerRecursively(
-        Path path,
-        String ownerName,
-        String groupName
-    ) throws Exception {
+    private static void secureRunnerOnlyFile(Path path) throws IOException {
         if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
 
-        UserPrincipalLookupService lookupService = path
-            .getFileSystem()
-            .getUserPrincipalLookupService();
-        UserPrincipal owner = lookupService.lookupPrincipalByName(ownerName);
-        GroupPrincipal group = lookupService.lookupPrincipalByGroupName(groupName);
-
-        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-            try (java.util.stream.Stream<Path> stream = Files.walk(path)) {
-                stream.forEach(entry -> applyPathOwnership(entry, owner, group));
-            }
-            return;
+        try {
+            Files.setPosixFilePermissions(
+                path,
+                EnumSet.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE
+                )
+            );
+        } catch (UnsupportedOperationException ignored) {
+            logWarn(
+                "filesystem.permissions",
+                "POSIX permissions are not supported for " + path
+            );
         }
-
-        applyPathOwnership(path, owner, group);
     }
 
     /**
-     * Applies owner/group changes to one filesystem entry.
+     * Makes the compile workspace readable and executable by the lower-privilege
+     * scorer user without exposing runner-only files outside that workspace.
+     *
+     * @param path Compile workspace directory or file prepared by the runner.
+     * @throws IOException When walking the workspace fails.
      */
-    private static void applyPathOwnership(
-        Path path,
-        UserPrincipal owner,
-        GroupPrincipal group
-    ) {
-        try {
-            Files.setOwner(path, owner);
-            PosixFileAttributeView attributes = Files.getFileAttributeView(
-                path,
-                PosixFileAttributeView.class,
-                LinkOption.NOFOLLOW_LINKS
-            );
-            if (attributes != null) {
-                attributes.setGroup(group);
+    private static void grantScorerReadExecuteAccess(Path path) throws IOException {
+        if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+
+        try (java.util.stream.Stream<Path> stream = Files.walk(path)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                applyScorerAccessiblePermissions(iterator.next());
             }
-        } catch (Exception error) {
+        }
+    }
+
+    /**
+     * Applies read/execute permissions needed for the scorer user to launch one
+     * compiled or interpreted submission file.
+     *
+     * @param path Workspace entry to make accessible.
+     */
+    private static void applyScorerAccessiblePermissions(Path path) {
+        try {
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.OWNER_EXECUTE,
+                        PosixFilePermission.GROUP_READ,
+                        PosixFilePermission.GROUP_EXECUTE,
+                        PosixFilePermission.OTHERS_READ,
+                        PosixFilePermission.OTHERS_EXECUTE
+                    )
+                );
+            } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.OWNER_EXECUTE,
+                        PosixFilePermission.GROUP_READ,
+                        PosixFilePermission.GROUP_EXECUTE,
+                        PosixFilePermission.OTHERS_READ,
+                        PosixFilePermission.OTHERS_EXECUTE
+                    )
+                );
+            }
+        } catch (UnsupportedOperationException ignored) {
+            logWarn(
+                "filesystem.permissions",
+                "POSIX permissions are not supported for " + path
+            );
+        } catch (IOException error) {
             throw new RuntimeException(
-                "Failed to change owner for " + path + ": " + error.getMessage(),
+                "Failed to update scorer permissions for "
+                    + path
+                    + ": "
+                    + error.getMessage(),
                 error
             );
         }
     }
 
     /**
-     * Kills any remaining runner-owned processes after isolated execution so
-     * detached child processes cannot mutate artifacts or linger until task exit.
+     * Cleans up scorer-owned processes after isolated execution.
+     *
+     * <p>The scorer helper supervises generic submitted solution process groups,
+     * but this cleanup also handles custom tester paths or detached descendants
+     * that survive until the isolated child JVM exits.
      */
     private static void killLingeringIsolatedProcesses() {
+        if (!"root".equals(System.getProperty("user.name", ""))) {
+            logInfo(
+                "tester.isolated",
+                "Skipping scorer process cleanup from non-root runner. User="
+                    + System.getProperty("user.name", "")
+                    + ", target="
+                    + SCORER_EXECUTION_USER
+            );
+            return;
+        }
+
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(
                 "pkill",
                 "-KILL",
                 "-u",
-                ISOLATED_EXECUTION_USER
+                SCORER_EXECUTION_USER
             );
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
@@ -1075,7 +1129,7 @@ public class EcsRunnerMain {
                 logWarn(
                     "tester.isolated",
                     "Killed lingering processes for user "
-                        + ISOLATED_EXECUTION_USER
+                        + SCORER_EXECUTION_USER
                         + "."
                 );
                 return;
@@ -1085,7 +1139,7 @@ public class EcsRunnerMain {
                 logInfo(
                     "tester.isolated",
                     "No lingering processes found for user "
-                        + ISOLATED_EXECUTION_USER
+                        + SCORER_EXECUTION_USER
                         + "."
                 );
                 return;
@@ -1481,6 +1535,24 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Builds the parent-runner token provider from ECS environment overrides.
+     *
+     * <p>The initial {@code ACCESS_TOKEN} keeps existing task launches working.
+     * Auth0 settings allow long-running scorer tasks to refresh M2M tokens before
+     * expiry or after a 401 response.
+     */
+    private static AccessTokenProvider buildAccessTokenProvider(String initialAccessToken) {
+        return new AccessTokenProvider(
+            initialAccessToken,
+            getOptionalEnv("AUTH0_URL", "http://localhost:4000/oauth/token"),
+            getOptionalEnv("AUTH0_AUDIENCE", "https://m2m.topcoder-dev.com/"),
+            getOptionalEnv("AUTH0_PROXY_SERVER_URL", ""),
+            getOptionalEnv("AUTH0_CLIENT_ID", ""),
+            getOptionalEnv("AUTH0_CLIENT_SECRET", "")
+        );
+    }
+
+    /**
      * Reads a required environment variable.
      */
     private static String getRequiredEnv(String variableName) {
@@ -1568,47 +1640,28 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Emits token debugging information for auth troubleshooting.
+     * Emits redacted token debugging information for auth troubleshooting.
      * @param accessToken Access token provided to the ECS runner.
-     * @param logFullToken Whether to print the full token value.
      */
-    private static void logAccessTokenDebug(String accessToken, boolean logFullToken) {
+    private static void logAccessTokenDebug(String accessToken) {
         logInfo("auth.token", "ACCESS_TOKEN length=" + accessToken.length());
         logInfo(
             "auth.token",
-            "ACCESS_TOKEN value=" + (logFullToken ? accessToken : redactToken(accessToken))
+            "ACCESS_TOKEN value=" + redactToken(accessToken)
         );
-
-        String headerJson = decodeJwtSection(accessToken, 0);
-        if (headerJson != null) {
-            logInfo("auth.token", "ACCESS_TOKEN header=" + headerJson);
-        } else {
-            logWarn("auth.token", "ACCESS_TOKEN header=<unavailable>");
-        }
-
-        String payloadJson = decodeJwtSection(accessToken, 1);
-        if (payloadJson != null) {
-            logInfo("auth.token", "ACCESS_TOKEN payload=" + payloadJson);
-        } else {
-            logWarn("auth.token", "ACCESS_TOKEN payload=<unavailable>");
-        }
     }
 
     /**
-     * Produces a partially redacted token string suitable for logs.
+     * Produces a token redaction marker that exposes no credential characters.
      * @param token Raw token value.
-     * @returns Token preview with middle characters masked.
+     * @returns Redaction marker with token length only.
      */
     private static String redactToken(String token) {
         if (token == null || token.isEmpty()) {
             return "<empty>";
         }
 
-        if (token.length() <= 24) {
-            return "<redacted-length-" + token.length() + ">";
-        }
-
-        return token.substring(0, 12) + "..." + token.substring(token.length() - 8);
+        return "<redacted-length-" + token.length() + ">";
     }
 
     /**
@@ -1724,14 +1777,14 @@ public class EcsRunnerMain {
     private static <T> T fetchJson(
         CloseableHttpClient httpClient,
         String url,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         Class<T> responseType
     ) throws Exception {
         logInfo(
             "http.get.json",
             "GET " + url + " (responseType=" + responseType.getSimpleName() + ")"
         );
-        String body = executeGetAsString(httpClient, url, accessToken);
+        String body = executeGetAsString(httpClient, url, accessTokenProvider);
         logInfo(
             "http.get.json",
             "Deserializing " + body.length() + " chars from " + url
@@ -1745,55 +1798,99 @@ public class EcsRunnerMain {
     private static byte[] fetchBinary(
         CloseableHttpClient httpClient,
         String url,
-        String accessToken
+        AccessTokenProvider accessTokenProvider
     ) throws Exception {
-        HttpGet request = new HttpGet(url);
-        request.setHeader("Authorization", "Bearer " + accessToken);
-        logInfo(
-            "http.get.binary",
-            "GET " + url + " with Authorization Bearer token"
-        );
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpGet request = new HttpGet(url);
+            request.setHeader(
+                "Authorization",
+                "Bearer " + accessTokenProvider.getToken(httpClient)
+            );
+            logInfo(
+                "http.get.binary",
+                "GET " + url + " with Authorization Bearer token"
+            );
 
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            logInfo("http.get.binary", "GET " + url + " returned HTTP " + statusCode);
-            if (statusCode < 200 || statusCode >= 300) {
-                String responseBody = response.getEntity() == null
-                    ? ""
-                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-                logError(
-                    "http.get.binary",
-                    "GET "
-                        + url
-                        + " failed: HTTP "
-                        + statusCode
-                        + ", body="
-                        + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT),
-                    null
-                );
-                throw new RuntimeException(
-                    "GET " + url + " failed: HTTP " + statusCode + " - " + responseBody
-                );
+            boolean retryWithFreshToken = false;
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                logInfo("http.get.binary", "GET " + url + " returned HTTP " + statusCode);
+                if (statusCode < 200 || statusCode >= 300) {
+                    String responseBody = response.getEntity() == null
+                        ? ""
+                        : EntityUtils.toString(
+                            response.getEntity(),
+                            StandardCharsets.UTF_8
+                        );
+
+                    if (
+                        shouldRetryWithRefreshedToken(
+                            statusCode,
+                            attempt,
+                            accessTokenProvider
+                        )
+                    ) {
+                        logWarn(
+                            "http.get.binary",
+                            "GET "
+                                + url
+                                + " returned HTTP 401; refreshing M2M token and retrying once, body="
+                                + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                        );
+                        retryWithFreshToken = true;
+                    } else {
+                        logError(
+                            "http.get.binary",
+                            "GET "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + ", body="
+                                + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT),
+                            null
+                        );
+                        throw new RuntimeException(
+                            "GET "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + " - "
+                                + responseBody
+                        );
+                    }
+                } else {
+                    if (response.getEntity() == null) {
+                        logError(
+                            "http.get.binary",
+                            "GET " + url + " returned empty response body",
+                            null
+                        );
+                        throw new RuntimeException(
+                            "GET " + url + " returned empty response body."
+                        );
+                    }
+
+                    try (InputStream inputStream = response.getEntity().getContent()) {
+                        byte[] bytes = readAllBytes(inputStream);
+                        logInfo(
+                            "http.get.binary",
+                            "GET " + url + " returned " + bytes.length + " bytes"
+                        );
+                        return bytes;
+                    }
+                }
             }
 
-            if (response.getEntity() == null) {
-                logError(
-                    "http.get.binary",
-                    "GET " + url + " returned empty response body",
-                    null
+            if (retryWithFreshToken) {
+                refreshAccessTokenAfterUnauthorized(
+                    accessTokenProvider,
+                    httpClient,
+                    "GET " + url
                 );
-                throw new RuntimeException("GET " + url + " returned empty response body.");
-            }
-
-            try (InputStream inputStream = response.getEntity().getContent()) {
-                byte[] bytes = readAllBytes(inputStream);
-                logInfo(
-                    "http.get.binary",
-                    "GET " + url + " returned " + bytes.length + " bytes"
-                );
-                return bytes;
             }
         }
+
+        throw new RuntimeException("GET " + url + " failed after token refresh retry.");
     }
 
     /**
@@ -1802,38 +1899,75 @@ public class EcsRunnerMain {
     private static String executeGetAsString(
         CloseableHttpClient httpClient,
         String url,
-        String accessToken
+        AccessTokenProvider accessTokenProvider
     ) throws Exception {
-        HttpGet request = new HttpGet(url);
-        request.setHeader("Authorization", "Bearer " + accessToken);
-        request.setHeader("Content-Type", "application/json");
-        logInfo("http.get", "GET " + url + " (Content-Type: application/json)");
-
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            String responseBody = response.getEntity() == null
-                ? ""
-                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            logInfo(
-                "http.get",
-                "GET "
-                    + url
-                    + " returned HTTP "
-                    + statusCode
-                    + ", bodyChars="
-                    + responseBody.length()
-                    + ", bodyPreview="
-                    + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpGet request = new HttpGet(url);
+            request.setHeader(
+                "Authorization",
+                "Bearer " + accessTokenProvider.getToken(httpClient)
             );
+            request.setHeader("Content-Type", "application/json");
+            logInfo("http.get", "GET " + url + " (Content-Type: application/json)");
 
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new RuntimeException(
-                    "GET " + url + " failed: HTTP " + statusCode + " - " + responseBody
+            boolean retryWithFreshToken = false;
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String responseBody = response.getEntity() == null
+                    ? ""
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                logInfo(
+                    "http.get",
+                    "GET "
+                        + url
+                        + " returned HTTP "
+                        + statusCode
+                        + ", bodyChars="
+                        + responseBody.length()
+                        + ", bodyPreview="
+                        + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
                 );
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    if (
+                        shouldRetryWithRefreshedToken(
+                            statusCode,
+                            attempt,
+                            accessTokenProvider
+                        )
+                    ) {
+                        logWarn(
+                            "http.get",
+                            "GET "
+                                + url
+                                + " returned HTTP 401; refreshing M2M token and retrying once."
+                        );
+                        retryWithFreshToken = true;
+                    } else {
+                        throw new RuntimeException(
+                            "GET "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + " - "
+                                + responseBody
+                        );
+                    }
+                } else {
+                    return responseBody;
+                }
             }
 
-            return responseBody;
+            if (retryWithFreshToken) {
+                refreshAccessTokenAfterUnauthorized(
+                    accessTokenProvider,
+                    httpClient,
+                    "GET " + url
+                );
+            }
         }
+
+        throw new RuntimeException("GET " + url + " failed after token refresh retry.");
     }
 
     /**
@@ -1842,46 +1976,85 @@ public class EcsRunnerMain {
     private static void postScoringCallback(
         CloseableHttpClient httpClient,
         String marathonMatchBaseUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         ScoringCallbackRequest callbackRequest
     ) throws Exception {
         String url = marathonMatchBaseUrl + "/internal/scoring-results";
         String payload = OBJECT_MAPPER.writeValueAsString(callbackRequest);
 
-        HttpPost request = new HttpPost(url);
-        request.setHeader("Authorization", "Bearer " + accessToken);
-        request.setHeader("Content-Type", "application/json");
-        request.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
-        logInfo(
-            "http.post.callback",
-            "POST " + url + " payloadChars=" + payload.length()
-        );
-        logInfo(
-            "http.post.callback",
-            "POST payload preview: " + truncate(payload, HTTP_BODY_PREVIEW_LIMIT)
-        );
-
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            String responseBody = response.getEntity() == null
-                ? ""
-                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpPost request = new HttpPost(url);
+            request.setHeader(
+                "Authorization",
+                "Bearer " + accessTokenProvider.getToken(httpClient)
+            );
+            request.setHeader("Content-Type", "application/json");
+            request.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
             logInfo(
                 "http.post.callback",
-                "POST "
-                    + url
-                    + " returned HTTP "
-                    + statusCode
-                    + ", responsePreview="
-                    + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                "POST " + url + " payloadChars=" + payload.length()
+            );
+            logInfo(
+                "http.post.callback",
+                "POST payload preview: " + truncate(payload, HTTP_BODY_PREVIEW_LIMIT)
             );
 
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new RuntimeException(
-                    "POST " + url + " failed: HTTP " + statusCode + " - " + responseBody
+            boolean retryWithFreshToken = false;
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String responseBody = response.getEntity() == null
+                    ? ""
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                logInfo(
+                    "http.post.callback",
+                    "POST "
+                        + url
+                        + " returned HTTP "
+                        + statusCode
+                        + ", responsePreview="
+                        + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                );
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    if (
+                        shouldRetryWithRefreshedToken(
+                            statusCode,
+                            attempt,
+                            accessTokenProvider
+                        )
+                    ) {
+                        logWarn(
+                            "http.post.callback",
+                            "POST "
+                                + url
+                                + " returned HTTP 401; refreshing M2M token and retrying once."
+                        );
+                        retryWithFreshToken = true;
+                    } else {
+                        throw new RuntimeException(
+                            "POST "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + " - "
+                                + responseBody
+                        );
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            if (retryWithFreshToken) {
+                refreshAccessTokenAfterUnauthorized(
+                    accessTokenProvider,
+                    httpClient,
+                    "POST " + url
                 );
             }
         }
+
+        throw new RuntimeException("POST " + url + " failed after token refresh retry.");
     }
 
     /**
@@ -1889,13 +2062,13 @@ public class EcsRunnerMain {
      *
      * @param httpClient Trusted parent HTTP client.
      * @param marathonMatchBaseUrl Marathon Match API base URL.
-     * @param accessToken Bearer token for the internal API.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param progressRequest Progress payload to persist in review summation metadata.
      */
     private static void postScoringProgressSafely(
         CloseableHttpClient httpClient,
         String marathonMatchBaseUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         ScoringProgressRequest progressRequest
     ) {
         rememberScoringProgress(progressRequest);
@@ -1904,7 +2077,7 @@ public class EcsRunnerMain {
             postScoringProgress(
                 httpClient,
                 marathonMatchBaseUrl,
-                accessToken,
+                accessTokenProvider,
                 progressRequest
             );
         } catch (Exception error) {
@@ -1922,7 +2095,7 @@ public class EcsRunnerMain {
      * @param submissionId Submission ID.
      * @param testPhase Scoring phase.
      * @param reviewId Optional review ID for system scoring.
-     * @param accessToken Bearer token, when bootstrap reached token loading.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param marathonMatchBaseUrl Marathon Match API base URL, when available.
      * @param reviewTypeId Review type ID, when available.
      * @param scorecardId Scorecard ID, when available.
@@ -1933,7 +2106,7 @@ public class EcsRunnerMain {
         String submissionId,
         String testPhase,
         String reviewId,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         String marathonMatchBaseUrl,
         String reviewTypeId,
         String scorecardId,
@@ -1941,7 +2114,7 @@ public class EcsRunnerMain {
     ) {
         if (
             !isProgressTrackedPhase(testPhase)
-                || isBlank(accessToken)
+                || accessTokenProvider == null
                 || isBlank(marathonMatchBaseUrl)
                 || isBlank(reviewTypeId)
                 || isBlank(challengeId)
@@ -1956,7 +2129,7 @@ public class EcsRunnerMain {
             postScoringProgressSafely(
                 httpClient,
                 marathonMatchBaseUrl,
-                accessToken,
+                accessTokenProvider,
                 new ScoringProgressRequest(
                     challengeId,
                     submissionId,
@@ -1986,49 +2159,117 @@ public class EcsRunnerMain {
      *
      * @param httpClient Trusted parent HTTP client.
      * @param marathonMatchBaseUrl Marathon Match API base URL.
-     * @param accessToken Bearer token for the internal API.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param progressRequest Progress payload to persist in review summation metadata.
      * @throws Exception When the API rejects the progress update.
      */
     private static void postScoringProgress(
         CloseableHttpClient httpClient,
         String marathonMatchBaseUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         ScoringProgressRequest progressRequest
     ) throws Exception {
         String url = marathonMatchBaseUrl + "/internal/scoring-progress";
         String payload = OBJECT_MAPPER.writeValueAsString(progressRequest);
 
-        HttpPost request = new HttpPost(url);
-        request.setHeader("Authorization", "Bearer " + accessToken);
-        request.setHeader("Content-Type", "application/json");
-        request.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
-        logInfo(
-            "http.post.progress",
-            "POST " + url + " payloadChars=" + payload.length()
-        );
-
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            String responseBody = response.getEntity() == null
-                ? ""
-                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpPost request = new HttpPost(url);
+            request.setHeader(
+                "Authorization",
+                "Bearer " + accessTokenProvider.getToken(httpClient)
+            );
+            request.setHeader("Content-Type", "application/json");
+            request.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
             logInfo(
                 "http.post.progress",
-                "POST "
-                    + url
-                    + " returned HTTP "
-                    + statusCode
-                    + ", responsePreview="
-                    + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                "POST " + url + " payloadChars=" + payload.length()
             );
 
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new RuntimeException(
-                    "POST " + url + " failed: HTTP " + statusCode + " - " + responseBody
+            boolean retryWithFreshToken = false;
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String responseBody = response.getEntity() == null
+                    ? ""
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                logInfo(
+                    "http.post.progress",
+                    "POST "
+                        + url
+                        + " returned HTTP "
+                        + statusCode
+                        + ", responsePreview="
+                        + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                );
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    if (
+                        shouldRetryWithRefreshedToken(
+                            statusCode,
+                            attempt,
+                            accessTokenProvider
+                        )
+                    ) {
+                        logWarn(
+                            "http.post.progress",
+                            "POST "
+                                + url
+                                + " returned HTTP 401; refreshing M2M token and retrying once."
+                        );
+                        retryWithFreshToken = true;
+                    } else {
+                        throw new RuntimeException(
+                            "POST "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + " - "
+                                + responseBody
+                        );
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            if (retryWithFreshToken) {
+                refreshAccessTokenAfterUnauthorized(
+                    accessTokenProvider,
+                    httpClient,
+                    "POST " + url
                 );
             }
         }
+
+        throw new RuntimeException("POST " + url + " failed after token refresh retry.");
+    }
+
+    /**
+     * Determines whether an unauthorized response should trigger a single forced
+     * M2M token refresh and request retry.
+     */
+    private static boolean shouldRetryWithRefreshedToken(
+        int statusCode,
+        int attempt,
+        AccessTokenProvider accessTokenProvider
+    ) {
+        return statusCode == HTTP_UNAUTHORIZED
+            && attempt == 1
+            && accessTokenProvider != null
+            && accessTokenProvider.canRefresh();
+    }
+
+    /**
+     * Forces a new M2M token after a 401 before retrying the original request.
+     */
+    private static void refreshAccessTokenAfterUnauthorized(
+        AccessTokenProvider accessTokenProvider,
+        CloseableHttpClient httpClient,
+        String requestDescription
+    ) throws Exception {
+        accessTokenProvider.refreshToken(
+            httpClient,
+            "HTTP 401 from " + requestDescription
+        );
     }
 
     /**
@@ -2417,7 +2658,7 @@ public class EcsRunnerMain {
      *
      * @param httpClient HTTP client used for multipart artifact upload.
      * @param submissionApiUrl Submission API base URL.
-     * @param accessToken Bearer token with artifact upload permission.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param submissionId Submission whose artifacts are uploaded.
      * @param testPhase Scoring phase represented by the artifacts.
      * @param submissionDir Extracted submission directory or workspace root.
@@ -2426,7 +2667,7 @@ public class EcsRunnerMain {
     private static void uploadArtifacts(
         CloseableHttpClient httpClient,
         String submissionApiUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         String submissionId,
         String testPhase,
         Path submissionDir
@@ -2466,7 +2707,7 @@ public class EcsRunnerMain {
                 uploadArtifactZip(
                     httpClient,
                     submissionApiUrl,
-                    accessToken,
+                    accessTokenProvider,
                     submissionId,
                     baseArtifactName,
                     publicZip
@@ -2485,7 +2726,7 @@ public class EcsRunnerMain {
                 uploadArtifactZip(
                     httpClient,
                     submissionApiUrl,
-                    accessToken,
+                    accessTokenProvider,
                     submissionId,
                     internalArtifactName,
                     privateZip
@@ -2672,7 +2913,7 @@ public class EcsRunnerMain {
     private static void uploadArtifactZip(
         CloseableHttpClient httpClient,
         String submissionApiUrl,
-        String accessToken,
+        AccessTokenProvider accessTokenProvider,
         String submissionId,
         String artifactName,
         Path zipPath
@@ -2687,53 +2928,92 @@ public class EcsRunnerMain {
                 + "/artifacts?filename="
                 + encodedFilename;
 
-        HttpPost request = new HttpPost(url);
-        request.setHeader("Authorization", "Bearer " + accessToken);
-        logInfo(
-            "http.post.artifact",
-            "POST "
-                + url
-                + " artifactName="
-                + artifactName
-                + ", zipPath="
-                + zipPath
-                + ", sizeBytes="
-                + Files.size(zipPath)
-        );
-
-        HttpEntity entity = MultipartEntityBuilder
-            .create()
-            .addBinaryBody(
-                "file",
-                zipPath.toFile(),
-                ContentType.APPLICATION_OCTET_STREAM,
-                artifactName + ".zip"
-            )
-            .build();
-
-        request.setEntity(entity);
-
-        try (CloseableHttpResponse response = httpClient.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            String responseBody = response.getEntity() == null
-                ? ""
-                : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpPost request = new HttpPost(url);
+            request.setHeader(
+                "Authorization",
+                "Bearer " + accessTokenProvider.getToken(httpClient)
+            );
             logInfo(
                 "http.post.artifact",
                 "POST "
                     + url
-                    + " returned HTTP "
-                    + statusCode
-                    + ", responsePreview="
-                    + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                    + " artifactName="
+                    + artifactName
+                    + ", zipPath="
+                    + zipPath
+                    + ", sizeBytes="
+                    + Files.size(zipPath)
             );
 
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new RuntimeException(
-                    "POST " + url + " failed: HTTP " + statusCode + " - " + responseBody
+            HttpEntity entity = MultipartEntityBuilder
+                .create()
+                .addBinaryBody(
+                    "file",
+                    zipPath.toFile(),
+                    ContentType.APPLICATION_OCTET_STREAM,
+                    artifactName + ".zip"
+                )
+                .build();
+
+            request.setEntity(entity);
+
+            boolean retryWithFreshToken = false;
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String responseBody = response.getEntity() == null
+                    ? ""
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                logInfo(
+                    "http.post.artifact",
+                    "POST "
+                        + url
+                        + " returned HTTP "
+                        + statusCode
+                        + ", responsePreview="
+                        + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                );
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    if (
+                        shouldRetryWithRefreshedToken(
+                            statusCode,
+                            attempt,
+                            accessTokenProvider
+                        )
+                    ) {
+                        logWarn(
+                            "http.post.artifact",
+                            "POST "
+                                + url
+                                + " returned HTTP 401; refreshing M2M token and retrying once."
+                        );
+                        retryWithFreshToken = true;
+                    } else {
+                        throw new RuntimeException(
+                            "POST "
+                                + url
+                                + " failed: HTTP "
+                                + statusCode
+                                + " - "
+                                + responseBody
+                        );
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            if (retryWithFreshToken) {
+                refreshAccessTokenAfterUnauthorized(
+                    accessTokenProvider,
+                    httpClient,
+                    "POST " + url
                 );
             }
         }
+
+        throw new RuntimeException("POST " + url + " failed after token refresh retry.");
     }
 
     /**
@@ -2787,6 +3067,7 @@ public class EcsRunnerMain {
         throws IOException {
         Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
         Files.write(jarPath, jarBytes);
+        secureRunnerOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
             "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"
@@ -3038,6 +3319,7 @@ public class EcsRunnerMain {
                 expectedSolutionBaseName,
                 compileLogPath
             );
+            grantScorerReadExecuteAccess(compileWorkDir);
 
             MarathonController controller = new MarathonController();
             List<Map<String, Object>> testScores = new ArrayList<Map<String, Object>>();
@@ -3416,10 +3698,12 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                "java -Xms1G -Xmx1G -cp "
-                    + workDir.toAbsolutePath()
-                    + " "
-                    + entryPoint.getQualifiedClassName(),
+                buildScorerExecutionCommand(
+                    "java -Xms1G -Xmx1G -cp "
+                        + workDir.toAbsolutePath()
+                        + " "
+                        + entryPoint.getQualifiedClassName()
+                ),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3449,7 +3733,7 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                binaryPath,
+                buildScorerExecutionCommand(binaryPath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3457,7 +3741,7 @@ public class EcsRunnerMain {
 
         if (".py".equals(extension)) {
             return new CompiledSubmission(
-                "python3 " + normalizedSource.toAbsolutePath(),
+                buildScorerExecutionCommand("python3 " + normalizedSource.toAbsolutePath()),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3483,7 +3767,7 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                binaryPath,
+                buildScorerExecutionCommand(binaryPath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3507,7 +3791,7 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                "mono " + exePath,
+                buildScorerExecutionCommand("mono " + exePath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -3548,16 +3832,33 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                "dotnet "
-                    + publishDir
-                        .resolve(GENERIC_SOLUTION_BASE_NAME + ".dll")
-                        .toAbsolutePath(),
+                buildScorerExecutionCommand(
+                    "dotnet "
+                        + publishDir
+                            .resolve(GENERIC_SOLUTION_BASE_NAME + ".dll")
+                            .toAbsolutePath()
+                ),
                 normalizedCsSource.getFileName().toString(),
                 language
             );
         }
 
         throw new IllegalArgumentException("Unsupported submission extension: " + extension);
+    }
+
+    /**
+     * Prefixes a compiled/interpreted submission command with the scorer
+     * isolation helper.
+     *
+     * <p>{@link MarathonTester} ultimately launches this string with
+     * {@code Runtime.exec(String)}, so arguments are kept whitespace-delimited and
+     * generated paths are controlled by the runner.
+     *
+     * @param command Submission command built by the generic runner.
+     * @return Command that executes the submission as the low-privilege scorer user.
+     */
+    private static String buildScorerExecutionCommand(String command) {
+        return SCORER_ISOLATION_WRAPPER_PATH + " " + command;
     }
 
     /**
@@ -3936,6 +4237,229 @@ public class EcsRunnerMain {
             output.write(buffer, 0, bytesRead);
         }
         return output.toByteArray();
+    }
+
+    /**
+     * Provides the trusted parent runner with an M2M bearer token that can be
+     * refreshed across long-running system tests.
+     */
+    private static class AccessTokenProvider {
+        private String accessToken;
+        private final String auth0Url;
+        private final String auth0Audience;
+        private final String auth0ProxyServerUrl;
+        private final String auth0ClientId;
+        private final String auth0ClientSecret;
+        private long expiresAtEpochSeconds;
+
+        AccessTokenProvider(
+            String initialAccessToken,
+            String auth0Url,
+            String auth0Audience,
+            String auth0ProxyServerUrl,
+            String auth0ClientId,
+            String auth0ClientSecret
+        ) {
+            this.accessToken = initialAccessToken;
+            this.auth0Url = auth0Url;
+            this.auth0Audience = auth0Audience;
+            this.auth0ProxyServerUrl = auth0ProxyServerUrl;
+            this.auth0ClientId = auth0ClientId;
+            this.auth0ClientSecret = auth0ClientSecret;
+            this.expiresAtEpochSeconds = extractJwtExpirationEpochSeconds(initialAccessToken);
+        }
+
+        synchronized String getToken(CloseableHttpClient httpClient) throws Exception {
+            if (isBlank(accessToken)) {
+                return refreshToken(httpClient, "no cached access token");
+            }
+
+            if (isTokenExpiringSoon() && canRefresh()) {
+                return refreshToken(httpClient, "cached access token expires soon");
+            }
+
+            return accessToken;
+        }
+
+        synchronized boolean canRefresh() {
+            return !isBlank(resolveTokenUrl())
+                && !isBlank(auth0ClientId)
+                && !isBlank(auth0ClientSecret);
+        }
+
+        synchronized String refreshToken(CloseableHttpClient httpClient, String reason)
+            throws Exception {
+            if (!canRefresh()) {
+                throw new IllegalStateException(
+                    "M2M token refresh is not configured for the ECS runner. "
+                        + "AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, and AUTH0_URL or "
+                        + "AUTH0_PROXY_SERVER_URL are required."
+                );
+            }
+
+            String tokenUrl = resolveTokenUrl();
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("grant_type", "client_credentials");
+            payload.put("client_id", auth0ClientId);
+            payload.put("client_secret", auth0ClientSecret);
+            if (!isBlank(auth0Url)) {
+                payload.put("auth0_url", auth0Url);
+            }
+            if (!isBlank(auth0Audience)) {
+                payload.put("audience", auth0Audience);
+            }
+
+            String payloadJson = OBJECT_MAPPER.writeValueAsString(payload);
+            HttpPost request = new HttpPost(tokenUrl);
+            request.setHeader("Content-Type", "application/json");
+            request.setEntity(new StringEntity(payloadJson, StandardCharsets.UTF_8));
+
+            logInfo(
+                "auth.token.refresh",
+                "Refreshing M2M access token, reason="
+                    + safeLogValue(reason)
+                    + ", tokenUrl="
+                    + tokenUrl
+            );
+
+            try (CloseableHttpResponse response = httpClient.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                String responseBody = response.getEntity() == null
+                    ? ""
+                    : EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new RuntimeException(
+                        "Failed to refresh M2M token: HTTP "
+                            + statusCode
+                            + " - "
+                            + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
+                    );
+                }
+
+                M2MTokenResponse tokenResponse = OBJECT_MAPPER.readValue(
+                    responseBody,
+                    M2MTokenResponse.class
+                );
+                if (!isBlank(tokenResponse.getAccessToken())) {
+                    accessToken = tokenResponse.getAccessToken();
+                    expiresAtEpochSeconds = resolveExpiryEpochSeconds(
+                        accessToken,
+                        tokenResponse.getExpiresIn()
+                    );
+                    logInfo(
+                        "auth.token.refresh",
+                        "Refreshed M2M access token; expiresAtEpochSeconds="
+                            + (expiresAtEpochSeconds <= 0
+                                ? "<unknown>"
+                                : String.valueOf(expiresAtEpochSeconds))
+                    );
+                    return accessToken;
+                }
+
+                if (!isBlank(tokenResponse.getError())) {
+                    throw new RuntimeException(
+                        "Failed to refresh M2M token: "
+                            + tokenResponse.getError()
+                            + " "
+                            + safeLogValue(tokenResponse.getErrorDescription())
+                    );
+                }
+
+                throw new RuntimeException(
+                    "M2M token response did not include access_token."
+                );
+            }
+        }
+
+        private boolean isTokenExpiringSoon() {
+            return expiresAtEpochSeconds > 0
+                && Instant.now().getEpochSecond()
+                    >= expiresAtEpochSeconds - TOKEN_REFRESH_SKEW_SECONDS;
+        }
+
+        private String resolveTokenUrl() {
+            if (!isBlank(auth0ProxyServerUrl)) {
+                return auth0ProxyServerUrl;
+            }
+            return auth0Url;
+        }
+
+        private long resolveExpiryEpochSeconds(String token, Long expiresInSeconds) {
+            long tokenExpiry = extractJwtExpirationEpochSeconds(token);
+            if (tokenExpiry > 0) {
+                return tokenExpiry;
+            }
+            if (expiresInSeconds != null && expiresInSeconds.longValue() > 0L) {
+                return Instant.now().getEpochSecond() + expiresInSeconds.longValue();
+            }
+            return 0L;
+        }
+
+        @SuppressWarnings("unchecked")
+        private long extractJwtExpirationEpochSeconds(String token) {
+            try {
+                String payloadJson = decodeJwtSection(token, 1);
+                if (payloadJson == null) {
+                    return 0L;
+                }
+                Map<String, Object> payload = OBJECT_MAPPER.readValue(
+                    payloadJson,
+                    Map.class
+                );
+                return parseEpochSeconds(payload.get("exp"));
+            } catch (Exception ignored) {
+                return 0L;
+            }
+        }
+
+        private long parseEpochSeconds(Object value) {
+            if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+            if (value instanceof String) {
+                try {
+                    return Long.parseLong(((String) value).trim());
+                } catch (NumberFormatException ignored) {
+                    return 0L;
+                }
+            }
+            return 0L;
+        }
+    }
+
+    /**
+     * Partial Auth0/proxy M2M token response.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static class M2MTokenResponse {
+        @JsonProperty("access_token")
+        private String accessToken;
+
+        @JsonProperty("expires_in")
+        private Long expiresIn;
+
+        @JsonProperty("error")
+        private String error;
+
+        @JsonProperty("error_description")
+        private String errorDescription;
+
+        String getAccessToken() {
+            return accessToken;
+        }
+
+        Long getExpiresIn() {
+            return expiresIn;
+        }
+
+        String getError() {
+            return error;
+        }
+
+        String getErrorDescription() {
+            return errorDescription;
+        }
     }
 
     /**

@@ -76,10 +76,11 @@ Kafka consumption retries with exponential backoff. When `KAFKA_DLQ_ENABLED=true
 
 ## Submission network isolation
 
-The ECS task keeps trusted network access only on the parent runner process so it can fetch config, download the submission, upload artifacts, and post the callback. The tester and submission run inside a separate child JVM as the `runner` user with:
+The ECS task keeps trusted network access only on the trusted parent runner process so it can fetch config, download the submission, upload artifacts, and post the callback. The tester runs inside a scrubbed child JVM, while generic submitted solution commands run as the separate non-root `scorer` user with:
 
 - a scrubbed environment that does not include `ACCESS_TOKEN`
 - socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
+- root-only tester JAR and scorer config files, preventing submitted code from reading those `/tmp` inputs
 - callback review payloads created by the trusted runner's generic Marathon flow, or by a custom tester `runTester(...)` result map when a tester opts into that advanced path
 
 ## Observability

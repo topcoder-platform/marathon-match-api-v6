@@ -211,7 +211,7 @@ The ECS task definition must:
 - Use the image built from `marathon-match-api-v6/ecs-runner/Dockerfile`.
 - Include the configured `ECS_CONTAINER_NAME`.
 - Use CloudWatch `awslogs` configuration if operator runner logs should be visible from the Work app.
-- Not override the container `user`; the runner starts as root and drops untrusted execution to the isolated `runner` user internally.
+- Not override the container `user`; the image starts as root for trusted bootstrap and runs generic submitted solution commands through the separate non-root `scorer` user internally.
 - Have network access for the trusted parent runner to call Marathon Match API, Submission API, and Review API.
 
 The API service must be configured with:
