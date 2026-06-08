@@ -3,5 +3,5 @@ NAME=$1
 TIMEOUT=$2
 COMPILE_TIMEOUT=$3
 
-timeout ${COMPILE_TIMEOUT}s g++ -std=gnu++23 -O3 -march=native /workdir/${NAME}.cpp -o /workdir/${NAME}
+timeout ${COMPILE_TIMEOUT}s g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic /workdir/${NAME}.cpp -o /workdir/${NAME}
 echo "timeout ${TIMEOUT}s /workdir/${NAME}" > /workdir/command.txt

@@ -155,6 +155,8 @@ public class MarathonController {
             result.setScore(score);
             result.setRunTime(tester.getRunTime());
             result.setOutput(tester.getSolutionError());
+            result.setStdout(tester.getSolutionOutput());
+            result.setStderr(tester.getSolutionError());
             result.setError(tester.getExecutionsErrors());
         } catch (Exception e) {
             result.setError("ERROR calling tester " + className + ": " + e.getMessage());

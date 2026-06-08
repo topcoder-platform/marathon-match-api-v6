@@ -31,17 +31,20 @@ Supported source extensions are:
 | `.py`       | Python 3.12                                                                  |
 | `.cs`       | C# using Mono                                                                |
 | `.cs_net10` | C# using .NET 10 / C# 14                                                     |
-| `.cs_net7`  | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
+| `.cs_net7`  | C# using .NET 7 / C# 11                                                      |
 | `.rs`       | Rust latest stable                                                           |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
 ### C++
 
-C++ submissions are compiled with `g++` using GNU++23:
+C++ submissions are compiled with `g++` using GNU++23 and a fixed
+`x86-64` architecture target with generic tuning. The runner does not use
+`-march=native`, so binaries do not depend on the specific Fargate host that
+compiled the submission.
 
 ```bash
-g++ -std=gnu++23 -O3 -march=native Solution.cpp -o Solution
+g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic Solution.cpp -o Solution
 ./Solution
 ```
 
@@ -53,6 +56,11 @@ Java submissions are compiled and executed with:
 javac --release 11 Solution.java
 java -Xms1G -Xmx1G -cp <workdir> Solution
 ```
+
+After `javac` succeeds, the runner loads the compiled Java class in a short-lived
+isolated JVM without invoking `main`. This startup check makes Java static
+initializers part of the compile phase so hangs or class-load failures are
+reported through `compile_log.txt` under the configured compile timeout.
 
 The ECS runner image includes the Java 11 JDK, so Java source submissions can be compiled by the same runner task that executes the tester. The explicit `--release 11` flag makes the supported source and API level visible in compile artifacts.
 
@@ -84,9 +92,9 @@ mcs /r:System.Numerics.dll -out:Solution.exe Solution.cs
 mono Solution.exe
 ```
 
-### C# with .NET 10
+### C# with .NET 7 or .NET 10
 
-.NET C# submissions use the special `.cs_net10` extension. The older `.cs_net7` extension remains accepted for backward compatibility, but both extensions are compiled with the .NET 10 SDK and target `net10.0`. The runner creates a temporary project with unsafe blocks enabled, publishes it, and executes the published DLL:
+.NET C# submissions use special extensions that select the target framework. `.cs_net7` targets `net7.0` and is reported as `csharp-net7`; `.cs_net10` targets `net10.0` and is reported as `csharp-net10`. The runner creates a temporary project with unsafe blocks enabled, publishes it, and executes the published DLL:
 
 ```bash
 dotnet publish Solution.csproj -c Release -o Solution
@@ -98,6 +106,8 @@ dotnet Solution/Solution.dll
 Compile and test timeouts are configured per Marathon Match challenge.
 
 - `compileTimeout` controls submission compilation timeout.
+- For Java submissions, `compileTimeout` also covers class startup and static
+  initializer checks performed after `javac`.
 - `testTimeout` controls per-seed tester execution timeout.
 - `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 
@@ -115,7 +125,7 @@ The current processor runs as an ECS/Fargate task using the configured task defi
 
 The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:11-jdk-noble`.
 
-Tool versions verified from a local build of the current runner image:
+Tool versions configured in the current runner image:
 
 | Tool             | Version                            |
 | ---------------- | ---------------------------------- |
@@ -127,7 +137,7 @@ Tool versions verified from a local build of the current runner image:
 | Python           | `3.12.3`                           |
 | Mono runtime     | `6.8.0.105`                        |
 | Mono C# compiler | `mcs 6.8.0.105`                    |
-| .NET SDK         | `10.0.108`                         |
+| .NET SDK         | `7.0.410` and `10.0.108`           |
 | Rust compiler    | `rustc 1.96.0`                     |
 | Bash             | `5.2.21`                           |
 
@@ -137,7 +147,8 @@ The runner image includes:
 - `g++` backed by GCC 14 for C++23 submissions
 - `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
-- .NET 10 SDK for `.cs_net10` submissions and backward-compatible `.cs_net7` submissions
+- .NET 7 SDK for `.cs_net7` submissions
+- .NET 10 SDK for `.cs_net10` submissions
 - `rustc` from the Rust stable channel for `.rs` submissions
 - `zip` and `unzip` for artifact handling
 - native isolation helpers that scrub the tester child environment and run generic submitted solution commands as the restricted `scorer` user
@@ -156,6 +167,8 @@ The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
 FROM eclipse-temurin:11-jdk-noble
+
+ARG DOTNET_7_SDK_VERSION=7.0.410
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
@@ -181,6 +194,9 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_7_SDK_VERSION}" --install-dir /usr/lib/dotnet --no-path \
+    && rm /tmp/dotnet-install.sh \
     && rm -rf /var/lib/apt/lists/* \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
     && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
@@ -350,7 +366,8 @@ When relative scoring is enabled, the system recalculates the latest submission 
 
 For each testcase:
 
-- failed, missing, negative, or zero raw scores receive `0`
+- failed, missing, negative, or zero raw scores receive `0`, except for the `MINIMIZE` tied-zero case
+- a `MINIMIZE` raw score of `0` tied with a best score of `0` receives `100`
 - the best raw score receives `100`
 - all other valid scores receive `(lower score / higher score) * 100`
 
@@ -385,7 +402,7 @@ The ECS task parent process has trusted network access so it can:
 - upload artifacts
 - post scoring callbacks
 
-The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain readable only by the trusted root runner process. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
+The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain runner-owned mode `0400` files that submitted code cannot read or modify. Submitted solution commands are also restricted to a filesystem allowlist that omits infrastructure-revealing `/etc` and `/proc` paths. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
 
 ## Multithreading and Resource Notes
 

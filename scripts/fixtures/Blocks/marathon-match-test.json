@@ -46,6 +46,30 @@
     {
       "memberId": "88770025",
       "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-94-zero-score.zip",
+      "source": {
+        "fileName": "submission-issue-94-zero-score.zip",
+        "issue": 94,
+        "scenario": "Establishes a zero raw-score baseline for relative scoring division-by-zero regression coverage.",
+        "expectedRawScore": 0,
+        "expectedRelativeScore": 0
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-issue-94-zero-score.zip",
+      "source": {
+        "fileName": "submission-issue-94-zero-score.zip",
+        "issue": 94,
+        "scenario": "Submits a second zero raw score while the best testcase score is still zero.",
+        "expectedRawScore": 0,
+        "expectedRelativeScore": 0
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
       "file": "submissions/submission-3G9RNcDiRX4ioW.zip",
       "source": {
         "fileName": "submission-3G9RNcDiRX4ioW.zip"
@@ -134,10 +158,52 @@
     {
       "memberId": "88770025",
       "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-187-fixed-cpp-baseline.zip",
+      "source": {
+        "fileName": "submission-issue-187-fixed-cpp-baseline.zip",
+        "issue": "#187",
+        "language": "cpp",
+        "validates": "Fails compilation when host-specific ISA macros such as AVX2, BMI2, or AVX-512 are enabled, and succeeds when the runner uses the fixed x86-64/generic C++ target."
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
       "file": "submissions/submission-winner.zip",
       "source": {
         "fileName": "submission-winner.zip",
         "winner": true
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-107-repeat-submission.zip",
+      "source": {
+        "fileName": "submission-issue-107-repeat-submission.zip",
+        "issue": 107,
+        "purpose": "Benign repeated Blocks submission from the same member validates that newer submissions supersede older in-flight scorer tasks while the newest submission still scores normally."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-212-symlink-artifact.zip",
+      "source": {
+        "fileName": "submission-issue-212-symlink-artifact.zip",
+        "issue": 212,
+        "purpose": "Regression submission creates public/private artifact symlinks to /etc/os-release plus regular proof files. The runner must archive the proof files without dereferencing the symlinks."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-18-config-probe.zip",
+      "submittedDate": "2026-01-01T00:00:00.000Z",
+      "source": {
+        "fileName": "submission-issue-18-config-probe.zip",
+        "issue": "https://github.com/topcoder-platform/marathon-match-api-v6/issues/18",
+        "securityRegression": "Attempts to read /tmp/mm-isolated-scorer-*.json and reports only whether the file is readable, unreadable, or absent."
       }
     },
     {
@@ -158,19 +224,295 @@
         "issue": 186,
         "language": "rust",
         "validates": "The submission scans /proc/self/fd before playing Blocks and fails if any inherited descriptor numbered 1024 or higher remains visible in the sandbox."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
       "file": "submissions/submission-issue-261-java11-release.zip",
       "source": {
         "fileName": "submission-issue-261-java11-release.zip",
         "issue": 261,
         "language": "java",
         "validates": "Java submissions compile with javac --release 11 by using ProcessHandle and List.of while completing the Blocks tester protocol."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
       "file": "submissions/submission-issue-16-token-redaction.zip",
       "source": {
         "fileName": "submission-issue-16-token-redaction.zip",
         "issue": 16,
         "language": "rust",
-        "purpose": "Regression for issue #16 runner credential redaction. Run the Blocks fixture with DEBUG_LOG_ACCESS_TOKEN=true and DEBUG_LOG_FULL_ACCESS_TOKEN=true, then verify runner logs contain only redacted ACCESS_TOKEN output and normal scoring completes.",
+        "purpose": "Regression for issue #16 runner credential redaction. Run the Blocks fixture with DEBUG_LOG_ACCESS_TOKEN=true, then verify runner logs contain only redacted ACCESS_TOKEN output and normal scoring completes.",
         "proof": "The submission prints only ISSUE16_ACCESS_TOKEN_ABSENT or ISSUE16_ACCESS_TOKEN_PRESENT without printing any credential value; ACCESS_TOKEN should remain absent from the untrusted submission environment."
+      }
+    },
+    {
+      "memberId": "88770028",
+      "memberHandle": "devtest141",
+      "file": "submissions/submission-issue-75-relative-scoring-lock.zip",
+      "source": {
+        "fileName": "submission-issue-75-relative-scoring-lock.zip",
+        "regressionIssue": 75,
+        "copiedFrom": "submission-winner.zip",
+        "validates": "Adds a successful Blocks scorer callback to the relative-scoring fixture so concurrent callback validation exercises serialized review summation recomputation."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-100-invalid-score.zip",
+      "expectedScores": {
+        "provisional": -1,
+        "system": -1
+      },
+      "source": {
+        "fileName": "submission-issue-100-invalid-score.zip",
+        "issue": 100,
+        "behavior": "prints NaN as the first Blocks move to verify invalid scorer output is converted to a failed testcase instead of corrupting review summations"
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-319-no-source.zip",
+      "expectedScores": {
+        "provisional": -1,
+        "system": -1
+      },
+      "source": {
+        "fileName": "submission-issue-319-no-source.zip",
+        "issue": 319,
+        "description": "Contains only README.txt and notes.md to validate that a no-source submission writes a clean output.txt error instead of leaking a Java stack trace in public artifacts."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-299-root-tester-probe.zip",
+      "expectedScores": {
+        "provisional": 0,
+        "system": 0
+      },
+      "source": {
+        "fileName": "submission-issue-299-root-tester-probe.zip",
+        "issue": 299,
+        "language": "python",
+        "purpose": "Benign regression probe that records /proc uid metadata for the isolated tester JVM and fails only if that JVM is running as root.",
+        "expectedBehavior": "Patched runner logs the isolated tester JVM as uid 10001 and completes with aggregateScore 0."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-24-tmp-persistence.zip",
+      "expectedScores": {
+        "provisional": 0,
+        "system": 0
+      },
+      "source": {
+        "fileName": "submission-issue-24-tmp-persistence.zip",
+        "issue": 24,
+        "purpose": "Benign regression probe that writes a marker to /tmp and fails if a later seed can read it.",
+        "expectedBehavior": "Every seed starts with no prior scorer-owned /tmp marker, so the submission terminates immediately with score 0."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-290-scorer-config-permissions.zip",
+      "source": {
+        "fileName": "submission-issue-290-scorer-config-permissions.zip",
+        "issue": 290,
+        "purpose": "Regression submission confirms submitted code cannot open /tmp/mm-isolated-scorer-*.json for writing."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-289-tester-jar-readonly.zip",
+      "source": {
+        "fileName": "submission-issue-289-tester-jar-readonly.zip",
+        "issue": 289,
+        "language": "python",
+        "validates": "Submitted code cannot open /tmp/tester-*.jar for write while normal Blocks scoring still runs."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-287-output-limit.zip",
+      "source": {
+        "fileName": "submission-issue-287-output-limit.zip",
+        "issue": "287",
+        "purpose": "Regression fixture for the ECS runner output size limit.",
+        "oversizedArtifact": "artifacts/public/output.txt is 10000001 bytes, one byte over the default 10000000-byte runner cap.",
+        "expectedRunnerBehavior": "Scoring fails before public artifact upload with an Output size limit exceeded error."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-283-clean-termination.zip",
+      "source": {
+        "fileName": "submission-issue-283-clean-termination.zip",
+        "issue": 283,
+        "language": "python",
+        "validates": "Clean Blocks submission lifecycle when the solution flushes stderr, prints -1 immediately, and exits before runner artifact upload."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-255-cs-net7-target.zip",
+      "source": {
+        "fileName": "submission-issue-255-cs-net7-target.zip",
+        "issue": 255,
+        "language": "csharp-net7",
+        "validates": ".cs_net7 submissions target net7.0 and compile with the NET7_0 target framework constant."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-245-long-system-callback.zip",
+      "source": {
+        "fileName": "submission-issue-245-long-system-callback.zip",
+        "issue": 245,
+        "behavior": "Sleeps 800 ms before returning -1 for each testcase so the 5000-test SYSTEM runner crosses the typical one-hour M2M token lifetime and must refresh before posting callbacks."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-220-private-reviews.zip",
+      "source": {
+        "fileName": "submission-issue-220-private-reviews.zip",
+        "language": "python",
+        "issue": 220,
+        "purpose": "Regression submission that pre-creates artifacts/private/reviews.json with a benign forged marker so the trusted runner must replace it with the canonical internal review artifact."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-189-delayed-timeout.zip",
+      "source": {
+        "fileName": "submission-issue-189-delayed-timeout.zip",
+        "issue": "#189",
+        "behavior": "Reads the Blocks setup, waits 25 ms, then returns a benign end-of-game response so low-timeout fixture runs can validate MarathonTester.runTest() timeout enforcement."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-175-static-init-timeout.zip",
+      "source": {
+        "fileName": "submission-issue-175-static-init-timeout.zip",
+        "issue": 175,
+        "language": "java",
+        "behavior": "BlockGame has a static initializer that sleeps forever.",
+        "expectedResult": "Runner fails compilation/startup after compileTimeout and records the timeout in compile_log.txt."
+      }
+    },
+    {
+      "memberId": "88770101",
+      "memberHandle": "issue101ctypes",
+      "file": "submissions/submission-issue-101-ctypes-syscall.zip",
+      "source": {
+        "fileName": "submission-issue-101-ctypes-syscall.zip",
+        "issue": 101,
+        "language": "python",
+        "purpose": "Regression probe for Issue #101: calls libc.syscall(SYS_socket, AF_INET, SOCK_STREAM, 0) through Python ctypes and fails if a non-AF_UNIX socket can be created."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-82-child-process-network-block.zip",
+      "source": {
+        "fileName": "submission-issue-82-child-process-network-block.zip",
+        "issue": 82,
+        "language": "java",
+        "securityRegression": "Starts a child process with LD_PRELOAD removed and verifies AF_INET socket creation is denied before continuing normal Blocks scoring."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-77-io-uring.zip",
+      "source": {
+        "fileName": "submission-issue-77-io-uring.zip",
+        "language": "cpp",
+        "securityRegression": "Issue #77",
+        "validates": "The submitted solution exits with failure if io_uring_setup succeeds; a scored run means the ECS runner blocks io_uring before solution execution."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-65-skipped-dispatch.zip",
+      "source": {
+        "fileName": "submission-issue-65-skipped-dispatch.zip",
+        "issue": 65,
+        "purpose": "Regression fixture marker for submission events that are permanently skipped before ECS dispatch. The unit test covers the skipped-dispatch terminal summation; this benign Blocks submission keeps full-fixture validation exercising normal submission scoring."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-45-ignore-sigterm.zip",
+      "source": {
+        "fileName": "submission-issue-45-ignore-sigterm.zip",
+        "language": "cpp",
+        "issue": 45,
+        "validation": "Regression submission ignores SIGTERM and spins so per-test timeout must use destroyForcibly/SIGKILL."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-32-progress-display.zip",
+      "source": {
+        "fileName": "submission-issue-32-progress-display.zip",
+        "issue": 32,
+        "purpose": "Exercises scoring progress callbacks so IN PROGRESS summations render as unavailable instead of failed while final scoring still completes.",
+        "derivedFrom": "submission-winner.zip"
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-23-java-workdir-lifetime.zip",
+      "source": {
+        "fileName": "submission-issue-23-java-workdir-lifetime.zip",
+        "issue": 23,
+        "language": "java",
+        "validates": "Java submission compilation keeps the temporary compile workspace available until compilation and tester execution have completed."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-21-filesystem-leak.zip",
+      "source": {
+        "fileName": "submission-issue-21-filesystem-leak.zip",
+        "issue": 21,
+        "language": "python",
+        "validates": "Submitted code cannot read /etc/hostname, /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, or /proc/net TCP tables."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-19-tester-jar-read.zip",
+      "source": {
+        "fileName": "submission-issue-19-tester-jar-read.zip",
+        "issue": 19,
+        "language": "python",
+        "validates": "Submitted code cannot open any visible /tmp/tester-*.jar file for reading. The probe reads only the JAR magic bytes if the runner is vulnerable, emits ISSUE19_TESTER_JAR_READABLE, and otherwise continues with the normal Blocks sample strategy."
       }
     }
   ]

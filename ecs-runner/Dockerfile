@@ -11,6 +11,8 @@ RUN mvn -B -ntp clean package -DskipTests
 # Runtime stage
 FROM eclipse-temurin:11-jdk-noble
 
+ARG DOTNET_7_SDK_VERSION=7.0.410
+
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_TOOLCHAIN=stable
@@ -35,6 +37,9 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_7_SDK_VERSION}" --install-dir /usr/lib/dotnet --no-path \
+    && rm /tmp/dotnet-install.sh \
     && rm -rf /var/lib/apt/lists/* \
     && dotnet --info >/dev/null \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
@@ -50,9 +55,7 @@ WORKDIR /app
 COPY --from=builder /workspace/target/mm-ecs-runner-1.0.0.jar /app/mm-ecs-runner.jar
 COPY scripts/ /app/scripts/
 RUN gcc -O2 -Wall -Wextra \
-        -DMM_SKIP_USER_DROP=1 \
-        -DMM_ISOLATED_HOME=\"/root\" \
-        -DMM_ISOLATED_NAME=\"runner-child\" \
+        -DMM_INSTALL_SOCKET_FILTER=0 \
         -o /usr/local/bin/mm-runner-isolate \
         /app/scripts/mm-net-isolate.c \
     && gcc -O2 -Wall -Wextra \
@@ -61,10 +64,13 @@ RUN gcc -O2 -Wall -Wextra \
         -DMM_ISOLATED_HOME=\"/home/scorer\" \
         -DMM_ISOLATED_NAME=\"scorer\" \
         -DMM_SUPERVISE_CHILD=1 \
+        -DMM_DROP_SUPERVISOR_PRIVS=1 \
+        -DMM_ENABLE_FS_SANDBOX=1 \
         -o /usr/local/bin/mm-scorer-isolate \
         /app/scripts/mm-net-isolate.c \
     && chown root:root /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate \
-    && chmod 755 /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate \
+    && chmod 755 /usr/local/bin/mm-runner-isolate \
+    && chmod 4755 /usr/local/bin/mm-scorer-isolate \
     && chmod +x /app/scripts/*.sh
 
 ENV DOTNET_ROOT=/usr/lib/dotnet

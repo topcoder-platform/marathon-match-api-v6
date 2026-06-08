@@ -8,6 +8,7 @@ import { ApiModule } from './api/api.module';
 import { LoggerService } from './shared/modules/global/logger.service';
 import { Response } from 'express';
 import { isHealthCheckRequestUrl } from './shared/request/healthCheckRequest';
+import { buildCorsOrigin } from './shared/cors/cors-origin';
 
 const API_PREFIX = '/v6/marathon-match'; // Service prefix for all routes
 
@@ -35,14 +36,7 @@ async function bootstrap() {
     allowedHeaders:
       'Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Allow-Origin, Access-Control-Allow-Headers,currentOrg,overrideOrg,x-atlassian-cloud-id,x-api-key,x-orgid,app-version',
     credentials: true,
-    origin: process.env.CORS_ALLOWED_ORIGIN
-      ? new RegExp(process.env.CORS_ALLOWED_ORIGIN)
-      : [
-          'http://localhost:3000',
-          /\.localhost:3000$/,
-          /^https?:\/\/([a-zA-Z0-9-]+\.)*topcoder-dev\.com(:\d+)?$/,
-          /^https?:\/\/([a-zA-Z0-9-]+\.)*topcoder\.com(:\d+)?$/,
-        ],
+    origin: buildCorsOrigin(process.env.CORS_ALLOWED_ORIGIN),
     methods: 'GET, POST, OPTIONS, PUT, DELETE, PATCH',
   };
   app.use(cors(corsConfig));

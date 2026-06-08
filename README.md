@@ -29,7 +29,7 @@ The service is configured via environment variables.
 | --------------------------- | -------- | -------------------------------------- | ------------------------------------------------------------- |
 | `PORT`                      | No       | `3000`                                 | HTTP listen port                                              |
 | `NODE_ENV`                  | No       | (unset)                                | Token-expiration behavior and Prisma logging behavior         |
-| `CORS_ALLOWED_ORIGIN`       | No       | Built-in localhost/topcoder regex list | CORS origin matching                                          |
+| `CORS_ALLOWED_ORIGIN`       | No       | Built-in localhost/topcoder regex list | Exact CORS matching for a full browser Origin value           |
 | `DATABASE_URL`              | Yes      | None                                   | Prisma + pg-boss Postgres connection                          |
 | `POSTGRES_SCHEMA`           | No       | `public`                               | Prisma schema name used in runtime logging/connection context |
 | `MM_SERVICE_PRISMA_TIMEOUT` | No       | `10000`                                | Prisma transaction timeout (ms)                               |
@@ -40,6 +40,9 @@ The service is configured via environment variables.
 | ------------------------ | ---------------------------- | --------------------------------------- | -------------------------------- |
 | `AUTH_SECRET`            | Yes (for JWT validation)     | None                                    | tc-core JWT authenticator secret |
 | `VALID_ISSUERS`          | No                           | Topcoder/Auth0 issuer JSON array string | Accepted JWT issuers             |
+| `AUTHORIZATION_SESSION_VALIDATION_ENABLED` | No                           | `true`                                  | Enables Identity API active-session validation for user JWTs |
+| `AUTHORIZATION_VALIDATION_URL`             | No                           | Derived from `https://api.topcoder(-dev).com` token issuers | Full Identity API `authorizations/1` URL used to reject logged-out user tokens |
+| `AUTHORIZATION_VALIDATION_TIMEOUT_MS`      | No                           | `3000`                                  | Timeout for active-session validation requests |
 | `AUTH0_ISSUER`           | No                           | `https://topcoder-dev.auth0.com/`       | Legacy JWT config field          |
 | `TOKEN_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | Legacy JWT config field          |
 | `AUTH0_URL`              | No                           | `http://localhost:4000/oauth/token`     | M2M token endpoint               |
@@ -118,13 +121,13 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 | `ECS_SUBNETS`                 | Yes (for scoring) | None        | Comma-separated subnets for awsvpc task networking                                                      |
 | `ECS_SECURITY_GROUPS`         | Yes (for scoring) | None        | Comma-separated security groups for awsvpc networking                                                   |
 | `ECS_CONTAINER_NAME`          | Yes (for scoring) | None        | Container override target in task definition                                                            |
+| `ECS_SCORER_MAX_CONCURRENT_TASKS` | No                | `20`        | Maximum pending/running Marathon Match scorer tasks this API will allow before retry back-pressure       |
 | `MARATHON_MATCH_API_URL`      | Yes (for scoring) | None        | Base URL passed to ECS runner                                                                           |
 | `REVIEW_API_URL`              | Yes (for scoring) | None        | Review API base URL used by NestJS scoring callback processor                                           |
 | `REVIEW_TYPE_ID`              | Yes (for scoring) | None        | Review type ID passed to ECS runner callback payload                                                    |
 | `DEBUG_LOG_ACCESS_TOKEN`      | No                | `false`     | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
-| `DEBUG_LOG_FULL_ACCESS_TOKEN` | No                | `false`     | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true`              |
 
-`launchScorerTask(...)` already disables public IP assignment for scorer tasks. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
+`launchScorerTask(...)` already disables public IP assignment for scorer tasks. It also enforces the pending/running scorer task cap before calling `RunTask`, skips duplicate active launches for the same challenge/submission/phase, and stops older active tasks for the same challenge/member when a newer submission arrives. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
 
 ### ECS runner task environment (injected at launch)
 
@@ -144,7 +147,6 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 Optional debug vars (set on API service env to be forwarded to runner):
 
 - `DEBUG_LOG_ACCESS_TOKEN`
-- `DEBUG_LOG_FULL_ACCESS_TOKEN` (prints full bearer token; use only for short-lived debugging)
 
 ### Submission isolation inside the ECS runner
 
@@ -153,8 +155,9 @@ The ECS task still needs trusted outbound access to fetch challenge config, down
 - The container starts as `root`. Do not override the ECS task-definition `user`; the trusted runner needs root only to drop submitted solution commands to `scorer`.
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
-- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept root-only, so submitted code cannot read them from `/tmp`.
-- Native wrappers block creation of non-`AF_UNIX` sockets for the child JVM and submitted solution processes, so submissions cannot open live outbound network connections.
+- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept runner-owned mode `0400`, so submitted code cannot read or modify them from `/tmp`.
+- Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
+- Native wrappers block `io_uring` and creation of non-`AF_UNIX` sockets for submitted solution processes and their fork/exec children, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
 ## Exit code 137 (OOM) mitigation

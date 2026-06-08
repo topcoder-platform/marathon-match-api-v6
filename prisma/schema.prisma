@@ -49,6 +49,7 @@ model tester {
   @@index([id])
   @@index([name])
   @@index([compilationStatus])
+  @@unique([name, version])
   @@schema("marathon_match")
 }
 

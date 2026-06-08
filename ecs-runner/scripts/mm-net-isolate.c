@@ -2,9 +2,11 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <grp.h>
 #include <linux/audit.h>
 #include <linux/filter.h>
+#include <linux/landlock.h>
 #include <linux/seccomp.h>
 #include <limits.h>
 #include <signal.h>
@@ -15,6 +17,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -52,12 +55,53 @@
 #define MM_CLOSE_FD_FALLBACK_MAX ((rlim_t) 1048576)
 #endif
 
+#ifndef MM_INSTALL_SOCKET_FILTER
+#define MM_INSTALL_SOCKET_FILTER 1
+#endif
+
+#ifndef MM_DROP_SUPERVISOR_PRIVS
+#define MM_DROP_SUPERVISOR_PRIVS 0
+#endif
+
+#ifndef MM_ENABLE_FS_SANDBOX
+#define MM_ENABLE_FS_SANDBOX 0
+#endif
+
 #if defined(__x86_64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_X86_64
+#define MM_BLOCK_X32_SYSCALLS 1
+#define MM_X32_SYSCALL_BIT 0x40000000U
 #elif defined(__aarch64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_AARCH64
+#define MM_BLOCK_X32_SYSCALLS 0
 #else
 #error "Unsupported architecture for mm-net-isolate"
+#endif
+
+#define MM_SOCKET_DENY (SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
+
+#ifndef __NR_io_uring_setup
+#define __NR_io_uring_setup 425
+#endif
+
+#ifndef __NR_io_uring_enter
+#define __NR_io_uring_enter 426
+#endif
+
+#ifndef __NR_io_uring_register
+#define __NR_io_uring_register 427
+#endif
+
+#ifndef __NR_landlock_create_ruleset
+#define __NR_landlock_create_ruleset 444
+#endif
+
+#ifndef __NR_landlock_add_rule
+#define __NR_landlock_add_rule 445
+#endif
+
+#ifndef __NR_landlock_restrict_self
+#define __NR_landlock_restrict_self 446
 #endif
 
 #if MM_SUPERVISE_CHILD
@@ -128,21 +172,35 @@ static void close_extra_fds(void) {
     }
 }
 
+#if MM_INSTALL_SOCKET_FILTER
 static int install_socket_filter(void) {
     struct sock_filter filter[] = {
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, arch)),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, MM_AUDIT_ARCH, 1, 0),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_KILL_PROCESS),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
+#if MM_BLOCK_X32_SYSCALLS
+        BPF_STMT(BPF_ALU + BPF_AND + BPF_K, MM_X32_SYSCALL_BIT),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 0, 1, 0),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
+#endif
+        /* io_uring can create sockets in-kernel through IORING_OP_SOCKET. */
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_setup, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_enter, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_register, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socket, 0, 4),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, args[0])),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AF_UNIX, 1, 0),
-        BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketpair, 0, 4),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, args[0])),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AF_UNIX, 1, 0),
-        BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
         BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
     };
@@ -164,6 +222,333 @@ static int install_socket_filter(void) {
 
     return 0;
 }
+#endif
+
+#if MM_ENABLE_FS_SANDBOX
+static int landlock_create_ruleset_wrapper(
+    const struct landlock_ruleset_attr *attr,
+    size_t size,
+    __u32 flags
+) {
+    return (int) syscall(__NR_landlock_create_ruleset, attr, size, flags);
+}
+
+static int landlock_add_rule_wrapper(
+    int ruleset_fd,
+    enum landlock_rule_type rule_type,
+    const void *rule_attr,
+    __u32 flags
+) {
+    return (int) syscall(
+        __NR_landlock_add_rule,
+        ruleset_fd,
+        rule_type,
+        rule_attr,
+        flags
+    );
+}
+
+static int landlock_restrict_self_wrapper(int ruleset_fd, __u32 flags) {
+    return (int) syscall(__NR_landlock_restrict_self, ruleset_fd, flags);
+}
+
+/**
+ * Returns the Landlock filesystem access rights supported by the running
+ * kernel and the headers used to build this helper.
+ */
+static __u64 supported_landlock_fs_access(int abi_version) {
+    __u64 access =
+        LANDLOCK_ACCESS_FS_EXECUTE |
+        LANDLOCK_ACCESS_FS_WRITE_FILE |
+        LANDLOCK_ACCESS_FS_READ_FILE |
+        LANDLOCK_ACCESS_FS_READ_DIR |
+        LANDLOCK_ACCESS_FS_REMOVE_DIR |
+        LANDLOCK_ACCESS_FS_REMOVE_FILE |
+        LANDLOCK_ACCESS_FS_MAKE_CHAR |
+        LANDLOCK_ACCESS_FS_MAKE_DIR |
+        LANDLOCK_ACCESS_FS_MAKE_REG |
+        LANDLOCK_ACCESS_FS_MAKE_SOCK |
+        LANDLOCK_ACCESS_FS_MAKE_FIFO |
+        LANDLOCK_ACCESS_FS_MAKE_BLOCK |
+        LANDLOCK_ACCESS_FS_MAKE_SYM;
+
+    if (abi_version >= 2) {
+        access |= LANDLOCK_ACCESS_FS_REFER;
+    }
+
+    if (abi_version >= 3) {
+        access |= LANDLOCK_ACCESS_FS_TRUNCATE;
+    }
+
+    return access;
+}
+
+static __u64 landlock_read_execute_dir_access(__u64 handled_access) {
+    return handled_access & (
+        LANDLOCK_ACCESS_FS_EXECUTE |
+        LANDLOCK_ACCESS_FS_READ_FILE |
+        LANDLOCK_ACCESS_FS_READ_DIR
+    );
+}
+
+static __u64 landlock_read_only_access(__u64 handled_access) {
+    return handled_access & (
+        LANDLOCK_ACCESS_FS_READ_FILE |
+        LANDLOCK_ACCESS_FS_READ_DIR
+    );
+}
+
+static __u64 landlock_read_write_file_access(__u64 handled_access) {
+    __u64 access =
+        LANDLOCK_ACCESS_FS_READ_FILE |
+        LANDLOCK_ACCESS_FS_WRITE_FILE;
+
+    if (handled_access & LANDLOCK_ACCESS_FS_TRUNCATE) {
+        access |= LANDLOCK_ACCESS_FS_TRUNCATE;
+    }
+
+    return handled_access & access;
+}
+
+static __u64 landlock_writable_dir_access(__u64 handled_access) {
+    __u64 access =
+        LANDLOCK_ACCESS_FS_EXECUTE |
+        LANDLOCK_ACCESS_FS_WRITE_FILE |
+        LANDLOCK_ACCESS_FS_READ_FILE |
+        LANDLOCK_ACCESS_FS_READ_DIR |
+        LANDLOCK_ACCESS_FS_REMOVE_DIR |
+        LANDLOCK_ACCESS_FS_REMOVE_FILE |
+        LANDLOCK_ACCESS_FS_MAKE_DIR |
+        LANDLOCK_ACCESS_FS_MAKE_REG |
+        LANDLOCK_ACCESS_FS_MAKE_SOCK |
+        LANDLOCK_ACCESS_FS_MAKE_FIFO |
+        LANDLOCK_ACCESS_FS_MAKE_SYM;
+
+    if (handled_access & LANDLOCK_ACCESS_FS_REFER) {
+        access |= LANDLOCK_ACCESS_FS_REFER;
+    }
+
+    if (handled_access & LANDLOCK_ACCESS_FS_TRUNCATE) {
+        access |= LANDLOCK_ACCESS_FS_TRUNCATE;
+    }
+
+    return handled_access & access;
+}
+
+/**
+ * Adds one filesystem allow rule. Missing optional paths are ignored so the
+ * same helper can run across the supported language-runtime image variants.
+ */
+static int add_landlock_path_rule(
+    int ruleset_fd,
+    const char *path,
+    __u64 allowed_access,
+    __u64 handled_access,
+    int required
+) {
+    int fd;
+    int result;
+    struct stat stat_buffer;
+    struct landlock_path_beneath_attr path_beneath;
+    __u64 path_access = allowed_access & handled_access;
+
+    if (path_access == 0) {
+        return 0;
+    }
+
+    fd = open(path, O_PATH | O_CLOEXEC);
+    if (fd < 0) {
+        if (!required && (errno == ENOENT || errno == ENOTDIR)) {
+            return 0;
+        }
+        fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    if (fstat(fd, &stat_buffer) != 0) {
+        fprintf(stderr, "fstat(%s): %s\n", path, strerror(errno));
+        close(fd);
+        return 1;
+    }
+
+    if (!S_ISDIR(stat_buffer.st_mode)) {
+        path_access &= (
+            LANDLOCK_ACCESS_FS_EXECUTE |
+            LANDLOCK_ACCESS_FS_WRITE_FILE |
+            LANDLOCK_ACCESS_FS_READ_FILE |
+            LANDLOCK_ACCESS_FS_TRUNCATE
+        );
+    }
+
+    memset(&path_beneath, 0, sizeof(path_beneath));
+    path_beneath.allowed_access = path_access;
+    path_beneath.parent_fd = fd;
+
+    result = landlock_add_rule_wrapper(
+        ruleset_fd,
+        LANDLOCK_RULE_PATH_BENEATH,
+        &path_beneath,
+        0
+    );
+    close(fd);
+
+    if (result != 0) {
+        fprintf(stderr, "landlock_add_rule(%s): %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    return 0;
+}
+
+static int add_landlock_paths(
+    int ruleset_fd,
+    const char *const *paths,
+    size_t path_count,
+    __u64 allowed_access,
+    __u64 handled_access,
+    int required
+) {
+    size_t index;
+    for (index = 0; index < path_count; index++) {
+        if (
+            add_landlock_path_rule(
+                ruleset_fd,
+                paths[index],
+                allowed_access,
+                handled_access,
+                required
+            ) != 0
+        ) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Restricts submitted solution filesystem access to runtime/toolchain files and
+ * scorer-owned writable locations. Infrastructure-revealing files such as
+ * /etc/hostname, /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, and
+ * proc network tables are intentionally omitted from the allowlist.
+ */
+static int install_filesystem_filter(void) {
+    static const char *const read_execute_paths[] = {
+        "/bin",
+        "/sbin",
+        "/usr",
+        "/lib",
+        "/lib64",
+        "/opt"
+    };
+    static const char *const read_only_paths[] = {
+        "/etc/dotnet",
+        "/etc/group",
+        "/etc/ld.so.cache",
+        "/etc/localtime",
+        "/etc/mono",
+        "/etc/nsswitch.conf",
+        "/etc/passwd",
+        "/etc/protocols",
+        "/etc/services",
+        "/etc/ssl/certs"
+    };
+    static const char *const read_write_paths[] = {
+        "/dev/null",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/zero"
+    };
+    static const char *const writable_paths[] = {
+        "/tmp",
+        MM_ISOLATED_HOME
+    };
+
+    int abi_version = landlock_create_ruleset_wrapper(
+        NULL,
+        0,
+        LANDLOCK_CREATE_RULESET_VERSION
+    );
+    int ruleset_fd;
+    struct landlock_ruleset_attr ruleset_attr;
+    __u64 handled_access;
+
+    if (abi_version <= 0) {
+        fprintf(
+            stderr,
+            "Landlock filesystem sandbox is unavailable; refusing to run submitted command: %s\n",
+            strerror(errno)
+        );
+        return 1;
+    }
+
+    handled_access = supported_landlock_fs_access(abi_version);
+    memset(&ruleset_attr, 0, sizeof(ruleset_attr));
+    ruleset_attr.handled_access_fs = handled_access;
+
+    ruleset_fd = landlock_create_ruleset_wrapper(
+        &ruleset_attr,
+        sizeof(ruleset_attr),
+        0
+    );
+    if (ruleset_fd < 0) {
+        perror("landlock_create_ruleset");
+        return 1;
+    }
+
+    if (
+        add_landlock_paths(
+            ruleset_fd,
+            read_execute_paths,
+            sizeof(read_execute_paths) / sizeof(read_execute_paths[0]),
+            landlock_read_execute_dir_access(handled_access),
+            handled_access,
+            0
+        ) != 0
+            || add_landlock_paths(
+                ruleset_fd,
+                read_only_paths,
+                sizeof(read_only_paths) / sizeof(read_only_paths[0]),
+                landlock_read_only_access(handled_access),
+                handled_access,
+                0
+            ) != 0
+            || add_landlock_paths(
+                ruleset_fd,
+                read_write_paths,
+                sizeof(read_write_paths) / sizeof(read_write_paths[0]),
+                landlock_read_write_file_access(handled_access),
+                handled_access,
+                0
+            ) != 0
+            || add_landlock_paths(
+                ruleset_fd,
+                writable_paths,
+                sizeof(writable_paths) / sizeof(writable_paths[0]),
+                landlock_writable_dir_access(handled_access),
+                handled_access,
+                1
+            ) != 0
+    ) {
+        close(ruleset_fd);
+        return 1;
+    }
+
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+        perror("prctl(PR_SET_NO_NEW_PRIVS)");
+        close(ruleset_fd);
+        return 1;
+    }
+
+    if (landlock_restrict_self_wrapper(ruleset_fd, 0) != 0) {
+        perror("landlock_restrict_self");
+        close(ruleset_fd);
+        return 1;
+    }
+
+    close(ruleset_fd);
+    return 0;
+}
+#endif
 
 static void sanitize_environment(void) {
     const char *path = getenv("PATH");
@@ -244,7 +629,7 @@ static int drop_to_isolated_user(void) {
 }
 
 /**
- * Enters the low-privilege socket-restricted execution context.
+ * Enters the low-privilege execution context.
  *
  * Returns 0 on success and 1 when the user drop or seccomp setup fails.
  */
@@ -253,9 +638,17 @@ static int enter_isolated_execution(void) {
         return 1;
     }
 
+#if MM_ENABLE_FS_SANDBOX
+    if (install_filesystem_filter() != 0) {
+        return 1;
+    }
+#endif
+
+#if MM_INSTALL_SOCKET_FILTER
     if (install_socket_filter() != 0) {
         return 1;
     }
+#endif
 
     return 0;
 }
@@ -270,7 +663,9 @@ static void forward_signal_to_child(int signo) {
     pid_t child_pid = (pid_t) supervised_child_pid;
     if (child_pid > 0) {
         if (kill(-child_pid, signo) != 0) {
-            kill(child_pid, signo);
+            if (kill(child_pid, signo) != 0 && errno == EPERM) {
+                _exit(128 + signo);
+            }
         }
     }
 }
@@ -303,6 +698,38 @@ static int wait_status_to_exit_code(int status) {
     }
 
     return 1;
+}
+
+/**
+ * Drops the supervising wrapper back to the real user that invoked the setuid
+ * scorer helper. The already-forked child keeps the temporary root privilege it
+ * needs to switch to the configured isolated UID before exec.
+ */
+static int drop_supervisor_to_invoker(void) {
+#if MM_DROP_SUPERVISOR_PRIVS
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+
+    if (uid == 0 && gid == 0) {
+        return 0;
+    }
+
+    if (setgroups(0, NULL) != 0) {
+        perror("supervisor setgroups");
+        return 1;
+    }
+
+    if (setgid(gid) != 0) {
+        perror("supervisor setgid");
+        return 1;
+    }
+
+    if (setuid(uid) != 0) {
+        perror("supervisor setuid");
+        return 1;
+    }
+#endif
+    return 0;
 }
 
 /**
@@ -350,6 +777,10 @@ static int run_supervised(int argc, char **argv) {
 
     supervised_child_pid = child_pid;
     setpgid(child_pid, child_pid);
+    if (drop_supervisor_to_invoker() != 0) {
+        kill(-child_pid, SIGKILL);
+        return 1;
+    }
     install_supervisor_signal_handlers();
 
     while (waitpid(child_pid, &status, 0) < 0) {

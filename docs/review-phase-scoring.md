@@ -64,7 +64,7 @@ sequenceDiagram
 
 After `ScoringResultService` writes the SYSTEM review summation, `completeSystemReviewIfNeeded` patches the originating review to `COMPLETED` and writes the final score back to Review API.
 
-While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested.
+While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested. In-progress summations keep a neutral placeholder score and should be displayed as unavailable from `testStatus`; failed progress uses the failed-score sentinel.
 
 Each dispatched SYSTEM task also schedules a pg-boss timeout check using the config's `systemTestTimeout` value. The default is 24 hours (`86400000` ms). When the delayed check runs, the API describes the ECS task and checks the SYSTEM summation; if the task is still active and the summation is not complete, it stops the ECS task, writes a failed SYSTEM summation with score `-1`, and includes `metadata.timed_out = true`.
 
@@ -82,7 +82,7 @@ After the review and downstream phases are closed, `SchedulerService` calls `att
 
 ## Submission isolation
 
-SYSTEM review scoring uses the same ECS runner isolation model as submission-phase scoring. The trusted parent runner process keeps the network access required for bootstrap and callback traffic, the tester executes in a scrubbed child JVM, and generic submitted solution commands run as the separate non-root `scorer` user with no outbound INET/INET6 socket access.
+SYSTEM review scoring uses the same ECS runner isolation model as submission-phase scoring. The trusted parent runner process keeps the network access required for bootstrap and callback traffic, the tester executes in a scrubbed child JVM, and generic submitted solution commands run as the separate non-root `scorer` user with no outbound INET/INET6 socket access and no read access to infrastructure-revealing `/etc` and `/proc` paths.
 
 ## Observability
 
