@@ -3172,7 +3172,7 @@ public class EcsRunnerMain {
         throws IOException {
         Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
         Files.write(jarPath, jarBytes);
-        secureRunnerOnlyFile(jarPath);
+        secureRunnerReadOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
             "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"

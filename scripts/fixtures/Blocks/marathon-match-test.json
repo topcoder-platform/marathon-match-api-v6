@@ -233,6 +233,17 @@
         "issue": 290,
         "purpose": "Regression submission confirms submitted code cannot open /tmp/mm-isolated-scorer-*.json for writing."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-289-tester-jar-readonly.zip",
+      "source": {
+        "fileName": "submission-issue-289-tester-jar-readonly.zip",
+        "issue": 289,
+        "language": "python",
+        "validates": "Submitted code cannot open /tmp/tester-*.jar for write while normal Blocks scoring still runs."
+      }
     }
   ]
 }
