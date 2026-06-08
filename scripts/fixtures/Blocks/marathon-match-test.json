@@ -401,6 +401,17 @@
         "language": "python",
         "purpose": "Regression probe for Issue #101: calls libc.syscall(SYS_socket, AF_INET, SOCK_STREAM, 0) through Python ctypes and fails if a non-AF_UNIX socket can be created."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-82-child-process-network-block.zip",
+      "source": {
+        "fileName": "submission-issue-82-child-process-network-block.zip",
+        "issue": 82,
+        "language": "java",
+        "securityRegression": "Starts a child process with LD_PRELOAD removed and verifies AF_INET socket creation is denied before continuing normal Blocks scoring."
+      }
     }
   ]
 }
