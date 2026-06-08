@@ -495,17 +495,16 @@ export class MarathonMatchConfigService {
 
   /**
    * Reruns scorer tasks for the latest submissions of an active marathon match challenge.
-   * Uses the challenge's PROVISIONAL phase config to mirror active-challenge
-   * submission scoring, validates active/open challenge runtime state through
-   * challenge-api, reduces submission API results to one latest submission
-   * per member, and launches ECS scorer tasks in bounded batches to avoid
-   * RunTask API throttling.
+   * Uses the challenge's currently open phase config, validates active/open
+   * challenge runtime state through challenge-api, reduces submission API
+   * results to one latest submission per member, and launches ECS scorer tasks
+   * in bounded batches to avoid RunTask API throttling.
    * @param challengeId Challenge ID from path params in POST /challenge/:challengeId/rerun.
    * @param user Authenticated user or machine token payload for audit-aware logging.
    * @returns Rerun dispatch summary mapped to `RerunResponseDto`.
    * @throws NotFoundException When the marathon match config does not exist.
    * @throws BadRequestException When the config/challenge is inactive, the challenge has no open phase,
-   * the tester is not compiled successfully, or no PROVISIONAL phase config exists.
+   * the tester is not compiled successfully, or no matching open phase config exists.
    * @throws InternalServerErrorException When submission lookup or ECS dispatch fails unexpectedly.
    */
   async rerunLatestSubmissions(
@@ -537,16 +536,6 @@ export class MarathonMatchConfigService {
         const compilationError = config.tester.compilationError?.trim();
         throw new BadRequestException(
           `Tester ${config.testerId} for challenge ${challengeId} is not ready for rerun. Current compilation status: ${config.tester.compilationStatus}.${compilationError ? ` compilationError: ${compilationError}` : ''}`,
-        );
-      }
-
-      const provisionalPhaseConfig = config.phaseConfigs.find(
-        (phaseConfigData) =>
-          phaseConfigData.configType === PhaseConfigType.PROVISIONAL,
-      );
-      if (!provisionalPhaseConfig) {
-        throw new BadRequestException(
-          `Marathon match config ${challengeId} requires a PROVISIONAL phase config for rerun.`,
         );
       }
 
@@ -781,8 +770,25 @@ export class MarathonMatchConfigService {
           return openPhaseIds;
         }
 
-        const currentPhaseId = extractPhaseId(challengePayload.currentPhase);
+        const currentPhase = asRecord(challengePayload.currentPhase);
+        if (asBoolean(currentPhase.isOpen) !== true) {
+          return [];
+        }
+
+        const currentPhaseId = extractPhaseId(currentPhase);
         return currentPhaseId ? [currentPhaseId] : [];
+      };
+      const findPhaseConfigForOpenPhase = (openPhaseIds: string[]) => {
+        for (const openPhaseId of openPhaseIds) {
+          const openPhaseConfig = config.phaseConfigs.find(
+            (phaseConfigData) => phaseConfigData.phaseId.trim() === openPhaseId,
+          );
+          if (openPhaseConfig) {
+            return openPhaseConfig;
+          }
+        }
+
+        return null;
       };
       type RerunSubmissionCandidate = {
         submissionId: string;
@@ -867,9 +873,17 @@ export class MarathonMatchConfigService {
         );
       }
 
-      if (extractOpenPhaseIds(challengeResponse.data).length === 0) {
+      const openPhaseIds = extractOpenPhaseIds(challengeResponse.data);
+      if (openPhaseIds.length === 0) {
         throw new BadRequestException(
           `Challenge ${challengeId} has no open phase. Rerun is allowed only for ACTIVE Marathon Match challenges.`,
+        );
+      }
+
+      const openPhaseConfig = findPhaseConfigForOpenPhase(openPhaseIds);
+      if (!openPhaseConfig) {
+        throw new BadRequestException(
+          `Marathon match config ${challengeId} has no phase config for currently open challenge phase ${openPhaseIds.join(', ')}.`,
         );
       }
 
@@ -975,9 +989,9 @@ export class MarathonMatchConfigService {
           taskDefinitionVersion: config.taskDefinitionVersion,
         },
         {
-          configType: provisionalPhaseConfig.configType,
-          startSeed: provisionalPhaseConfig.startSeed,
-          numberOfTests: provisionalPhaseConfig.numberOfTests,
+          configType: openPhaseConfig.configType,
+          startSeed: openPhaseConfig.startSeed,
+          numberOfTests: openPhaseConfig.numberOfTests,
         },
       );
 
