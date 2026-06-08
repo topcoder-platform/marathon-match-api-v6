@@ -423,6 +423,16 @@
         "securityRegression": "Issue #77",
         "validates": "The submitted solution exits with failure if io_uring_setup succeeds; a scored run means the ECS runner blocks io_uring before solution execution."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-65-skipped-dispatch.zip",
+      "source": {
+        "fileName": "submission-issue-65-skipped-dispatch.zip",
+        "issue": 65,
+        "purpose": "Regression fixture marker for submission events that are permanently skipped before ECS dispatch. The unit test covers the skipped-dispatch terminal summation; this benign Blocks submission keeps full-fixture validation exercising normal submission scoring."
+      }
     }
   ]
 }
