@@ -193,6 +193,20 @@
         "copiedFrom": "submission-winner.zip",
         "validates": "Adds a successful Blocks scorer callback to the relative-scoring fixture so concurrent callback validation exercises serialized review summation recomputation."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-319-no-source.zip",
+      "expectedScores": {
+        "provisional": -1,
+        "system": -1
+      },
+      "source": {
+        "fileName": "submission-issue-319-no-source.zip",
+        "issue": 319,
+        "description": "Contains only README.txt and notes.md to validate that a no-source submission writes a clean output.txt error instead of leaking a Java stack trace in public artifacts."
+      }
     }
   ]
 }

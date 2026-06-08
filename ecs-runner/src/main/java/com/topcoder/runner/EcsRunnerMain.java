@@ -92,6 +92,10 @@ public class EcsRunnerMain {
         ".cs_net7",
         ".rs"
     );
+    private static final String SUPPORTED_SOURCE_EXTENSIONS_TEXT =
+        String.join(", ", SUPPORTED_SOURCE_EXTENSIONS);
+    private static final String NO_SUPPORTED_SOURCE_ERROR =
+        "No supported source file found.";
     private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
         "(?m)^\\s*package\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)\\s*;"
     );
@@ -3286,10 +3290,21 @@ public class EcsRunnerMain {
         Files.createDirectories(artifactsPrivateDir);
 
         String expectedSolutionBaseName = deriveExpectedSolutionBaseName(testerClassName);
-        Path submissionSource = locateSubmissionSource(
-            submissionRoot,
-            expectedSolutionBaseName
-        );
+        Path submissionSource;
+        try {
+            submissionSource = locateSubmissionSource(
+                submissionRoot,
+                expectedSolutionBaseName
+            );
+        } catch (IllegalArgumentException error) {
+            logWarn(
+                "submission.validation",
+                NO_SUPPORTED_SOURCE_ERROR
+                    + " Supported extensions: "
+                    + SUPPORTED_SOURCE_EXTENSIONS_TEXT
+            );
+            return buildNoSupportedSourceResult(testerClassName, artifactsPublicDir);
+        }
 
         int timeLimitMs = resolvePositiveInt(
             scorerConfig.getTimeLimit(),
@@ -3419,6 +3434,52 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Writes a member-visible validation error for submissions that do not contain
+     * a supported source file and returns a structured failed result.
+     *
+     * @param testerClassName Fully qualified Marathon tester class name.
+     * @param artifactsPublicDir Public artifact directory where {@code output.txt} is written.
+     * @return Failed tester execution result with validation metadata.
+     * @throws IOException When the public output artifact cannot be written.
+     */
+    private static TesterExecutionResult buildNoSupportedSourceResult(
+        String testerClassName,
+        Path artifactsPublicDir
+    ) throws IOException {
+        String outputText =
+            "Submission error: "
+                + NO_SUPPORTED_SOURCE_ERROR
+                + "\nSupported extensions: "
+                + SUPPORTED_SOURCE_EXTENSIONS_TEXT
+                + "\n";
+        Files.write(
+            artifactsPublicDir.resolve("output.txt"),
+            outputText.getBytes(StandardCharsets.UTF_8)
+        );
+
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("testerClass", testerClassName);
+        metadata.put("submissionError", NO_SUPPORTED_SOURCE_ERROR);
+        metadata.put(
+            "supportedExtensions",
+            new ArrayList<String>(SUPPORTED_SOURCE_EXTENSIONS)
+        );
+        metadata.put("numberOfTests", 0);
+
+        Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
+        currentReview.put("score", -1.0);
+        currentReview.put("aggregateScore", -1.0);
+        currentReview.put("metadata", metadata);
+
+        return new TesterExecutionResult(
+            -1.0,
+            metadata,
+            currentReview,
+            new ArrayList<Map<String, Object>>()
+        );
+    }
+
+    /**
      * Emits a progress marker for the trusted parent process to forward to the API.
      *
      * @param completedTests Number of seeds completed by the generic runner.
@@ -3495,10 +3556,7 @@ public class EcsRunnerMain {
 
         if (candidates.isEmpty()) {
             throw new IllegalArgumentException(
-                "No supported submission source was found under "
-                    + submissionRoot
-                    + ". Expected one of: "
-                    + SUPPORTED_SOURCE_EXTENSIONS
+                NO_SUPPORTED_SOURCE_ERROR
             );
         }
 
