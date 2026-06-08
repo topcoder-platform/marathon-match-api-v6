@@ -9,7 +9,7 @@ COPY src/ /workspace/src/
 RUN mvn -B -ntp clean package -DskipTests
 
 # Runtime stage
-FROM eclipse-temurin:8-jdk-noble
+FROM eclipse-temurin:11-jdk-noble
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo

@@ -152,6 +152,12 @@
     {
       "memberId": "88770029",
       "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-261-java11-release.zip",
+      "source": {
+        "fileName": "submission-issue-261-java11-release.zip",
+        "issue": 261,
+        "language": "java",
+        "validates": "Java submissions compile with javac --release 11 by using ProcessHandle and List.of while completing the Blocks tester protocol."
       "file": "submissions/submission-issue-16-token-redaction.zip",
       "source": {
         "fileName": "submission-issue-16-token-redaction.zip",
