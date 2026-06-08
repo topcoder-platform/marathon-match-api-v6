@@ -109,6 +109,7 @@ Compile and test timeouts are configured per Marathon Match challenge.
 - For Java submissions, `compileTimeout` also covers class startup and static
   initializer checks performed after `javac`.
 - `testTimeout` controls per-seed tester execution timeout.
+- `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 
 The default values supplied by `marathon-match-api-v6` are environment-configurable. If not overridden in service configuration, the API defaults are:
 
@@ -116,6 +117,7 @@ The default values supplied by `marathon-match-api-v6` are environment-configura
 | ---------------- | ----------: |
 | `testTimeout`    |  `90000` ms |
 | `compileTimeout` | `120000` ms |
+| `systemTestTimeout` | `86400000` ms |
 
 ## Processing Server Specifications
 

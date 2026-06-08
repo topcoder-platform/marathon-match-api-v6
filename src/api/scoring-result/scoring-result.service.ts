@@ -22,6 +22,10 @@ import {
   SubmissionScoringCompletionEmailDetails,
   SystemScoringCompletionEmailDetails,
 } from './scoring-completion-email.service';
+import {
+  SystemTestTimeoutJobData,
+  SystemTestTimeoutSchedulerService,
+} from './system-test-timeout-scheduler.service';
 
 export interface ScoringResultCallbackPayload {
   challengeId: string;
@@ -182,6 +186,8 @@ export class ScoringResultService {
     private readonly ecsService: EcsService,
     @Optional()
     private readonly scoringCompletionEmailService?: ScoringCompletionEmailService,
+    @Optional()
+    private readonly systemTestTimeoutSchedulerService?: SystemTestTimeoutSchedulerService,
   ) {}
 
   /**
@@ -367,6 +373,66 @@ export class ScoringResultService {
   }
 
   /**
+   * Checks whether a phase review summation has reached a terminal state.
+   * Used by the SYSTEM timeout worker before stopping a runner task so a delayed
+   * timeout job cannot overwrite an already completed success or failure.
+   * @param challengeId Challenge identifier that owns the submission.
+   * @param submissionId Submission identifier to inspect.
+   * @param testPhase Example, provisional, or system phase name.
+   * @returns True when any matching review summation is complete.
+   */
+  async isPhaseScoringComplete(
+    challengeId: string,
+    submissionId: string,
+    testPhase: string,
+  ): Promise<boolean> {
+    const normalizedPhase = this.normalizeTestPhase(testPhase);
+    await this.requireScoringResultConfig(challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error('Unable to get M2M token for review summation lookup.');
+    }
+
+    const existingReviews = await this.findExistingReviewSummations(
+      token,
+      submissionId,
+      normalizedPhase,
+    );
+
+    return existingReviews.some((review) =>
+      Boolean(this.resolveCompletedPhaseScoringResult(review)),
+    );
+  }
+
+  /**
+   * Persists a failed SYSTEM review summation caused by the total timeout guard.
+   * The summation metadata includes `timed_out: true` so downstream consumers can
+   * distinguish timeout failures from runner/tester failures.
+   * @param data Timeout job data containing challenge, submission, review, and task context.
+   * @returns Promise that resolves after the failed scoring result is processed.
+   */
+  async markSystemTestTimedOut(data: SystemTestTimeoutJobData): Promise<void> {
+    const timeoutMs = this.resolveSystemTestTimeout(data.timeoutMs);
+
+    await this.processScoringResult({
+      challengeId: data.challengeId,
+      submissionId: data.submissionId,
+      score: -1,
+      testPhase: 'system',
+      reviewTypeId: data.reviewTypeId,
+      reviewId: data.reviewId,
+      scorecardId: data.scorecardId,
+      metadata: {
+        timed_out: true,
+        timeoutMs,
+        taskArn: data.taskArn,
+        timeoutMessage: `SYSTEM scoring timed out after ${timeoutMs} ms.`,
+      },
+    });
+  }
+
+  /**
    * Dispatches the SYSTEM scorer task for a pending Marathon Match review.
    * @param reviewId Review identifier created in review-api.
    * @param submissionId Submission identifier to score.
@@ -433,6 +499,18 @@ export class ScoringResultService {
       },
       reviewId,
     );
+    const systemTestTimeout = this.resolveSystemTestTimeout(
+      config.systemTestTimeout,
+    );
+    await this.scheduleSystemScoringTimeout({
+      challengeId,
+      submissionId,
+      reviewId,
+      scorecardId: config.reviewScorecardId,
+      taskArn: launchResult.taskArn,
+      cluster: launchResult.cluster,
+      timeoutMs: systemTestTimeout,
+    });
 
     this.logger.log({
       message: 'Triggered Marathon Match SYSTEM score dispatch.',
@@ -441,7 +519,89 @@ export class ScoringResultService {
       reviewId,
       taskArn: launchResult.taskArn,
       taskId: launchResult.taskId,
+      systemTestTimeout,
     });
+  }
+
+  /**
+   * Schedules a delayed timeout guard for a launched SYSTEM scorer task.
+   * @param args Scoring task context produced by ECS launch.
+   * @returns Promise that resolves after scheduling or when timeout scheduling is unavailable.
+   */
+  private async scheduleSystemScoringTimeout(args: {
+    challengeId: string;
+    submissionId: string;
+    reviewId?: string;
+    scorecardId?: string;
+    taskArn: string;
+    cluster: string;
+    timeoutMs: number;
+  }): Promise<void> {
+    if (!this.systemTestTimeoutSchedulerService) {
+      this.logger.warn({
+        message:
+          'SYSTEM test timeout scheduler is unavailable; timeout guard was not scheduled.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+      });
+      return;
+    }
+
+    const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    if (!reviewTypeId) {
+      this.logger.warn({
+        message:
+          'REVIEW_TYPE_ID is not configured; SYSTEM test timeout guard was not scheduled.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+      });
+      return;
+    }
+
+    try {
+      await this.systemTestTimeoutSchedulerService.scheduleSystemTestTimeout(
+        {
+          challengeId: args.challengeId,
+          submissionId: args.submissionId,
+          reviewId: args.reviewId,
+          taskArn: args.taskArn,
+          cluster: args.cluster,
+          testPhase: 'system',
+          reviewTypeId,
+          scorecardId: args.scorecardId,
+          timeoutMs: args.timeoutMs,
+          launchedAt: new Date().toISOString(),
+        },
+        args.timeoutMs,
+      );
+    } catch (error) {
+      this.logger.error({
+        message:
+          'Failed to schedule SYSTEM test timeout guard after ECS launch.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Normalizes configured total SYSTEM scoring timeout values.
+   * @param value Candidate timeout in milliseconds.
+   * @returns Positive integer timeout in milliseconds, defaulting to 24 hours.
+   */
+  private resolveSystemTestTimeout(value: unknown): number {
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : Number.parseInt(this.asString(value) ?? '', 10);
+
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : 86400000;
   }
 
   /**

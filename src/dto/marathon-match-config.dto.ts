@@ -211,6 +211,18 @@ export class CreateMarathonMatchConfigDto {
   compileTimeout: number;
 
   @ApiProperty({
+    description:
+      'Total SYSTEM scoring timeout in milliseconds before the ECS runner is stopped and the review summation is failed.',
+    required: false,
+    default: 86400000,
+    example: 86400000,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  systemTestTimeout?: number;
+
+  @ApiProperty({
     description: 'ECS task definition name for submission execution',
     example: 'mm-submission-runner',
   })
@@ -353,6 +365,17 @@ export class UpdateMarathonMatchConfigDto {
   compileTimeout?: number;
 
   @ApiProperty({
+    description:
+      'Total SYSTEM scoring timeout in milliseconds before the ECS runner is stopped and the review summation is failed.',
+    required: false,
+    example: 86400000,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  systemTestTimeout?: number;
+
+  @ApiProperty({
     description: 'ECS task definition name for submission execution',
     required: false,
     example: 'mm-submission-runner',
@@ -425,6 +448,12 @@ export class MarathonMatchDefaultsResponseDto {
     example: 120000,
   })
   compileTimeout: number;
+
+  @ApiProperty({
+    description: 'Default total SYSTEM scoring timeout in ms',
+    example: 86400000,
+  })
+  systemTestTimeout: number;
 
   @ApiProperty({
     description:
@@ -538,6 +567,13 @@ export class MarathonMatchConfigResponseDto {
     example: 120000,
   })
   compileTimeout: number;
+
+  @ApiProperty({
+    description:
+      'Total SYSTEM scoring timeout in milliseconds before the ECS runner is stopped and the review summation is failed.',
+    example: 86400000,
+  })
+  systemTestTimeout: number;
 
   @ApiProperty({
     description: 'ECS task definition name',

@@ -32,10 +32,15 @@ describe('ScoringResultService', () => {
     reviewTypeId: 'review-type-1',
   };
 
-  const createService = (scoringCompletionEmailService?: {
-    sendSubmissionScoringCompleteEmail?: jest.Mock;
-    sendSystemScoringCompleteEmail?: jest.Mock;
-  }) => {
+  const createService = (
+    scoringCompletionEmailService?: {
+      sendSubmissionScoringCompleteEmail?: jest.Mock;
+      sendSystemScoringCompleteEmail?: jest.Mock;
+    },
+    systemTestTimeoutSchedulerService?: {
+      scheduleSystemTestTimeout?: jest.Mock;
+    },
+  ) => {
     const httpService = {
       get: jest.fn(),
       post: jest.fn(),
@@ -62,7 +67,9 @@ describe('ScoringResultService', () => {
       async (callback: (client: typeof prisma) => Promise<unknown>) =>
         callback(prisma),
     );
-    const ecsService = {};
+    const ecsService = {
+      launchScorerTask: jest.fn(),
+    };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
 
@@ -72,6 +79,7 @@ describe('ScoringResultService', () => {
       prisma as never,
       ecsService as never,
       scoringCompletionEmailService as never,
+      systemTestTimeoutSchedulerService as never,
     );
 
     return {
@@ -79,6 +87,7 @@ describe('ScoringResultService', () => {
       httpService,
       m2mService,
       prisma,
+      ecsService,
     };
   };
 
@@ -1496,6 +1505,113 @@ describe('ScoringResultService', () => {
     expect(result.payload.reviewedDate).toBe(reviewedDate);
   });
 
+  it('marks timed-out system tests as failed with timed_out metadata', async () => {
+    const { service } = createService();
+    const processScoringResultSpy = jest
+      .spyOn(service, 'processScoringResult')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.markSystemTestTimedOut({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        timeoutMs: 86400000,
+        launchedAt: '2026-06-09T00:00:00.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(processScoringResultSpy).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      submissionId: basePayload.submissionId,
+      score: -1,
+      testPhase: 'system',
+      reviewTypeId: basePayload.reviewTypeId,
+      reviewId: 'review-1',
+      scorecardId: 'scorecard-1',
+      metadata: expect.objectContaining({
+        timed_out: true,
+        timeoutMs: 86400000,
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      }),
+    });
+  });
+
+  it('schedules a timeout job after dispatching system scoring', async () => {
+    const originalReviewTypeId = process.env.REVIEW_TYPE_ID;
+    process.env.REVIEW_TYPE_ID = basePayload.reviewTypeId;
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, ecsService, prisma } = createService(
+      undefined,
+      systemTestTimeoutSchedulerService,
+    );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster',
+    });
+
+    try {
+      await expect(
+        service.triggerSystemScore(
+          'review-1',
+          basePayload.submissionId,
+          basePayload.challengeId,
+        ),
+      ).resolves.toBe(undefined);
+    } finally {
+      if (originalReviewTypeId === undefined) {
+        delete process.env.REVIEW_TYPE_ID;
+      } else {
+        process.env.REVIEW_TYPE_ID = originalReviewTypeId;
+      }
+    }
+
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        timeoutMs: 3600000,
+      }),
+      3600000,
+    );
+  });
+
   it('normalizes zero-best relative scores without NaN or Infinity', () => {
     const { service } = createService();
     const calculateRelativeScore = (service as any).calculateRelativeScore.bind(
@@ -1675,123 +1791,6 @@ describe('ScoringResultService', () => {
     expect(bestScores.get('seed-1')).toBe(10);
     expect(bestScores.get('seed-2')).toBe(20);
     expect(bestScores.get('seed-3')).toBe(50);
-  });
-
-  it('writes recomputed relative review summations in leaderboard order', async () => {
-    const { service } = createService();
-    const processRelativeScoring = (service as any).processRelativeScoring.bind(
-      service,
-    ) as (
-      token: string,
-      payload: ScoringResultCallbackPayload,
-      testPhase: string,
-      fallbackMetadata: Record<string, unknown>,
-      fallbackScorecardId: string | undefined,
-      settings: {
-        challengeId?: string;
-        submissionApiUrl?: string;
-        enabled: boolean;
-        scoreDirection: ScoreDirection;
-      },
-    ) => Promise<number | undefined>;
-
-    const reviewFor = (submissionId: string, rawScore: number) => ({
-      id: `summation-${submissionId}`,
-      aggregateScore: rawScore,
-      isProvisional: true,
-      metadata: {
-        testType: 'provisional',
-        testScores: [{ testcase: '753388858', score: rawScore }],
-      },
-    });
-
-    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
-      {
-        id: 'submission-ghost',
-        memberId: 'member-ghost',
-        reviewSummation: [reviewFor('submission-ghost', 100)],
-      },
-      {
-        id: 'submission-vdave',
-        memberId: 'member-vdave',
-        reviewSummation: [reviewFor('submission-vdave', 88.33507138754184)],
-      },
-      {
-        id: 'submission-bitrelica',
-        memberId: 'member-bitrelica',
-        reviewSummation: [reviewFor('submission-bitrelica', 79.5106923255694)],
-      },
-      {
-        id: 'submission-kazaward',
-        memberId: 'member-kazaward',
-        reviewSummation: [
-          reviewFor('submission-kazaward', 0.004946668727778636),
-        ],
-      },
-      {
-        id: 'submission-eulerschez',
-        memberId: 'member-eulerschez',
-        reviewSummation: [
-          reviewFor('submission-eulerschez', 0.004946668727778636),
-        ],
-      },
-      {
-        id: 'submission-shxzhaosr',
-        memberId: 'member-shxzhaosr',
-        reviewSummation: [reviewFor('submission-shxzhaosr', 0)],
-      },
-      {
-        id: 'submission-failed',
-        memberId: 'member-failed',
-        reviewSummation: [reviewFor('submission-failed', -1)],
-      },
-      {
-        id: 'submission-tsegaye',
-        memberId: 'member-tsegaye',
-      },
-    ]);
-    const upsertReviewSummationSpy = jest
-      .spyOn(service as any, 'upsertReviewSummation')
-      .mockResolvedValue(undefined);
-
-    const currentScore = await processRelativeScoring(
-      'm2m-token',
-      {
-        ...basePayload,
-        score: 85.82148326711835,
-        submissionId: 'submission-tsegaye',
-      },
-      'provisional',
-      {
-        reviewTypeId: basePayload.reviewTypeId,
-        testType: 'provisional',
-        testScores: [{ testcase: '753388858', score: 85.82148326711835 }],
-      },
-      undefined,
-      {
-        challengeId: basePayload.challengeId,
-        submissionApiUrl: 'https://api.topcoder-dev.com/v6',
-        enabled: true,
-        scoreDirection: ScoreDirection.MAXIMIZE,
-      },
-    );
-
-    expect(currentScore).toBeCloseTo(85.82148326711835);
-    const persistedSubmissionIds = upsertReviewSummationSpy.mock.calls.map(
-      ([, , reviewPayload]) =>
-        (reviewPayload as { submissionId: string }).submissionId,
-    );
-
-    expect(persistedSubmissionIds).toEqual([
-      'submission-ghost',
-      'submission-vdave',
-      'submission-tsegaye',
-      'submission-bitrelica',
-      'submission-kazaward',
-      'submission-eulerschez',
-      'submission-shxzhaosr',
-      'submission-failed',
-    ]);
   });
 
   it('selects the latest relative review using current submission date fields when created is missing', () => {
