@@ -364,8 +364,14 @@ describe('EcsService', () => {
     );
 
     const runTaskCommand = send.mock.calls
-      .map(([command]) => command)
-      .find((command) => command instanceof RunTaskCommand) as RunTaskCommand;
+      .map((call) => call[0] as unknown)
+      .find(
+        (command): command is RunTaskCommand =>
+          command instanceof RunTaskCommand,
+      );
+    if (!runTaskCommand) {
+      throw new Error('Expected RunTaskCommand to be sent.');
+    }
     const environment =
       runTaskCommand.input.overrides?.containerOverrides?.[0]?.environment ??
       [];
