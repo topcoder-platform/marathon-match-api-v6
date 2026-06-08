@@ -72,7 +72,8 @@ class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
   reviewTypeId: string;
 
   @ApiPropertyOptional({
-    description: 'Review ID to complete after summation upsert succeeds',
+    description:
+      'Review ID to complete before the final SYSTEM summation is persisted',
     example: '7af90e06-d65a-4c0f-acaf-61d4f0c71234',
   })
   @IsOptional()

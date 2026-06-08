@@ -178,7 +178,7 @@ export class ScoringResultService {
 
   /**
    * Processes one scorer callback payload after verifying the challenge config exists,
-   * then upserts all required review summations.
+   * then completes any SYSTEM review before final summation writes.
    */
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
@@ -221,17 +221,6 @@ export class ScoringResultService {
         relativeScoringSettings,
       );
       if (currentRelativeScore !== undefined) {
-        await this.completeSystemReviewIfNeeded(
-          token,
-          payload.reviewId,
-          currentRelativeScore,
-          normalizedPhase,
-          {
-            challengeId: payload.challengeId,
-            scorecardId: fallbackScorecardId,
-            submissionId: payload.submissionId,
-          },
-        );
         await this.notifyScoringCompletionEmailIfReady(
           token,
           payload,
@@ -246,28 +235,11 @@ export class ScoringResultService {
       payload.currentReview &&
       Object.keys(payload.currentReview).length > 0
     ) {
-      const currentReviewScore = await this.upsertFromLegacyReviewPayload(
-        token,
-        {
-          legacyReview: payload.currentReview,
-          fallbackSubmissionId: payload.submissionId,
-          fallbackScore: payload.score,
-          fallbackScorecardId,
-          fallbackMetadata,
-          testPhase: normalizedPhase,
-        },
+      const currentReviewScore = this.resolveReviewScore(
+        this.asRecord(payload.currentReview),
+        normalizedPhase,
+        payload.score,
       );
-
-      for (const impactedReview of payload.impactedReviews ?? []) {
-        await this.upsertFromLegacyReviewPayload(token, {
-          legacyReview: impactedReview,
-          fallbackSubmissionId: payload.submissionId,
-          fallbackScore: payload.score,
-          fallbackScorecardId,
-          fallbackMetadata,
-          testPhase: normalizedPhase,
-        });
-      }
 
       await this.completeSystemReviewIfNeeded(
         token,
@@ -280,6 +252,27 @@ export class ScoringResultService {
           submissionId: payload.submissionId,
         },
       );
+
+      await this.upsertFromLegacyReviewPayload(token, {
+        legacyReview: payload.currentReview,
+        fallbackSubmissionId: payload.submissionId,
+        fallbackScore: payload.score,
+        fallbackScorecardId,
+        fallbackMetadata,
+        testPhase: normalizedPhase,
+      });
+
+      for (const impactedReview of payload.impactedReviews ?? []) {
+        await this.upsertFromLegacyReviewPayload(token, {
+          legacyReview: impactedReview,
+          fallbackSubmissionId: payload.submissionId,
+          fallbackScore: payload.score,
+          fallbackScorecardId,
+          fallbackMetadata,
+          testPhase: normalizedPhase,
+        });
+      }
+
       await this.notifyScoringCompletionEmailIfReady(
         token,
         payload,
@@ -297,7 +290,6 @@ export class ScoringResultService {
       testPhase: normalizedPhase,
     });
 
-    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.completeSystemReviewIfNeeded(
       token,
       payload.reviewId,
@@ -309,6 +301,7 @@ export class ScoringResultService {
         submissionId: payload.submissionId,
       },
     );
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.notifyScoringCompletionEmailIfReady(
       token,
       payload,
@@ -446,6 +439,7 @@ export class ScoringResultService {
   /**
    * Recomputes relative scores for the latest submission from each member while
    * holding a challenge/phase advisory lock for the read-compute-write cycle.
+   * Completes the current SYSTEM review before writing the recomputed summations.
    * Returns undefined when relative scoring cannot be applied and the caller
    * should fall back to direct review upserts.
    */
@@ -573,6 +567,22 @@ export class ScoringResultService {
 
     const currentReviewPayload =
       relativeReviewPayloads[relativeReviewPayloads.length - 1];
+
+    if (!currentReviewPayload) {
+      return undefined;
+    }
+
+    await this.completeSystemReviewIfNeeded(
+      token,
+      payload.reviewId,
+      currentReviewPayload.payload.aggregateScore,
+      testPhase,
+      {
+        challengeId: payload.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: payload.submissionId,
+      },
+    );
 
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
@@ -2424,7 +2434,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Completes the originating review record after SYSTEM scoring has been persisted.
+   * Completes the originating review record before final SYSTEM summations are persisted.
    */
   private async completeSystemReviewIfNeeded(
     token: string,

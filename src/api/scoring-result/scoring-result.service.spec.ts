@@ -1083,6 +1083,215 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('does not persist system summation when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      reviewId: 'review-1',
+      score: 100,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const findExistingReviewSummationsSpy = jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(findExistingReviewSummationsSpy).not.toHaveBeenCalled();
+    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(updateReviewSummationSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not persist currentReview summation when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      currentReview: {
+        aggregateScore: 97,
+      },
+      reviewId: 'review-1',
+      score: 100,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const upsertFromLegacyReviewPayloadSpy = jest
+      .spyOn(service as any, 'upsertFromLegacyReviewPayload')
+      .mockResolvedValue(97);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 97,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(upsertFromLegacyReviewPayloadSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not persist relative summations when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      metadata: {
+        testScores: [
+          {
+            testcase: '753388858',
+            score: 50,
+          },
+        ],
+      },
+      reviewId: 'review-1',
+      score: 50,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: [
+            {
+              id: basePayload.submissionId,
+              memberId: 'member-1',
+              submittedDate: '2026-05-01T00:00:00.000Z',
+            },
+          ],
+          headers: {},
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            data: [],
+          },
+        }),
+      );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(upsertReviewSummationSpy).not.toHaveBeenCalled();
+  });
+
   it('returns a bad request error when review-api rejects a nonexistent submissionId', async () => {
     const { service, httpService, m2mService, prisma } = createService();
 
