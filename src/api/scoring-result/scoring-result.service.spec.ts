@@ -1632,6 +1632,123 @@ describe('ScoringResultService', () => {
     expect(bestScores.get('seed-3')).toBe(50);
   });
 
+  it('writes recomputed relative review summations in leaderboard order', async () => {
+    const { service } = createService();
+    const processRelativeScoring = (service as any).processRelativeScoring.bind(
+      service,
+    ) as (
+      token: string,
+      payload: ScoringResultCallbackPayload,
+      testPhase: string,
+      fallbackMetadata: Record<string, unknown>,
+      fallbackScorecardId: string | undefined,
+      settings: {
+        challengeId?: string;
+        submissionApiUrl?: string;
+        enabled: boolean;
+        scoreDirection: ScoreDirection;
+      },
+    ) => Promise<number | undefined>;
+
+    const reviewFor = (submissionId: string, rawScore: number) => ({
+      id: `summation-${submissionId}`,
+      aggregateScore: rawScore,
+      isProvisional: true,
+      metadata: {
+        testType: 'provisional',
+        testScores: [{ testcase: '753388858', score: rawScore }],
+      },
+    });
+
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-ghost',
+        memberId: 'member-ghost',
+        reviewSummation: [reviewFor('submission-ghost', 100)],
+      },
+      {
+        id: 'submission-vdave',
+        memberId: 'member-vdave',
+        reviewSummation: [reviewFor('submission-vdave', 88.33507138754184)],
+      },
+      {
+        id: 'submission-bitrelica',
+        memberId: 'member-bitrelica',
+        reviewSummation: [reviewFor('submission-bitrelica', 79.5106923255694)],
+      },
+      {
+        id: 'submission-kazaward',
+        memberId: 'member-kazaward',
+        reviewSummation: [
+          reviewFor('submission-kazaward', 0.004946668727778636),
+        ],
+      },
+      {
+        id: 'submission-eulerschez',
+        memberId: 'member-eulerschez',
+        reviewSummation: [
+          reviewFor('submission-eulerschez', 0.004946668727778636),
+        ],
+      },
+      {
+        id: 'submission-shxzhaosr',
+        memberId: 'member-shxzhaosr',
+        reviewSummation: [reviewFor('submission-shxzhaosr', 0)],
+      },
+      {
+        id: 'submission-failed',
+        memberId: 'member-failed',
+        reviewSummation: [reviewFor('submission-failed', -1)],
+      },
+      {
+        id: 'submission-tsegaye',
+        memberId: 'member-tsegaye',
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+
+    const currentScore = await processRelativeScoring(
+      'm2m-token',
+      {
+        ...basePayload,
+        score: 85.82148326711835,
+        submissionId: 'submission-tsegaye',
+      },
+      'provisional',
+      {
+        reviewTypeId: basePayload.reviewTypeId,
+        testType: 'provisional',
+        testScores: [{ testcase: '753388858', score: 85.82148326711835 }],
+      },
+      undefined,
+      {
+        challengeId: basePayload.challengeId,
+        submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+        enabled: true,
+        scoreDirection: ScoreDirection.MAXIMIZE,
+      },
+    );
+
+    expect(currentScore).toBeCloseTo(85.82148326711835);
+    const persistedSubmissionIds = upsertReviewSummationSpy.mock.calls.map(
+      ([, , reviewPayload]) =>
+        (reviewPayload as { submissionId: string }).submissionId,
+    );
+
+    expect(persistedSubmissionIds).toEqual([
+      'submission-ghost',
+      'submission-vdave',
+      'submission-tsegaye',
+      'submission-bitrelica',
+      'submission-kazaward',
+      'submission-eulerschez',
+      'submission-shxzhaosr',
+      'submission-failed',
+    ]);
+  });
+
   it('selects the latest relative review using current submission date fields when created is missing', () => {
     const { service } = createService();
     const selectLatestRelativeReviewRecords = (

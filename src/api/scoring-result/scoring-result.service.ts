@@ -1740,7 +1740,8 @@ export class ScoringResultService {
   /**
    * Orders recomputed relative review summation writes to match leaderboard order.
    * Review API assigns provisional/final rank values from the persisted update
-   * sequence, so higher passing relative scores must be written first.
+   * sequence, so passing higher aggregate scores must be written before lower
+   * or failed results.
    * @param reviewPayloads Recomputed relative review summation payloads.
    * @returns A new payload list sorted by leaderboard position.
    */
