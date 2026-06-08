@@ -134,6 +134,17 @@
     {
       "memberId": "88770025",
       "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-187-fixed-cpp-baseline.zip",
+      "source": {
+        "fileName": "submission-issue-187-fixed-cpp-baseline.zip",
+        "issue": "#187",
+        "language": "cpp",
+        "validates": "Fails compilation when host-specific ISA macros such as AVX2, BMI2, or AVX-512 are enabled, and succeeds when the runner uses the fixed x86-64/generic C++ target."
+      }
+    },
+    {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
       "file": "submissions/submission-winner.zip",
       "source": {
         "fileName": "submission-winner.zip",

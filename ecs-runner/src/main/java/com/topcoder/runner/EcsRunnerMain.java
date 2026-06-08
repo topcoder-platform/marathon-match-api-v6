@@ -97,6 +97,8 @@ public class EcsRunnerMain {
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
     private static final String JAVA_SUBMISSION_RELEASE = "11";
+    private static final String CXX_MARCH_FLAG = "-march=x86-64";
+    private static final String CXX_MTUNE_FLAG = "-mtune=generic";
     private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
         ".cpp",
         ".java",
@@ -4320,7 +4322,8 @@ public class EcsRunnerMain {
                     "g++",
                     "-std=gnu++23",
                     "-O3",
-                    "-march=native",
+                    CXX_MARCH_FLAG,
+                    CXX_MTUNE_FLAG,
                     normalizedSource.getFileName().toString(),
                     "-o",
                     binaryPath
