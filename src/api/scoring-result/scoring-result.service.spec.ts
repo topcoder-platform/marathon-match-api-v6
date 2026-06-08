@@ -233,6 +233,96 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('persists finite relative scores when the maximize best testcase score is zero', async () => {
+    const { service, m2mService, prisma } = createService();
+    const zeroScorePayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: 0,
+      testPhase: 'provisional',
+      metadata: {
+        testScores: [
+          { testcase: '753388858', score: 0 },
+          { testcase: '753388859', score: 0 },
+        ],
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-2',
+        memberId: 'member-2',
+        submittedDate: '2026-05-01T00:00:00.000Z',
+        reviewSummation: [
+          {
+            id: 'summation-2',
+            isProvisional: true,
+            metadata: {
+              testType: 'provisional',
+              testScores: [
+                { testcase: '1', score: 0 },
+                { testcase: '2', score: 0 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: zeroScorePayload.submissionId,
+        memberId: 'member-1',
+        submittedDate: '2026-05-01T00:00:01.000Z',
+        reviewSummation: [],
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    await expect(service.processScoringResult(zeroScorePayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(2);
+    const payloads = upsertReviewSummationSpy.mock.calls.map(
+      (call) => call[2],
+    ) as Array<{
+      aggregateScore: number;
+      metadata: {
+        relativeScores: Array<{ testcase: string; score: number }>;
+      };
+    }>;
+    for (const payload of payloads) {
+      expect(Number.isFinite(payload.aggregateScore)).toBe(true);
+      expect(payload.aggregateScore).toBe(0);
+      expect(payload.metadata.relativeScores).toEqual([
+        { testcase: '1', score: 0 },
+        { testcase: '2', score: 0 },
+      ]);
+    }
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      undefined,
+      0,
+      'provisional',
+      {
+        challengeId: zeroScorePayload.challengeId,
+        scorecardId: undefined,
+        submissionId: zeroScorePayload.submissionId,
+      },
+    );
+  });
+
   it('serializes concurrent relative scoring recomputations for the same challenge phase', async () => {
     const { service, m2mService, prisma } = createService();
     const firstPayload: ScoringResultCallbackPayload = {
@@ -1152,16 +1242,21 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('does not award relative scoring credit for zero-score ties', () => {
+  it('normalizes zero-best relative scores without NaN or Infinity', () => {
     const { service } = createService();
     const calculateRelativeScore = (service as any).calculateRelativeScore.bind(
       service,
-    ) as (rawScore: number, bestScore?: number) => number;
+    ) as (
+      rawScore: number,
+      bestScore: number | undefined,
+      scoreDirection: ScoreDirection,
+    ) => number;
 
-    expect(calculateRelativeScore(0, 0)).toBe(0);
-    expect(calculateRelativeScore(0, 50)).toBe(0);
-    expect(calculateRelativeScore(50, 0)).toBe(0);
-    expect(calculateRelativeScore(50, 50)).toBe(100);
+    expect(calculateRelativeScore(0, 0, ScoreDirection.MAXIMIZE)).toBe(0);
+    expect(calculateRelativeScore(50, 0, ScoreDirection.MAXIMIZE)).toBe(0);
+    expect(calculateRelativeScore(0, 0, ScoreDirection.MINIMIZE)).toBe(100);
+    expect(calculateRelativeScore(0, 50, ScoreDirection.MINIMIZE)).toBe(0);
+    expect(calculateRelativeScore(50, 50, ScoreDirection.MAXIMIZE)).toBe(100);
   });
 
   it('selects the latest relative review using current submission date fields when created is missing', () => {

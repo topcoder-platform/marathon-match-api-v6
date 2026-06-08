@@ -1606,6 +1606,7 @@ export class ScoringResultService {
       const relativeScore = this.calculateRelativeScore(
         rawTestScore.score,
         bestScore,
+        scoreDirection,
       );
 
       if (rawTestScore.score < 0 || rawTestScore.error) {
@@ -1682,17 +1683,24 @@ export class ScoringResultService {
 
   /**
    * Converts one raw testcase score into its 0..100 relative score.
-   * Zero raw or best scores receive no relative credit, including a 0-to-0 tie.
+   * Zero best scores are guarded explicitly to avoid NaN/Infinity.
    */
   private calculateRelativeScore(
     rawScore: number,
     bestScore: number | undefined,
+    scoreDirection: ScoreDirection,
   ): number {
     if (rawScore < 0 || bestScore === undefined) {
       return 0;
     }
 
-    if (bestScore === 0 || rawScore === 0) {
+    if (bestScore === 0) {
+      return rawScore === 0 && scoreDirection === ScoreDirection.MINIMIZE
+        ? 100
+        : 0;
+    }
+
+    if (rawScore === 0) {
       return 0;
     }
 
