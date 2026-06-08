@@ -444,6 +444,17 @@
         "issue": 45,
         "validation": "Regression submission ignores SIGTERM and spins so per-test timeout must use destroyForcibly/SIGKILL."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-32-progress-display.zip",
+      "source": {
+        "fileName": "submission-issue-32-progress-display.zip",
+        "issue": 32,
+        "purpose": "Exercises scoring progress callbacks so IN PROGRESS summations render as unavailable instead of failed while final scoring still completes.",
+        "derivedFrom": "submission-winner.zip"
+      }
     }
   ]
 }

@@ -78,6 +78,7 @@ interface SummationBuildInput {
   score: number;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
+  preserveReviewedDate?: boolean;
   reviewObject?: Record<string, unknown>;
   testPhase: string;
 }
@@ -564,13 +565,14 @@ export class ScoringResultService {
 
     const relativeReviewPayloads =
       this.sortRelativeReviewPayloadsForLeaderboard(
-        reviewsToRecompute.map((reviewRecord) =>
+        reviewsToRecompute.map((reviewRecord, index) =>
           this.buildRelativeReviewPayload(
             reviewRecord,
             bestScores,
             settings.scoreDirection,
             fallbackScorecardId,
             testPhase,
+            index < impactedReviews.length,
           ),
         ),
       );
@@ -1656,6 +1658,7 @@ export class ScoringResultService {
     scoreDirection: ScoreDirection,
     fallbackScorecardId: string | undefined,
     testPhase: string,
+    preserveReviewedDate = false,
   ): RelativeReviewPayload {
     let totalTests = 0;
     let failedTests = 0;
@@ -1738,6 +1741,7 @@ export class ScoringResultService {
         score: aggregateScore,
         scorecardId,
         metadata,
+        preserveReviewedDate,
         reviewObject,
         testPhase,
       }),
@@ -1922,6 +1926,9 @@ export class ScoringResultService {
     this.validateReviewScore(input.score, 'Review summation score');
 
     const metadata = this.asRecord(input.metadata);
+    const existingReviewedDate = input.preserveReviewedDate
+      ? this.asString(input.reviewObject?.reviewedDate)
+      : undefined;
 
     const normalizedTestType = this.normalizeTestPhase(
       this.coalesceString(this.asString(metadata.testType), input.testPhase),
@@ -1954,7 +1961,7 @@ export class ScoringResultService {
         input.score >= 0 &&
         testStatus !== ScoringTestStatus.InProgress &&
         testStatus !== ScoringTestStatus.Failed,
-      reviewedDate: new Date().toISOString(),
+      reviewedDate: existingReviewedDate ?? new Date().toISOString(),
       ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
       ...(shouldSetFinal ? { isFinal: true } : {}),
       ...(shouldSetProvisional ? { isProvisional: true } : {}),
