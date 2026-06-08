@@ -10,7 +10,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
 - Python 3.12 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
-- C# (.NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
+- C# (.NET 7 / C# 11 and .NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
 - Rust latest stable compiler support for tester-side submission compilation (`rustc`)
 - native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, and block non-`AF_UNIX` sockets for submitted solution processes
 

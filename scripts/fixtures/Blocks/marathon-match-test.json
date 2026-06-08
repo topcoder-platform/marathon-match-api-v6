@@ -267,6 +267,17 @@
         "language": "python",
         "validates": "Clean Blocks submission lifecycle when the solution flushes stderr, prints -1 immediately, and exits before runner artifact upload."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-255-cs-net7-target.zip",
+      "source": {
+        "fileName": "submission-issue-255-cs-net7-target.zip",
+        "issue": 255,
+        "language": "csharp-net7",
+        "validates": ".cs_net7 submissions target net7.0 and compile with the NET7_0 target framework constant."
+      }
     }
   ]
 }

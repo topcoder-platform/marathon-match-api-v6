@@ -31,7 +31,7 @@ Supported source extensions are:
 | `.py`       | Python 3.12                                                                  |
 | `.cs`       | C# using Mono                                                                |
 | `.cs_net10` | C# using .NET 10 / C# 14                                                     |
-| `.cs_net7`  | C# using .NET 10 / C# 14, retained for backward-compatible submission naming |
+| `.cs_net7`  | C# using .NET 7 / C# 11                                                      |
 | `.rs`       | Rust latest stable                                                           |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
@@ -84,9 +84,9 @@ mcs /r:System.Numerics.dll -out:Solution.exe Solution.cs
 mono Solution.exe
 ```
 
-### C# with .NET 10
+### C# with .NET 7 or .NET 10
 
-.NET C# submissions use the special `.cs_net10` extension. The older `.cs_net7` extension remains accepted for backward compatibility, but both extensions are compiled with the .NET 10 SDK and target `net10.0`. The runner creates a temporary project with unsafe blocks enabled, publishes it, and executes the published DLL:
+.NET C# submissions use special extensions that select the target framework. `.cs_net7` targets `net7.0` and is reported as `csharp-net7`; `.cs_net10` targets `net10.0` and is reported as `csharp-net10`. The runner creates a temporary project with unsafe blocks enabled, publishes it, and executes the published DLL:
 
 ```bash
 dotnet publish Solution.csproj -c Release -o Solution
@@ -113,7 +113,7 @@ The current processor runs as an ECS/Fargate task using the configured task defi
 
 The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:11-jdk-noble`.
 
-Tool versions verified from a local build of the current runner image:
+Tool versions configured in the current runner image:
 
 | Tool             | Version                            |
 | ---------------- | ---------------------------------- |
@@ -125,7 +125,7 @@ Tool versions verified from a local build of the current runner image:
 | Python           | `3.12.3`                           |
 | Mono runtime     | `6.8.0.105`                        |
 | Mono C# compiler | `mcs 6.8.0.105`                    |
-| .NET SDK         | `10.0.108`                         |
+| .NET SDK         | `7.0.410` and `10.0.108`           |
 | Rust compiler    | `rustc 1.96.0`                     |
 | Bash             | `5.2.21`                           |
 
@@ -135,7 +135,8 @@ The runner image includes:
 - `g++` backed by GCC 14 for C++23 submissions
 - `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
-- .NET 10 SDK for `.cs_net10` submissions and backward-compatible `.cs_net7` submissions
+- .NET 7 SDK for `.cs_net7` submissions
+- .NET 10 SDK for `.cs_net10` submissions
 - `rustc` from the Rust stable channel for `.rs` submissions
 - `zip` and `unzip` for artifact handling
 - native isolation helpers that scrub the tester child environment and run generic submitted solution commands as the restricted `scorer` user
@@ -154,6 +155,8 @@ The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
 FROM eclipse-temurin:11-jdk-noble
+
+ARG DOTNET_7_SDK_VERSION=7.0.410
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
@@ -179,6 +182,9 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_7_SDK_VERSION}" --install-dir /usr/lib/dotnet --no-path \
+    && rm /tmp/dotnet-install.sh \
     && rm -rf /var/lib/apt/lists/* \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
     && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \

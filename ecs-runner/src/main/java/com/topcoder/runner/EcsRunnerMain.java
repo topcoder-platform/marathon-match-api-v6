@@ -4019,7 +4019,7 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, .NET 10 C#, or Rust submissions.
+     * @return {@code true} for C++, Java, Python, Mono C#, .NET 7/10 C#, or Rust submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -4242,13 +4242,14 @@ public class EcsRunnerMain {
         }
 
         if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+            String targetFramework = dotNetTargetFramework(extension);
             Path csproj = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".csproj");
             Files.write(
                 csproj,
                 Arrays.asList(
                     "<Project Sdk=\"Microsoft.NET.Sdk\">",
                     "  <PropertyGroup>",
-                    "    <TargetFramework>net10.0</TargetFramework>",
+                    "    <TargetFramework>" + targetFramework + "</TargetFramework>",
                     "    <OutputType>Exe</OutputType>",
                     "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
                     "  </PropertyGroup>",
@@ -4272,7 +4273,7 @@ public class EcsRunnerMain {
                 ),
                 workDir,
                 compileTimeoutMs,
-                "C# (.NET 10) compilation failed.",
+                "C# (" + targetFramework + ") compilation failed.",
                 compileLogPath
             );
             return new CompiledSubmission(
@@ -4288,6 +4289,23 @@ public class EcsRunnerMain {
         }
 
         throw new IllegalArgumentException("Unsupported submission extension: " + extension);
+    }
+
+    /**
+     * Maps a .NET C# submission extension to the project target framework.
+     *
+     * @param extension Supported .NET C# source extension.
+     * @return Target framework moniker used in the generated project file.
+     * @throws IllegalArgumentException When the extension is not a .NET C# submission extension.
+     */
+    private static String dotNetTargetFramework(String extension) {
+        if (".cs_net7".equals(extension)) {
+            return "net7.0";
+        }
+        if (".cs_net10".equals(extension)) {
+            return "net10.0";
+        }
+        throw new IllegalArgumentException("Unsupported .NET C# extension: " + extension);
     }
 
     /**
@@ -4324,8 +4342,11 @@ public class EcsRunnerMain {
         if (".cs".equals(extension)) {
             return "csharp-mono";
         }
-        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+        if (".cs_net10".equals(extension)) {
             return "csharp-net10";
+        }
+        if (".cs_net7".equals(extension)) {
+            return "csharp-net7";
         }
         if (".rs".equals(extension)) {
             return "rust";
