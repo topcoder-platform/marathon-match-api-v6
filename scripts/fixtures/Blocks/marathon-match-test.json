@@ -152,6 +152,16 @@
       }
     },
     {
+      "memberId": "88770025",
+      "memberHandle": "devtest1400",
+      "file": "submissions/submission-issue-107-repeat-submission.zip",
+      "source": {
+        "fileName": "submission-issue-107-repeat-submission.zip",
+        "issue": 107,
+        "purpose": "Benign repeated Blocks submission from the same member validates that newer submissions supersede older in-flight scorer tasks while the newest submission still scores normally."
+      }
+    },
+    {
       "memberId": "88770029",
       "memberHandle": "devtest142",
       "file": "submissions/submission-issue-212-symlink-artifact.zip",

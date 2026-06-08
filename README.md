@@ -117,13 +117,14 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 | `ECS_SUBNETS`                 | Yes (for scoring) | None        | Comma-separated subnets for awsvpc task networking                                                      |
 | `ECS_SECURITY_GROUPS`         | Yes (for scoring) | None        | Comma-separated security groups for awsvpc networking                                                   |
 | `ECS_CONTAINER_NAME`          | Yes (for scoring) | None        | Container override target in task definition                                                            |
+| `ECS_SCORER_MAX_CONCURRENT_TASKS` | No                | `20`        | Maximum pending/running Marathon Match scorer tasks this API will allow before retry back-pressure       |
 | `MARATHON_MATCH_API_URL`      | Yes (for scoring) | None        | Base URL passed to ECS runner                                                                           |
 | `REVIEW_API_URL`              | Yes (for scoring) | None        | Review API base URL used by NestJS scoring callback processor                                           |
 | `REVIEW_TYPE_ID`              | Yes (for scoring) | None        | Review type ID passed to ECS runner callback payload                                                    |
 | `DEBUG_LOG_ACCESS_TOKEN`      | No                | `false`     | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
 | `DEBUG_LOG_FULL_ACCESS_TOKEN` | No                | `false`     | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true`              |
 
-`launchScorerTask(...)` already disables public IP assignment for scorer tasks. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
+`launchScorerTask(...)` already disables public IP assignment for scorer tasks. It also enforces the pending/running scorer task cap before calling `RunTask`, skips duplicate active launches for the same challenge/submission/phase, and stops older active tasks for the same challenge/member when a newer submission arrives. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
 
 ### ECS runner task environment (injected at launch)
 

@@ -949,6 +949,7 @@ export class MarathonMatchConfigService {
         })
         .map((submission) => ({
           submissionId: submission.submissionId,
+          memberId: submission.memberId,
           submittedDate: submission.submittedDate,
         }));
 
@@ -1044,7 +1045,7 @@ export class MarathonMatchConfigService {
    */
   private async launchScorerTasksWithRateLimit(
     challengeId: string,
-    submissions: { submissionId: string }[],
+    submissions: { submissionId: string; memberId?: string }[],
     mmConfig: {
       taskDefinitionName: string;
       taskDefinitionVersion: string;
@@ -1068,12 +1069,14 @@ export class MarathonMatchConfigService {
         index + MarathonMatchConfigService.scorerLaunchBatchSize,
       );
       const batchResults = await Promise.allSettled(
-        batch.map(({ submissionId }) =>
+        batch.map(({ submissionId, memberId }) =>
           this.ecsService.launchScorerTask(
             challengeId,
             submissionId,
             mmConfig,
             scoringPhase,
+            undefined,
+            { memberId },
           ),
         ),
       );
