@@ -4,6 +4,7 @@ import {
   DescribeTaskDefinitionCommand,
   ECSClient,
   RunTaskCommand,
+  StopTaskCommand,
   Task,
 } from '@aws-sdk/client-ecs';
 import { PhaseConfigType } from '@prisma/client';
@@ -308,6 +309,62 @@ export class EcsService {
         error instanceof Error ? error.message : String(error);
       throw new Error(
         `Failed to describe ECS task ${normalizedTaskArn}: ${errorMessage}`,
+      );
+    }
+  }
+
+  /**
+   * Stops a previously launched ECS scorer task.
+   * @param taskArn Task ARN to stop.
+   * @param reason Human-readable stop reason stored by ECS.
+   * @param clusterName Optional ECS cluster override. Defaults to ECS_CLUSTER env var.
+   * @returns ECS task details returned by StopTask.
+   * @throws Error when task ARN is missing or ECS stop fails.
+   */
+  async stopTask(
+    taskArn: string,
+    reason: string,
+    clusterName?: string,
+  ): Promise<Task> {
+    const normalizedTaskArn = taskArn?.trim();
+    if (!normalizedTaskArn) {
+      throw new Error('Task ARN is required to stop an ECS task.');
+    }
+
+    const cluster = clusterName?.trim() || this.getRequiredEnv('ECS_CLUSTER');
+    const normalizedReason =
+      reason?.trim() || 'Marathon Match scorer task stopped by API.';
+
+    try {
+      const response = await this.ecsClient.send(
+        new StopTaskCommand({
+          cluster,
+          task: normalizedTaskArn,
+          reason: normalizedReason,
+        }),
+      );
+
+      if (!response.task?.taskArn) {
+        throw new Error(
+          `ECS StopTask returned invalid task data for taskArn ${normalizedTaskArn}.`,
+        );
+      }
+
+      this.logger.log({
+        message: 'Stopped ECS scorer task',
+        cluster,
+        taskArn: response.task.taskArn,
+        lastStatus: response.task.lastStatus,
+        desiredStatus: response.task.desiredStatus,
+        reason: normalizedReason,
+      });
+
+      return response.task;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to stop ECS task ${normalizedTaskArn}: ${errorMessage}`,
       );
     }
   }

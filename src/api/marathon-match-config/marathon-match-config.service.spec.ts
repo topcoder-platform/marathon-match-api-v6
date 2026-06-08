@@ -84,6 +84,32 @@ describe('MarathonMatchConfigService', () => {
     taskDefinitionVersion: '7',
   });
 
+  it('defaults total system test timeout to 24 hours', () => {
+    const originalReviewScorecardId = process.env.DEFAULT_REVIEW_SCORECARD_ID;
+    const originalSystemTestTimeout =
+      process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+    process.env.DEFAULT_REVIEW_SCORECARD_ID = 'scorecard-1';
+    delete process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+
+    try {
+      const { service } = createService();
+      const defaults = service.getDefaults();
+
+      expect(defaults.systemTestTimeout).toBe(86400000);
+    } finally {
+      if (originalReviewScorecardId === undefined) {
+        delete process.env.DEFAULT_REVIEW_SCORECARD_ID;
+      } else {
+        process.env.DEFAULT_REVIEW_SCORECARD_ID = originalReviewScorecardId;
+      }
+      if (originalSystemTestTimeout === undefined) {
+        delete process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+      } else {
+        process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS = originalSystemTestTimeout;
+      }
+    }
+  });
+
   it('resolves legacy review scorecard ids when loading one config', async () => {
     const { service, httpService, m2mService, prisma } = createService();
 

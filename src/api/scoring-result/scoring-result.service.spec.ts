@@ -32,10 +32,15 @@ describe('ScoringResultService', () => {
     reviewTypeId: 'review-type-1',
   };
 
-  const createService = (scoringCompletionEmailService?: {
-    sendSubmissionScoringCompleteEmail?: jest.Mock;
-    sendSystemScoringCompleteEmail?: jest.Mock;
-  }) => {
+  const createService = (
+    scoringCompletionEmailService?: {
+      sendSubmissionScoringCompleteEmail?: jest.Mock;
+      sendSystemScoringCompleteEmail?: jest.Mock;
+    },
+    systemTestTimeoutSchedulerService?: {
+      scheduleSystemTestTimeout?: jest.Mock;
+    },
+  ) => {
     const httpService = {
       get: jest.fn(),
       post: jest.fn(),
@@ -50,7 +55,9 @@ describe('ScoringResultService', () => {
         findUnique: jest.fn(),
       },
     };
-    const ecsService = {};
+    const ecsService = {
+      launchScorerTask: jest.fn(),
+    };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
 
@@ -60,6 +67,7 @@ describe('ScoringResultService', () => {
       prisma as never,
       ecsService as never,
       scoringCompletionEmailService as never,
+      systemTestTimeoutSchedulerService as never,
     );
 
     return {
@@ -67,6 +75,7 @@ describe('ScoringResultService', () => {
       httpService,
       m2mService,
       prisma,
+      ecsService,
     };
   };
 
@@ -923,6 +932,113 @@ describe('ScoringResultService', () => {
           }),
         }),
       }),
+    );
+  });
+
+  it('marks timed-out system tests as failed with timed_out metadata', async () => {
+    const { service } = createService();
+    const processScoringResultSpy = jest
+      .spyOn(service, 'processScoringResult')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.markSystemTestTimedOut({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        timeoutMs: 86400000,
+        launchedAt: '2026-06-09T00:00:00.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(processScoringResultSpy).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      submissionId: basePayload.submissionId,
+      score: -1,
+      testPhase: 'system',
+      reviewTypeId: basePayload.reviewTypeId,
+      reviewId: 'review-1',
+      scorecardId: 'scorecard-1',
+      metadata: expect.objectContaining({
+        timed_out: true,
+        timeoutMs: 86400000,
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      }),
+    });
+  });
+
+  it('schedules a timeout job after dispatching system scoring', async () => {
+    const originalReviewTypeId = process.env.REVIEW_TYPE_ID;
+    process.env.REVIEW_TYPE_ID = basePayload.reviewTypeId;
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, ecsService, prisma } = createService(
+      undefined,
+      systemTestTimeoutSchedulerService,
+    );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster',
+    });
+
+    try {
+      await expect(
+        service.triggerSystemScore(
+          'review-1',
+          basePayload.submissionId,
+          basePayload.challengeId,
+        ),
+      ).resolves.toBe(undefined);
+    } finally {
+      if (originalReviewTypeId === undefined) {
+        delete process.env.REVIEW_TYPE_ID;
+      } else {
+        process.env.REVIEW_TYPE_ID = originalReviewTypeId;
+      }
+    }
+
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        timeoutMs: 3600000,
+      }),
+      3600000,
     );
   });
 

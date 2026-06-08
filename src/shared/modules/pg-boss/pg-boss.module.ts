@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import PgBoss = require('pg-boss');
+import { PG_BOSS_TOKEN } from './pg-boss.constants';
+import { PgBossLifecycleService } from './pg-boss-lifecycle.service';
 
-export const PG_BOSS_TOKEN = 'PG_BOSS';
+export { PG_BOSS_TOKEN } from './pg-boss.constants';
 
 /**
  * Provides a shared PgBoss instance backed by the same Postgres
@@ -22,7 +24,8 @@ export const PG_BOSS_TOKEN = 'PG_BOSS';
         return await Promise.resolve(new PgBoss(databaseUrl));
       },
     },
+    PgBossLifecycleService,
   ],
-  exports: [PG_BOSS_TOKEN],
+  exports: [PG_BOSS_TOKEN, PgBossLifecycleService],
 })
 export class PgBossModule {}

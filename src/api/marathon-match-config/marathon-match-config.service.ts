@@ -91,6 +91,10 @@ export class MarathonMatchConfigService {
   private readonly challengeApiBaseUrl =
     process.env.CHALLENGE_API_URL?.replace(/\/+$/, '') ||
     'https://api.topcoder-dev.com';
+  private readonly defaultSystemTestTimeout = this.getPositiveIntegerEnv(
+    'DEFAULT_SYSTEM_TEST_TIMEOUT_MS',
+    86400000,
+  );
   private readonly scorecardIdLookupCache = new Map<string, string | null>();
 
   constructor(
@@ -132,6 +136,7 @@ export class MarathonMatchConfigService {
       Number.isFinite(parsedCompileTimeout) && parsedCompileTimeout > 0
         ? parsedCompileTimeout
         : 120000;
+    const systemTestTimeout = this.defaultSystemTestTimeout;
     const taskDefinitionName =
       process.env.DEFAULT_TASK_DEFINITION_NAME?.trim() || '';
     const taskDefinitionVersion =
@@ -141,6 +146,7 @@ export class MarathonMatchConfigService {
       reviewScorecardId,
       testTimeout,
       compileTimeout,
+      systemTestTimeout,
       taskDefinitionName,
       taskDefinitionVersion,
     };
@@ -207,6 +213,7 @@ export class MarathonMatchConfigService {
             testerId: body.testerId,
             testTimeout: body.testTimeout,
             compileTimeout: body.compileTimeout,
+            systemTestTimeout: body.systemTestTimeout,
             taskDefinitionName: body.taskDefinitionName,
             taskDefinitionVersion: body.taskDefinitionVersion,
             createdBy: actor,
@@ -1419,6 +1426,8 @@ export class MarathonMatchConfigService {
       testerId: config.testerId,
       testTimeout: config.testTimeout,
       compileTimeout: config.compileTimeout,
+      systemTestTimeout:
+        config.systemTestTimeout ?? this.defaultSystemTestTimeout,
       taskDefinitionName: config.taskDefinitionName,
       taskDefinitionVersion: config.taskDefinitionVersion,
       example: mapPhaseByType(PhaseConfigType.EXAMPLE),
@@ -1747,6 +1756,17 @@ export class MarathonMatchConfigService {
    */
   private getActor(user: JwtUser): string {
     return user.isMachine ? 'System' : (user.userId ?? 'Unknown');
+  }
+
+  /**
+   * Reads a positive integer environment variable with a default fallback.
+   * @param envName Environment variable name.
+   * @param defaultValue Value used when the env var is missing or invalid.
+   * @returns Parsed positive integer, or the provided default value.
+   */
+  private getPositiveIntegerEnv(envName: string, defaultValue: number): number {
+    const parsed = Number.parseInt(process.env[envName] ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
   }
 
   /**

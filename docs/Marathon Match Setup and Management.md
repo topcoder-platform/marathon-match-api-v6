@@ -140,6 +140,7 @@ The `Scorer Settings` section controls the persisted Marathon Match config for t
 | `Review Scorecard ID` | `reviewScorecardId` | Review API scorecard ID or legacy scorecard ID. The API validates this before saving. |
 | `Test Timeout (ms)` | `testTimeout` | Timeout for tester execution. |
 | `Compile Timeout (ms)` | `compileTimeout` | Timeout for submission compilation inside the ECS runner. |
+| `System Test Timeout (ms)` | `systemTestTimeout` | Total SYSTEM scoring timeout per submission. Defaults to 24 hours; timed-out SYSTEM tasks are stopped and failed with `metadata.timed_out = true`. |
 | `Task Definition Name` | `taskDefinitionName` | ECS task definition family, for example `mm-ecs-runner`. |
 | `Task Definition Version` | `taskDefinitionVersion` | ECS task definition revision to run. |
 
