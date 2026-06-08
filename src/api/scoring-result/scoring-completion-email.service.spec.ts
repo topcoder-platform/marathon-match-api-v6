@@ -18,14 +18,14 @@ describe('ScoringCompletionEmailService', () => {
   const details = {
     aggregateExampleScore: 95.25,
     aggregateProvisionalScore: 87.5,
-    challengeId: '30000123',
+    challengeId: '76d6e4b8-1cca-4850-8bc5-bdaddfece87a',
     challengeName: 'Blocks',
     memberHandle: 'competitor',
     scoringStatus: 'pass',
     submissionId: 'submission-1',
   };
   const systemDetails = {
-    challengeId: '30000123',
+    challengeId: '76d6e4b8-1cca-4850-8bc5-bdaddfece87a',
     challengeName: 'Blocks',
     finalSystemScore: 91.5,
     memberHandle: 'competitor',
@@ -116,7 +116,8 @@ describe('ScoringCompletionEmailService', () => {
             aggregateProvisionalScore: details.aggregateProvisionalScore,
             challengeId: details.challengeId,
             challengeName: details.challengeName,
-            challengeUrl: 'https://topcoder.com/challenges/30000123',
+            challengeUrl:
+              'https://topcoder.com/challenges/76d6e4b8-1cca-4850-8bc5-bdaddfece87a',
             memberHandle: details.memberHandle,
             scoringStatus: 'pass',
             submissionId: details.submissionId,
@@ -210,7 +211,8 @@ describe('ScoringCompletionEmailService', () => {
           data: expect.objectContaining({
             challengeId: systemDetails.challengeId,
             challengeName: systemDetails.challengeName,
-            challengeUrl: 'https://topcoder.com/challenges/30000123',
+            challengeUrl:
+              'https://topcoder.com/challenges/76d6e4b8-1cca-4850-8bc5-bdaddfece87a',
             finalSystemScore: systemDetails.finalSystemScore,
             memberHandle: systemDetails.memberHandle,
             placement: '1st',
@@ -230,6 +232,44 @@ describe('ScoringCompletionEmailService', () => {
     expect(sentPayload.aggregateExampleScore).toBeUndefined();
     expect(sentPayload.aggregateProvisionalScore).toBeUndefined();
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the legacy Marathon Match standings URL for numeric challenge IDs', async () => {
+    const { httpService, prisma, service } = createService();
+
+    prisma.$queryRaw.mockResolvedValue([{ id: 'notification-1' }]);
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          email: 'competitor@example.com',
+          handle: 'competitor',
+        },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ status: 202 }));
+
+    await expect(
+      service.sendSubmissionScoringCompleteEmail('m2m-token', {
+        ...details,
+        challengeId: '19829',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v5/bus/events',
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          data: expect.objectContaining({
+            challengeId: '19829',
+            challengeUrl:
+              'https://community.topcoder.com/longcontest/?module=ViewStandings&rd=19829',
+            challengeURL:
+              'https://community.topcoder.com/longcontest/?module=ViewStandings&rd=19829',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
   });
 
   it('skips sending when a sent or active notification marker already exists', async () => {
