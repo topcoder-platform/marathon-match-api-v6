@@ -1,10 +1,12 @@
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <grp.h>
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <limits.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -46,6 +48,10 @@
 #define MM_SKIP_USER_DROP 0
 #endif
 
+#ifndef MM_CLOSE_FD_FALLBACK_MAX
+#define MM_CLOSE_FD_FALLBACK_MAX ((rlim_t) 1048576)
+#endif
+
 #if defined(__x86_64__)
 #define MM_AUDIT_ARCH AUDIT_ARCH_X86_64
 #elif defined(__aarch64__)
@@ -64,16 +70,61 @@ static void copy_env_if_present(const char *name, const char *value) {
     }
 }
 
+/**
+ * Closes inherited descriptors before the sandboxed command starts.
+ *
+ * The network sandbox only blocks creating new sockets, so inherited parent
+ * descriptors must be removed independently of RLIMIT_NOFILE.
+ */
 static void close_extra_fds(void) {
-    struct rlimit limit;
-    int max_fd = 1024;
+#ifdef __NR_close_range
+    if (syscall(__NR_close_range, 3U, ~0U, 0U) == 0) {
+        return;
+    }
+#endif
 
-    if (getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY) {
-        max_fd = (int) limit.rlim_cur;
+    DIR *fd_dir = opendir("/proc/self/fd");
+    if (fd_dir != NULL) {
+        int fd_dir_fd = dirfd(fd_dir);
+        struct dirent *entry;
+
+        while ((entry = readdir(fd_dir)) != NULL) {
+            char *end = NULL;
+            unsigned long fd;
+
+            errno = 0;
+            fd = strtoul(entry->d_name, &end, 10);
+            if (
+                errno != 0
+                || end == entry->d_name
+                || *end != '\0'
+                || fd < 3
+                || fd > (unsigned long) INT_MAX
+                || (int) fd == fd_dir_fd
+            ) {
+                continue;
+            }
+
+            close((int) fd);
+        }
+
+        closedir(fd_dir);
+        return;
     }
 
-    for (int fd = 3; fd < max_fd; fd++) {
-        close(fd);
+    struct rlimit limit;
+    rlim_t max_fd = MM_CLOSE_FD_FALLBACK_MAX;
+
+    if (
+        getrlimit(RLIMIT_NOFILE, &limit) == 0
+        && limit.rlim_cur != RLIM_INFINITY
+        && limit.rlim_cur < max_fd
+    ) {
+        max_fd = limit.rlim_cur;
+    }
+
+    for (rlim_t fd = 3; fd < max_fd; fd++) {
+        close((int) fd);
     }
 }
 

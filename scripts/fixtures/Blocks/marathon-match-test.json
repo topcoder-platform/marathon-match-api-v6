@@ -152,6 +152,12 @@
     {
       "memberId": "88770029",
       "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-186-fd-sanitization.zip",
+      "source": {
+        "fileName": "submission-issue-186-fd-sanitization.zip",
+        "issue": 186,
+        "language": "rust",
+        "validates": "The submission scans /proc/self/fd before playing Blocks and fails if any inherited descriptor numbered 1024 or higher remains visible in the sandbox."
       "file": "submissions/submission-issue-261-java11-release.zip",
       "source": {
         "fileName": "submission-issue-261-java11-release.zip",
