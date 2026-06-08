@@ -110,11 +110,15 @@ interface RelativeTestScoreEntry {
 
 interface RelativeReviewRecord {
   submissionId: string;
-  memberId?: string;
+  memberKey?: string;
   createdAt?: string;
   reviewObject: Record<string, unknown>;
   metadata: Record<string, unknown>;
   rawTestScores: RelativeTestScoreEntry[];
+}
+
+interface RelativeReviewCandidate extends LatestMemberSubmissionCandidate {
+  reviewObject: Record<string, unknown>;
 }
 
 interface SystemReviewCompletionContext {
@@ -510,11 +514,14 @@ export class ScoringResultService {
       settings.submissionApiUrl,
       settings.challengeId,
     );
+    const currentSubmissionId = payload.submissionId.trim();
     const currentSubmission = submissions.find(
       (submission) =>
-        this.asString(submission.id) === payload.submissionId.trim(),
+        this.extractSubmissionId(submission) === currentSubmissionId,
     );
-    const currentMemberId = this.asString(currentSubmission?.memberId);
+    const currentMemberKey = currentSubmission
+      ? this.extractSubmissionMemberKey(currentSubmission)
+      : undefined;
 
     const currentReview = this.buildCurrentRelativeReviewRecord({
       payload,
@@ -524,7 +531,7 @@ export class ScoringResultService {
         currentSubmission,
         testPhase,
       ),
-      memberId: currentMemberId,
+      memberKey: currentMemberKey,
       createdAt: this.resolveSubmissionDate(currentSubmission),
       testPhase,
     });
@@ -545,7 +552,7 @@ export class ScoringResultService {
       testPhase,
       payload.reviewTypeId,
       payload.submissionId,
-      currentMemberId,
+      currentMemberKey,
     );
 
     const reviewsToRecompute = [...impactedReviews, currentReview];
@@ -1391,32 +1398,31 @@ export class ScoringResultService {
 
   /**
    * Selects the latest scored submission per member for the requested phase.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @param testPhase Scoring phase to match on each submission's review summations.
+   * @param reviewTypeId Review type to preserve in normalized metadata.
+   * @param excludedSubmissionId Current callback submission ID supplied separately.
+   * @param excludedMemberKey Current callback member key whose older submissions are skipped.
+   * @returns Latest recomputable relative review records for other members.
    */
   private selectLatestRelativeReviewRecords(
     submissions: Record<string, unknown>[],
     testPhase: string,
     reviewTypeId: string,
     excludedSubmissionId: string,
-    excludedMemberId?: string,
+    excludedMemberKey?: string,
   ): RelativeReviewRecord[] {
-    const latestByMember = new Map<
-      string,
-      {
-        submissionId: string;
-        memberId?: string;
-        createdAt?: string;
-        reviewObject: Record<string, unknown>;
-      }
-    >();
+    const latestByMember = new Map<string, RelativeReviewCandidate>();
+    const normalizedExcludedSubmissionId = excludedSubmissionId.trim();
 
-    for (const submission of submissions) {
-      const submissionId = this.asString(submission.id);
-      if (!submissionId || submissionId === excludedSubmissionId) {
+    for (const [sequence, submission] of submissions.entries()) {
+      const submissionId = this.extractSubmissionId(submission);
+      if (!submissionId || submissionId === normalizedExcludedSubmissionId) {
         continue;
       }
 
-      const memberId = this.asString(submission.memberId);
-      if (excludedMemberId && memberId === excludedMemberId) {
+      const memberKey = this.extractSubmissionMemberKey(submission);
+      if (excludedMemberKey && memberKey === excludedMemberKey) {
         continue;
       }
 
@@ -1425,35 +1431,61 @@ export class ScoringResultService {
         continue;
       }
 
-      const key = memberId ?? `submission:${submissionId}`;
-      const createdAt = this.resolveSubmissionDate(submission);
+      const key = memberKey ?? `submission:${submissionId}`;
+      const candidate: RelativeReviewCandidate = {
+        submission,
+        memberKey: key,
+        submittedDate: this.resolveSubmissionDate(submission),
+        isLatest:
+          this.parseBooleanFlag(submission.isLatest) ??
+          this.parseBooleanFlag(submission.latest) ??
+          undefined,
+        sequence,
+        reviewObject,
+      };
       const existing = latestByMember.get(key);
 
       if (
         !existing ||
-        this.compareIsoDateStrings(createdAt, existing.createdAt) >= 0
+        this.compareRelativeReviewCandidates(candidate, existing) >= 0
       ) {
-        latestByMember.set(key, {
-          submissionId,
-          memberId,
-          createdAt,
-          reviewObject,
-        });
+        latestByMember.set(key, candidate);
       }
     }
 
     return Array.from(latestByMember.values())
-      .map((entry) =>
+      .map((candidate) =>
         this.buildRelativeReviewRecord({
-          createdAt: entry.createdAt,
-          memberId: entry.memberId,
-          reviewObject: entry.reviewObject,
+          createdAt: candidate.submittedDate,
+          memberKey: candidate.memberKey,
+          reviewObject: candidate.reviewObject,
           reviewTypeId,
-          submissionId: entry.submissionId,
+          submissionId: this.extractSubmissionId(candidate.submission) ?? '',
           testPhase,
         }),
       )
       .filter((entry): entry is RelativeReviewRecord => entry !== null);
+  }
+
+  /**
+   * Compares relative-review candidates, preferring explicit latest markers and
+   * then the shared timestamp/sequence latest-submission ordering.
+   * @param left Candidate being evaluated.
+   * @param right Current selected candidate.
+   * @returns Positive when left should replace right, negative when right should remain.
+   */
+  private compareRelativeReviewCandidates(
+    left: RelativeReviewCandidate,
+    right: RelativeReviewCandidate,
+  ): number {
+    if (left.isLatest === true && right.isLatest !== true) {
+      return 1;
+    }
+    if (right.isLatest === true && left.isLatest !== true) {
+      return -1;
+    }
+
+    return this.compareSubmissionCandidates(left, right);
   }
 
   /**
@@ -1464,7 +1496,7 @@ export class ScoringResultService {
     fallbackMetadata: Record<string, unknown>;
     fallbackScorecardId?: string;
     existingReviewObject: Record<string, unknown> | null;
-    memberId?: string;
+    memberKey?: string;
     createdAt?: string;
     testPhase: string;
   }): RelativeReviewRecord | null {
@@ -1501,7 +1533,7 @@ export class ScoringResultService {
 
     return this.buildRelativeReviewRecord({
       createdAt: args.createdAt,
-      memberId: args.memberId,
+      memberKey: args.memberKey,
       reviewObject: mergedReviewObject,
       reviewTypeId: args.payload.reviewTypeId,
       submissionId: args.payload.submissionId,
@@ -1514,7 +1546,7 @@ export class ScoringResultService {
    */
   private buildRelativeReviewRecord(args: {
     createdAt?: string;
-    memberId?: string;
+    memberKey?: string;
     reviewObject: Record<string, unknown>;
     reviewTypeId: string;
     submissionId: string;
@@ -1534,7 +1566,7 @@ export class ScoringResultService {
 
     return {
       submissionId: args.submissionId,
-      memberId: args.memberId,
+      memberKey: args.memberKey,
       createdAt: args.createdAt,
       reviewObject: {
         ...reviewObject,
