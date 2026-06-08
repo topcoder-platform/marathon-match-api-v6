@@ -278,6 +278,16 @@
         "language": "csharp-net7",
         "validates": ".cs_net7 submissions target net7.0 and compile with the NET7_0 target framework constant."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-245-long-system-callback.zip",
+      "source": {
+        "fileName": "submission-issue-245-long-system-callback.zip",
+        "issue": 245,
+        "behavior": "Sleeps 800 ms before returning -1 for each testcase so the 5000-test SYSTEM runner crosses the typical one-hour M2M token lifetime and must refresh before posting callbacks."
+      }
     }
   ]
 }
