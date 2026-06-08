@@ -223,6 +223,16 @@
         "purpose": "Benign regression probe that records /proc uid metadata for the isolated tester JVM and fails only if that JVM is running as root.",
         "expectedBehavior": "Patched runner logs the isolated tester JVM as uid 10001 and completes with aggregateScore 0."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-290-scorer-config-permissions.zip",
+      "source": {
+        "fileName": "submission-issue-290-scorer-config-permissions.zip",
+        "issue": 290,
+        "purpose": "Regression submission confirms submitted code cannot open /tmp/mm-isolated-scorer-*.json for writing."
+      }
     }
   ]
 }

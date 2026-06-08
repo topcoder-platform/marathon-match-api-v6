@@ -20,7 +20,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback.
 - The tester executes in a separate child JVM launched through `mm-runner-isolate` as uid/gid `10001` (`runner`) with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
 - Generic submitted solution commands execute through the setuid-root `mm-scorer-isolate` bridge as uid/gid `10002` (`scorer`). The bridge drops its supervisor back to the invoking `runner` uid after it forks the solution child, then supervises the solution process group so tester timeouts can still terminate lower-privilege processes.
-- Downloaded tester JARs and serialized scorer config are mode `0600` runner-owned files. Submitted code running as `scorer` cannot read them even if it can guess their `/tmp` paths.
+- Downloaded tester JARs and serialized scorer config are mode `0400` runner-owned files. Submitted code running as `scorer` cannot read or modify them even if it can guess their `/tmp` paths.
 - Submitted solution processes can create only `AF_UNIX` sockets. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
 - The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
 
