@@ -9,6 +9,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Request } from 'express';
 import { Scope } from 'src/shared/enums/scopes.enum';
+import { UserRole } from 'src/shared/enums/userRole.enum';
 import { JwtUser, isAdmin } from 'src/shared/modules/global/jwt.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
@@ -33,8 +34,9 @@ interface ChallengeResource {
 }
 
 /**
- * Restricts runner log access to admins, scoped machine tokens, or users with
- * an allowed resource assignment on the challenge mapped to the submission.
+ * Restricts runner log privileged access to admins or users with an allowed
+ * resource assignment on the challenge mapped to the submission, while letting
+ * ordinary users continue to service-level submission ownership checks.
  * Used by the submission runner log endpoint after the global token guard has
  * validated the JWT's global role or read scope.
  */
@@ -66,7 +68,7 @@ export class SubmissionRunnerLogAccessGuard implements CanActivate {
   /**
    * Authorizes the current request against the challenge mapped to submissionId.
    * @param context Nest execution context containing the HTTP request.
-   * @returns `true` when the caller may read runner logs for the mapped challenge.
+   * @returns `true` when the caller may continue to service-level runner log authorization.
    * @throws ForbiddenException When the caller is not assigned to the challenge.
    * @throws NotFoundException When no runner log mapping exists for the submission/task.
    */
@@ -79,6 +81,10 @@ export class SubmissionRunnerLogAccessGuard implements CanActivate {
     }
 
     if (isAdmin(user) || this.hasMarathonMatchReadScope(user)) {
+      return true;
+    }
+
+    if (!this.hasChallengeRunnerLogRole(user)) {
       return true;
     }
 
@@ -103,8 +109,12 @@ export class SubmissionRunnerLogAccessGuard implements CanActivate {
     );
 
     if (!hasChallengeResource) {
+      if (this.hasGeneralUserRole(user)) {
+        return true;
+      }
+
       throw new ForbiddenException(
-        'Only admins, M2M tokens, or challenge-assigned Copilot/Manager resources can read marathon match runner logs.',
+        'Only admins, submission owners, or challenge-assigned Copilot/Manager resources can read marathon match runner logs.',
       );
     }
 
@@ -126,6 +136,38 @@ export class SubmissionRunnerLogAccessGuard implements CanActivate {
     return Array.isArray(user.scopes)
       ? user.scopes.includes(Scope.ReadMarathonMatch) ||
           user.scopes.includes(Scope.AllMarathonMatch)
+      : false;
+  }
+
+  /**
+   * Checks whether a caller has a challenge resource role that needs assignment verification.
+   * @param user Authenticated JWT payload.
+   * @returns `true` for global Copilot or Project Manager roles.
+   * Used by `canActivate` to route submitters to service-level ownership checks.
+   */
+  private hasChallengeRunnerLogRole(user: JwtUser): boolean {
+    return Array.isArray(user.roles)
+      ? user.roles.some((role) =>
+          [
+            this.normalizeText(UserRole.Copilot),
+            this.normalizeText(UserRole.ProjectManager),
+          ].includes(this.normalizeText(role)),
+        )
+      : false;
+  }
+
+  /**
+   * Checks whether the caller can fall back to submission-owner authorization.
+   * @param user Authenticated JWT payload.
+   * @returns `true` when the caller carries the normal user role.
+   * Used by `canActivate` when challenge-resource verification fails.
+   */
+  private hasGeneralUserRole(user: JwtUser): boolean {
+    return Array.isArray(user.roles)
+      ? user.roles.some(
+          (role) =>
+            this.normalizeText(role) === this.normalizeText(UserRole.User),
+        )
       : false;
   }
 
