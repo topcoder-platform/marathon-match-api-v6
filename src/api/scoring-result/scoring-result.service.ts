@@ -347,7 +347,7 @@ export class ScoringResultService {
 
     const reviewPayload = this.buildSummationPayload({
       submissionId: payload.submissionId,
-      score: payload.status === ScoringTestStatus.Success ? 0 : -1,
+      score: this.progressPlaceholderScore(payload.status),
       scorecardId: fallbackScorecardId,
       metadata,
       testPhase: normalizedPhase,
@@ -2166,6 +2166,15 @@ export class ScoringResultService {
       testStatus: progress.status,
       testProgressDetails: details,
     };
+  }
+
+  /**
+   * Chooses a neutral placeholder score for active progress updates.
+   * @param status Runner progress status being persisted.
+   * @returns `-1` only for explicit failed progress; otherwise `0` until the final callback writes the real score.
+   */
+  private progressPlaceholderScore(status: ScoringTestStatus): number {
+    return status === ScoringTestStatus.Failed ? -1 : 0;
   }
 
   /**

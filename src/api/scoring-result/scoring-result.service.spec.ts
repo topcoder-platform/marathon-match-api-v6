@@ -1010,7 +1010,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('persists scoring progress as review summation metadata', async () => {
+  it('persists in-progress scoring progress without a failed placeholder score', async () => {
     const { service, m2mService, prisma } = createService();
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
@@ -1056,7 +1056,7 @@ describe('ScoringResultService', () => {
       'm2m-token',
       'summation-1',
       expect.objectContaining({
-        aggregateScore: -1,
+        aggregateScore: 0,
         isPassing: false,
         isProvisional: true,
         metadata: expect.objectContaining({
@@ -1071,6 +1071,61 @@ describe('ScoringResultService', () => {
             testProcess: 'provisional',
             totalTests: 20,
           }),
+        }),
+      }),
+    );
+  });
+
+  it('persists failed scoring progress with a failed placeholder score', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-1',
+          metadata: {
+            testProcess: 'provisional',
+            testType: 'provisional',
+          },
+        },
+      ]);
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 4,
+        failedTests: 1,
+        progress: 0.2,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.Failed,
+        message: 'Runner failed',
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        totalTests: 20,
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'summation-1',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        metadata: expect.objectContaining({
+          testStatus: ScoringTestStatus.Failed,
         }),
       }),
     );

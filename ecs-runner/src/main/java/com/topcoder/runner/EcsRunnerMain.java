@@ -3434,7 +3434,7 @@ public class EcsRunnerMain {
         throws IOException {
         Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
         Files.write(jarPath, jarBytes);
-        secureRunnerReadOnlyFile(jarPath);
+        secureRunnerOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
             "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"
@@ -3743,10 +3743,20 @@ public class EcsRunnerMain {
                     testOutputText.append(testResult.getError().trim()).append('\n');
                 }
                 if (
-                    testResult.getOutput() != null
-                        && !testResult.getOutput().trim().isEmpty()
+                    testResult.getStdout() != null
+                        && !testResult.getStdout().trim().isEmpty()
                 ) {
-                    testOutputText.append(testResult.getOutput().trim()).append('\n');
+                    testOutputText.append("stdout:\n")
+                        .append(testResult.getStdout().trim())
+                        .append('\n');
+                }
+                if (
+                    testResult.getStderr() != null
+                        && !testResult.getStderr().trim().isEmpty()
+                ) {
+                    testOutputText.append("stderr:\n")
+                        .append(testResult.getStderr().trim())
+                        .append('\n');
                 }
                 testOutputText.append('\n');
                 outputBytes = appendLimitedOutput(
