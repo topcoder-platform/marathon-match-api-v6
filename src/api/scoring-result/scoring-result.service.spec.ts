@@ -1585,6 +1585,53 @@ describe('ScoringResultService', () => {
     ]);
   });
 
+  it('excludes no-credit and errored scores from MINIMIZE best-score baselines', () => {
+    const { service } = createService();
+    const computeBestScores = (service as any).computeBestScores.bind(
+      service,
+    ) as (
+      reviewRecords: Array<{
+        rawTestScores: Array<{
+          testcase: string;
+          score: number;
+          error?: string;
+        }>;
+      }>,
+      scoreDirection: ScoreDirection,
+    ) => Map<string, number>;
+
+    const bestScores = computeBestScores(
+      [
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 0 },
+            { testcase: 'seed-2', score: 5, error: 'runtime error' },
+            { testcase: 'seed-3', score: -1 },
+          ],
+        },
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 40 },
+            { testcase: 'seed-2', score: 30 },
+            { testcase: 'seed-3', score: 60 },
+          ],
+        },
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 10 },
+            { testcase: 'seed-2', score: 20 },
+            { testcase: 'seed-3', score: 50 },
+          ],
+        },
+      ],
+      ScoreDirection.MINIMIZE,
+    );
+
+    expect(bestScores.get('seed-1')).toBe(10);
+    expect(bestScores.get('seed-2')).toBe(20);
+    expect(bestScores.get('seed-3')).toBe(50);
+  });
+
   it('selects the latest relative review using current submission date fields when created is missing', () => {
     const { service } = createService();
     const selectLatestRelativeReviewRecords = (
