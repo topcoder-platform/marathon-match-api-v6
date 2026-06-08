@@ -288,6 +288,17 @@
         "issue": 245,
         "behavior": "Sleeps 800 ms before returning -1 for each testcase so the 5000-test SYSTEM runner crosses the typical one-hour M2M token lifetime and must refresh before posting callbacks."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-220-private-reviews.zip",
+      "source": {
+        "fileName": "submission-issue-220-private-reviews.zip",
+        "language": "python",
+        "issue": 220,
+        "purpose": "Regression submission that pre-creates artifacts/private/reviews.json with a benign forged marker so the trusted runner must replace it with the canonical internal review artifact."
+      }
     }
   ]
 }
