@@ -309,6 +309,16 @@
         "issue": 220,
         "purpose": "Regression submission that pre-creates artifacts/private/reviews.json with a benign forged marker so the trusted runner must replace it with the canonical internal review artifact."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-189-delayed-timeout.zip",
+      "source": {
+        "fileName": "submission-issue-189-delayed-timeout.zip",
+        "issue": "#189",
+        "behavior": "Reads the Blocks setup, waits 25 ms, then returns a benign end-of-game response so low-timeout fixture runs can validate MarathonTester.runTest() timeout enforcement."
+      }
     }
   ]
 }
