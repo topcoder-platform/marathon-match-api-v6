@@ -57,6 +57,11 @@ javac --release 11 Solution.java
 java -Xms1G -Xmx1G -cp <workdir> Solution
 ```
 
+After `javac` succeeds, the runner loads the compiled Java class in a short-lived
+isolated JVM without invoking `main`. This startup check makes Java static
+initializers part of the compile phase so hangs or class-load failures are
+reported through `compile_log.txt` under the configured compile timeout.
+
 The ECS runner image includes the Java 11 JDK, so Java source submissions can be compiled by the same runner task that executes the tester. The explicit `--release 11` flag makes the supported source and API level visible in compile artifacts.
 
 ### Python
@@ -101,6 +106,8 @@ dotnet Solution/Solution.dll
 Compile and test timeouts are configured per Marathon Match challenge.
 
 - `compileTimeout` controls submission compilation timeout.
+- For Java submissions, `compileTimeout` also covers class startup and static
+  initializer checks performed after `javac`.
 - `testTimeout` controls per-seed tester execution timeout.
 
 The default values supplied by `marathon-match-api-v6` are environment-configurable. If not overridden in service configuration, the API defaults are:

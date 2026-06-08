@@ -330,6 +330,18 @@
         "issue": "#189",
         "behavior": "Reads the Blocks setup, waits 25 ms, then returns a benign end-of-game response so low-timeout fixture runs can validate MarathonTester.runTest() timeout enforcement."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-175-static-init-timeout.zip",
+      "source": {
+        "fileName": "submission-issue-175-static-init-timeout.zip",
+        "issue": 175,
+        "language": "java",
+        "behavior": "BlockGame has a static initializer that sleeps forever.",
+        "expectedResult": "Runner fails compilation/startup after compileTimeout and records the timeout in compile_log.txt."
+      }
     }
   ]
 }

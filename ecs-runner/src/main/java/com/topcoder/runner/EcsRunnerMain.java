@@ -121,6 +121,22 @@ public class EcsRunnerMain {
     private static final Pattern JAVA_CLASS_PATTERN = Pattern.compile(
         "\\bclass\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b"
     );
+    private static final String JAVA_STARTUP_CHECK_CLASS_NAME =
+        "com.topcoder.runner.startupcheck.JavaStartupCheck";
+    private static final String JAVA_STARTUP_CHECK_SOURCE =
+        "package com.topcoder.runner.startupcheck;\n"
+            + "\n"
+            + "public final class JavaStartupCheck {\n"
+            + "    private JavaStartupCheck() {\n"
+            + "    }\n"
+            + "\n"
+            + "    public static void main(String[] args) throws Exception {\n"
+            + "        if (args.length != 1 || args[0].trim().isEmpty()) {\n"
+            + "            throw new IllegalArgumentException(\"Submitted class name is required.\");\n"
+            + "        }\n"
+            + "        Class.forName(args[0], true, Thread.currentThread().getContextClassLoader());\n"
+            + "    }\n"
+            + "}\n";
     private static final Pattern MEMBER_ARTIFACT_JSON_SEED_PATTERN = Pattern.compile(
         "(?i)(\"(?:seed|startSeed|endSeed|phaseStartSeed)\"\\s*:\\s*\"?)\\d+(\"?)"
     );
@@ -4297,6 +4313,7 @@ public class EcsRunnerMain {
                 "Java compilation failed.",
                 compileLogPath
             );
+            runJavaStartupCheck(workDir, entryPoint, compileTimeoutMs, compileLogPath);
             return new CompiledSubmission(
                 buildScorerExecutionCommand(
                     "java -Xms1G -Xmx1G -cp "
@@ -4463,6 +4480,80 @@ public class EcsRunnerMain {
             return "net10.0";
         }
         throw new IllegalArgumentException("Unsupported .NET C# extension: " + extension);
+    }
+
+    /**
+     * Loads the compiled Java submission class in an isolated JVM so static initializers
+     * are covered by the configured compile timeout before seed execution starts.
+     *
+     * @param workDir Temporary compile workspace containing the compiled submission.
+     * @param entryPoint Resolved Java submission entry point.
+     * @param compileTimeoutMs Compile/startup timeout in milliseconds.
+     * @param compileLogPath Public artifact file that receives check output.
+     * @throws Exception When the helper cannot be written/compiled, the class fails to load,
+     *                   or the startup check times out.
+     */
+    private static void runJavaStartupCheck(
+        Path workDir,
+        JavaEntryPoint entryPoint,
+        int compileTimeoutMs,
+        Path compileLogPath
+    ) throws Exception {
+        Path checkRoot = workDir.resolve(".topcoder-java-startup-check");
+        Path sourcePath = checkRoot.resolve(
+            Paths.get(
+                "src",
+                "com",
+                "topcoder",
+                "runner",
+                "startupcheck",
+                "JavaStartupCheck.java"
+            )
+        );
+        Path classesDir = checkRoot.resolve("classes");
+        Path checkWorkDir = checkRoot.resolve("work");
+
+        try {
+            Files.createDirectories(sourcePath.getParent());
+            Files.createDirectories(classesDir);
+            Files.createDirectories(checkWorkDir);
+            Files.write(sourcePath, JAVA_STARTUP_CHECK_SOURCE.getBytes(StandardCharsets.UTF_8));
+
+            runCommand(
+                Arrays.asList(
+                    "javac",
+                    "-d",
+                    classesDir.toAbsolutePath().toString(),
+                    sourcePath.toAbsolutePath().toString()
+                ),
+                workDir,
+                compileTimeoutMs,
+                "Java startup check helper compilation failed.",
+                compileLogPath
+            );
+
+            grantScorerReadExecuteAccess(workDir);
+            runCommand(
+                Arrays.asList(
+                    SCORER_ISOLATION_WRAPPER_PATH,
+                    "java",
+                    "-Xms1G",
+                    "-Xmx1G",
+                    "-cp",
+                    classesDir.toAbsolutePath().toString()
+                        + System.getProperty("path.separator")
+                        + workDir.toAbsolutePath().toString(),
+                    JAVA_STARTUP_CHECK_CLASS_NAME,
+                    entryPoint.getQualifiedClassName()
+                ),
+                checkWorkDir,
+                compileTimeoutMs,
+                "Java startup check failed.",
+                compileLogPath
+            );
+        } finally {
+            deletePathRecursively(checkRoot);
+        }
     }
 
     /**
