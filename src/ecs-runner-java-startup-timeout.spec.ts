@@ -26,7 +26,7 @@ describe('ECS runner Java startup timeout guard', () => {
     expect(runnerSource).toContain('SCORER_ISOLATION_WRAPPER_PATH');
 
     expect(runnerSource).toMatch(
-      /runCommand\(\s*Arrays\.asList\("javac", workDir\.relativize\(normalizedSource\)\.toString\(\)\)[\s\S]*?"Java compilation failed\.",\s*compileLogPath\s*\);\s*runJavaStartupCheck\(workDir, entryPoint, compileTimeoutMs, compileLogPath\);/,
+      /runCommand\(\s*Arrays\.asList\(\s*"javac",\s*"--release",\s*JAVA_SUBMISSION_RELEASE,\s*workDir\.relativize\(normalizedSource\)\.toString\(\)\s*\)[\s\S]*?"Java compilation failed\.",\s*compileLogPath\s*\);\s*runJavaStartupCheck\(workDir, entryPoint, compileTimeoutMs, compileLogPath\);/,
     );
   });
 });

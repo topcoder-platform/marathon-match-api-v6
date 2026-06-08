@@ -11,6 +11,10 @@ jest.mock('child_process', () => ({
   spawn: jest.fn(),
 }));
 
+jest.mock('nanoid', () => ({
+  nanoid: jest.fn(() => 'generated-id'),
+}));
+
 type TesterCompilationServicePrivate = TesterCompilationService & {
   executeMavenBuild: (
     pomPath: string,
