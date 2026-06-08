@@ -245,7 +245,7 @@
         "fileName": "submission-issue-16-token-redaction.zip",
         "issue": 16,
         "language": "rust",
-        "purpose": "Regression for issue #16 runner credential redaction. Run the Blocks fixture with DEBUG_LOG_ACCESS_TOKEN=true and DEBUG_LOG_FULL_ACCESS_TOKEN=true, then verify runner logs contain only redacted ACCESS_TOKEN output and normal scoring completes.",
+        "purpose": "Regression for issue #16 runner credential redaction. Run the Blocks fixture with DEBUG_LOG_ACCESS_TOKEN=true, then verify runner logs contain only redacted ACCESS_TOKEN output and normal scoring completes.",
         "proof": "The submission prints only ISSUE16_ACCESS_TOKEN_ABSENT or ISSUE16_ACCESS_TOKEN_PRESENT without printing any credential value; ACCESS_TOKEN should remain absent from the untrusted submission environment."
       }
     },

@@ -3660,7 +3660,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Copies bytes between streams for Java 8 runtimes.
+     * Copies bytes between streams using a bounded reusable buffer.
      *
      * @param inputStream Source stream.
      * @param outputStream Destination stream.
@@ -5343,7 +5343,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Reads all bytes from an input stream for Java 8 compatibility.
+     * Reads all bytes from an input stream using a bounded reusable buffer.
      */
     private static byte[] readAllBytes(InputStream inputStream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
