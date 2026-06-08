@@ -42,6 +42,9 @@ export enum ScoringTestStatus {
   Failed = 'FAILED',
 }
 
+const MAX_REVIEW_SCORE_LABEL = '9223372036854775807';
+const MAX_REVIEW_SCORE = Number(MAX_REVIEW_SCORE_LABEL);
+
 export interface ScoringProgressCallbackPayload {
   challengeId: string;
   submissionId: string;
@@ -176,6 +179,8 @@ export class ScoringResultService {
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
   ): Promise<void> {
+    this.validateReviewScore(payload.score, 'Scoring callback score');
+
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     const config = await this.requireScoringResultConfig(payload.challengeId);
     const token = await this.m2mService.getM2MToken();
@@ -1716,15 +1721,28 @@ export class ScoringResultService {
       const entry = this.asRecord(rawEntry);
       const testcase = this.asString(entry.testcase);
       const score = this.toNumber(entry.score);
+      const error = this.asString(entry.error);
+      const hasScore = Object.prototype.hasOwnProperty.call(entry, 'score');
 
-      if (!testcase || score === null) {
+      if (!testcase || (!hasScore && score === null)) {
+        continue;
+      }
+
+      if (score === null || score > MAX_REVIEW_SCORE) {
+        result.push({
+          testcase,
+          score: -1,
+          error:
+            error ??
+            `Invalid score value suppressed; scores must be finite and no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+        });
         continue;
       }
 
       result.push({
         testcase,
         score,
-        error: this.asString(entry.error),
+        error,
       });
     }
 
@@ -1810,6 +1828,8 @@ export class ScoringResultService {
   private buildSummationPayload(
     input: SummationBuildInput,
   ): ReviewSummationPayload {
+    this.validateReviewScore(input.score, 'Review summation score');
+
     const metadata = this.asRecord(input.metadata);
 
     const normalizedTestType = this.normalizeTestPhase(
@@ -2029,6 +2049,18 @@ export class ScoringResultService {
           continue;
         }
         sanitizedEntry[key] = value;
+      }
+
+      const score = this.toNumber(entry.score);
+      if (
+        Object.prototype.hasOwnProperty.call(entry, 'score') &&
+        (score === null || score > MAX_REVIEW_SCORE)
+      ) {
+        sanitizedEntry.score = -1;
+        sanitizedEntry.error = this.coalesceString(
+          this.asString(sanitizedEntry.error),
+          `Invalid score value suppressed; scores must be finite and no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+        );
       }
 
       sanitizedEntry.testcase = String(index + 1);
@@ -2721,7 +2753,12 @@ export class ScoringResultService {
       const entry = this.asRecord(testScore);
       const score = this.toNumber(entry.score);
       const error = this.asString(entry.error);
-      if ((score !== null && score < 0) || error) {
+      const hasScore = Object.prototype.hasOwnProperty.call(entry, 'score');
+      if (
+        (hasScore && score === null) ||
+        (score !== null && (score < 0 || score > MAX_REVIEW_SCORE)) ||
+        error
+      ) {
         failedTests += 1;
       }
     }
@@ -2795,6 +2832,29 @@ export class ScoringResultService {
     }
 
     return null;
+  }
+
+  /**
+   * Ensures review scores can be safely persisted in review-api summations.
+   * Negative values remain valid because the scorer uses them as failed-test
+   * sentinels; non-finite values and values above Java Long.MAX_VALUE are rejected.
+   * @param score Score value received from the runner or legacy review payload.
+   * @param label Human-readable score context for error messages.
+   * @throws BadRequestException when the score is non-numeric, non-finite, or too large.
+   */
+  private validateReviewScore(
+    score: unknown,
+    label: string,
+  ): asserts score is number {
+    if (
+      typeof score !== 'number' ||
+      !Number.isFinite(score) ||
+      score > MAX_REVIEW_SCORE
+    ) {
+      throw new BadRequestException(
+        `${label} must be a finite number no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+      );
+    }
   }
 
   /**
