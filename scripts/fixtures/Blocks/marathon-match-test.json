@@ -481,6 +481,17 @@
         "language": "java",
         "validates": "Java submission compilation keeps the temporary compile workspace available until compilation and tester execution have completed."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-21-filesystem-leak.zip",
+      "source": {
+        "fileName": "submission-issue-21-filesystem-leak.zip",
+        "issue": 21,
+        "language": "python",
+        "validates": "Submitted code cannot read /etc/hostname, /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, or /proc/net TCP tables."
+      }
     }
   ]
 }

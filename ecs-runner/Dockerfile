@@ -65,6 +65,7 @@ RUN gcc -O2 -Wall -Wextra \
         -DMM_ISOLATED_NAME=\"scorer\" \
         -DMM_SUPERVISE_CHILD=1 \
         -DMM_DROP_SUPERVISOR_PRIVS=1 \
+        -DMM_ENABLE_FS_SANDBOX=1 \
         -o /usr/local/bin/mm-scorer-isolate \
         /app/scripts/mm-net-isolate.c \
     && chown root:root /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate \

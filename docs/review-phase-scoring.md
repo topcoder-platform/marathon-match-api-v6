@@ -80,7 +80,7 @@ After the review and downstream phases are closed, `SchedulerService` calls `att
 
 ## Submission isolation
 
-SYSTEM review scoring uses the same ECS runner isolation model as submission-phase scoring. The trusted parent runner process keeps the network access required for bootstrap and callback traffic, the tester executes in a scrubbed child JVM, and generic submitted solution commands run as the separate non-root `scorer` user with no outbound INET/INET6 socket access.
+SYSTEM review scoring uses the same ECS runner isolation model as submission-phase scoring. The trusted parent runner process keeps the network access required for bootstrap and callback traffic, the tester executes in a scrubbed child JVM, and generic submitted solution commands run as the separate non-root `scorer` user with no outbound INET/INET6 socket access and no read access to infrastructure-revealing `/etc` and `/proc` paths.
 
 ## Observability
 

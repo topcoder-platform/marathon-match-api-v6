@@ -400,7 +400,7 @@ The ECS task parent process has trusted network access so it can:
 - upload artifacts
 - post scoring callbacks
 
-The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain read-only to the trusted root runner process. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
+The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain runner-owned mode `0400` files that submitted code cannot read or modify. Submitted solution commands are also restricted to a filesystem allowlist that omits infrastructure-revealing `/etc` and `/proc` paths. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
 
 ## Multithreading and Resource Notes
 

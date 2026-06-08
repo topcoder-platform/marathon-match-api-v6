@@ -88,7 +88,8 @@ The ECS task keeps trusted network access only on the trusted parent runner proc
 
 - a scrubbed environment that does not include `ACCESS_TOKEN`
 - socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
-- root-read-only tester JAR and scorer config files, preventing submitted code from reading or modifying those `/tmp` inputs
+- a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes without exposing `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables
+- runner-owned mode `0400` tester JAR and scorer config files, preventing submitted code from reading or modifying those `/tmp` inputs
 - callback review payloads created by the trusted runner's generic Marathon flow, or by a custom tester `runTester(...)` result map when a tester opts into that advanced path
 
 ## Observability

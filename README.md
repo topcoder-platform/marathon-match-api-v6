@@ -125,7 +125,6 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 | `REVIEW_API_URL`              | Yes (for scoring) | None        | Review API base URL used by NestJS scoring callback processor                                           |
 | `REVIEW_TYPE_ID`              | Yes (for scoring) | None        | Review type ID passed to ECS runner callback payload                                                    |
 | `DEBUG_LOG_ACCESS_TOKEN`      | No                | `false`     | Pass-through to ECS runner for access-token debug logging (redacted token + decoded JWT header/payload) |
-| `DEBUG_LOG_FULL_ACCESS_TOKEN` | No                | `false`     | Pass-through to ECS runner to print full `ACCESS_TOKEN` when `DEBUG_LOG_ACCESS_TOKEN=true`              |
 
 `launchScorerTask(...)` already disables public IP assignment for scorer tasks. It also enforces the pending/running scorer task cap before calling `RunTask`, skips duplicate active launches for the same challenge/submission/phase, and stops older active tasks for the same challenge/member when a newer submission arrives. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
 
@@ -147,7 +146,6 @@ These are required by `ecs-runner` and are passed in container overrides when a 
 Optional debug vars (set on API service env to be forwarded to runner):
 
 - `DEBUG_LOG_ACCESS_TOKEN`
-- `DEBUG_LOG_FULL_ACCESS_TOKEN` (prints full bearer token; use only for short-lived debugging)
 
 ### Submission isolation inside the ECS runner
 
@@ -156,8 +154,9 @@ The ECS task still needs trusted outbound access to fetch challenge config, down
 - The container starts as `root`. Do not override the ECS task-definition `user`; the trusted runner needs root only to drop submitted solution commands to `scorer`.
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
-- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept root-read-only, so submitted code cannot read or modify them from `/tmp`.
-- Native wrappers block creation of non-`AF_UNIX` sockets for the child JVM and submitted solution processes, so submissions cannot open live outbound network connections.
+- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept runner-owned mode `0400`, so submitted code cannot read or modify them from `/tmp`.
+- Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
+- Native wrappers block `io_uring` and creation of non-`AF_UNIX` sockets for submitted solution processes and their fork/exec children, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
 ## Exit code 137 (OOM) mitigation
