@@ -147,3 +147,13 @@ docker run --rm mm-ecs-runner:local
 ```
 
 The container exits quickly unless all required scorer environment variables are provided.
+
+## Local socket-isolation regression
+
+```bash
+./ecs-runner/scripts/test-mm-net-isolate-socket-block.sh
+```
+
+This compiles the native helper in no-user-drop test mode, runs a Python
+`ctypes` raw `socket` syscall probe under seccomp, and verifies that an
+`AF_INET` socket is denied while `AF_UNIX` socket pairs still work.
