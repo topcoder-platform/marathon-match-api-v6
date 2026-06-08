@@ -3,6 +3,7 @@ import {
   OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
+import axios from 'axios';
 import { createHash } from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { ALL_SCOPE_MAPPINGS } from '../../enums/scopes.enum';
@@ -47,6 +48,11 @@ export const isAdmin = (user: JwtUser): boolean => {
 @Injectable()
 export class JwtService implements OnModuleInit {
   private static readonly SLOW_VALIDATION_WARNING_INTERVAL_MS = 5000;
+  private static readonly AUTHORIZATION_VALIDATION_TIMEOUT_MS = 3000;
+  private static readonly TOPCODER_API_ISSUERS = new Set([
+    'https://api.topcoder.com',
+    'https://api.topcoder-dev.com',
+  ]);
   private jwtAuthenticator: any;
   private readonly logger = LoggerService.forRoot('JwtService');
 
@@ -68,9 +74,10 @@ export class JwtService implements OnModuleInit {
    * @returns The user information extracted from the token
    */
   async validateToken(token: string): Promise<JwtUser> {
+    const normalizedToken = this.normalizeToken(token);
     const startedAt = Date.now();
-    const tokenHash = this.anonymizeToken(token);
-    const tokenMetadata = this.decodeTokenMetadata(token);
+    const tokenHash = this.anonymizeToken(normalizedToken);
+    const tokenMetadata = this.decodeTokenMetadata(normalizedToken);
     const validIssuers = this.getValidIssuersList();
     const hasAuthSecret = Boolean(AuthConfig.authSecret);
     this.logger.log({
@@ -93,9 +100,7 @@ export class JwtService implements OnModuleInit {
         // Create a request object with the authorization header
         const req = {
           headers: {
-            authorization: token.startsWith('Bearer ')
-              ? token
-              : `Bearer ${token}`,
+            authorization: `Bearer ${normalizedToken}`,
           },
         };
 
@@ -259,6 +264,13 @@ export class JwtService implements OnModuleInit {
         }
       }
 
+      await this.validateActiveUserSession(
+        normalizedToken,
+        payload,
+        tokenMetadata,
+        tokenHash,
+      );
+
       this.logger.log({
         message: 'JWT validation completed',
         tokenHash,
@@ -305,6 +317,184 @@ export class JwtService implements OnModuleInit {
 
   private anonymizeToken(token: string): string {
     return createHash('sha256').update(token).digest('hex').slice(0, 16);
+  }
+
+  /**
+   * Normalizes raw bearer-token input before validation.
+   * @param token Raw JWT or Authorization header value.
+   * @returns JWT without the Bearer prefix.
+   * @throws UnauthorizedException When the token is empty.
+   * Used by `validateToken` so signature and session checks inspect the same token value.
+   */
+  private normalizeToken(token: string): string {
+    const normalized = token?.startsWith('Bearer ')
+      ? token.slice('Bearer '.length)
+      : token;
+
+    if (!normalized || normalized.trim().length === 0) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    return normalized.trim();
+  }
+
+  /**
+   * Verifies that a user token still has an active Identity API authorization.
+   * @param token JWT already validated by tc-core.
+   * @param payload Decoded token payload.
+   * @param tokenMetadata Safe decoded token metadata used for issuer routing.
+   * @param tokenHash Redacted token hash used only for logs.
+   * @throws UnauthorizedException When the token session is inactive or cannot be verified.
+   * Used to make Topcoder logout invalidate previously issued user bearer tokens.
+   */
+  private async validateActiveUserSession(
+    token: string,
+    payload: Record<string, unknown>,
+    tokenMetadata:
+      | {
+          iss?: string;
+        }
+      | undefined,
+    tokenHash: string,
+  ): Promise<void> {
+    if (!this.isActiveUserSessionValidationEnabled()) {
+      return;
+    }
+
+    if (this.isMachineTokenPayload(payload)) {
+      return;
+    }
+
+    const validationUrl = this.resolveAuthorizationValidationUrl(
+      tokenMetadata?.iss,
+    );
+    if (!validationUrl) {
+      this.logger.warn({
+        message:
+          'Skipping active user session validation because no authorization validation URL is configured for issuer',
+        tokenHash,
+        iss: tokenMetadata?.iss,
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.get(validationUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params: {
+          fields: 'token',
+        },
+        timeout: this.getAuthorizationValidationTimeoutMs(),
+        validateStatus: () => true,
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        this.logger.log({
+          message: 'Active user session validation completed',
+          tokenHash,
+          validationStatus: response.status,
+        });
+        return;
+      }
+
+      this.logger.warn({
+        message: 'Active user session validation rejected token',
+        tokenHash,
+        validationStatus: response.status,
+      });
+      throw new UnauthorizedException('Token session is no longer active');
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      const errorDetail = error as {
+        code?: string;
+        message?: string;
+        response?: { status?: number };
+      };
+      this.logger.error({
+        message: 'Failed to validate active user session',
+        tokenHash,
+        validationStatus: errorDetail.response?.status,
+        errorCode: errorDetail.code,
+        error: errorDetail.message ?? String(error),
+      });
+      throw new UnauthorizedException('Unable to validate token session');
+    }
+  }
+
+  /**
+   * Determines whether active user session validation should run.
+   * @returns `false` only when explicitly disabled with environment config.
+   * Used to keep local development overrideable while enabling logout checks by default.
+   */
+  private isActiveUserSessionValidationEnabled(): boolean {
+    return (
+      (process.env.AUTHORIZATION_SESSION_VALIDATION_ENABLED ?? 'true')
+        .trim()
+        .toLowerCase() !== 'false'
+    );
+  }
+
+  /**
+   * Detects token payloads this service treats as M2M.
+   * @param payload Decoded JWT payload from tc-core.
+   * @returns True when the token has machine markers or scope claims.
+   * Used by active-session validation to avoid calling Identity API for M2M tokens.
+   */
+  private isMachineTokenPayload(payload: Record<string, unknown>): boolean {
+    return (
+      payload.isMachine === true ||
+      payload.gty === 'client-credentials' ||
+      Boolean(payload.scopes || payload.scope)
+    );
+  }
+
+  /**
+   * Resolves the Identity API authorization endpoint used to verify a user token.
+   * @param issuer Token issuer claim.
+   * @returns Configured or issuer-derived validation URL.
+   * Used by `validateActiveUserSession` to support dev and production issuers.
+   */
+  private resolveAuthorizationValidationUrl(
+    issuer?: string,
+  ): string | undefined {
+    const configuredUrl = process.env.AUTHORIZATION_VALIDATION_URL?.trim();
+    if (configuredUrl) {
+      return configuredUrl;
+    }
+
+    const normalizedIssuer = issuer?.replace(/\/+$/, '');
+    if (
+      normalizedIssuer &&
+      JwtService.TOPCODER_API_ISSUERS.has(normalizedIssuer)
+    ) {
+      return `${normalizedIssuer}/v6/authorizations/1`;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Reads the configured Identity API request timeout.
+   * @returns Timeout in milliseconds.
+   * Used to keep active-session validation from hanging auth requests indefinitely.
+   */
+  private getAuthorizationValidationTimeoutMs(): number {
+    const raw = process.env.AUTHORIZATION_VALIDATION_TIMEOUT_MS;
+    if (!raw) {
+      return JwtService.AUTHORIZATION_VALIDATION_TIMEOUT_MS;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return JwtService.AUTHORIZATION_VALIDATION_TIMEOUT_MS;
+    }
+
+    return parsed;
   }
 
   private safeSerialize(value: unknown): string | undefined {
