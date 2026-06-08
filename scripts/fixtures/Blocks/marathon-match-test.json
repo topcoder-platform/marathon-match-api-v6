@@ -207,6 +207,22 @@
         "issue": 319,
         "description": "Contains only README.txt and notes.md to validate that a no-source submission writes a clean output.txt error instead of leaking a Java stack trace in public artifacts."
       }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-299-root-tester-probe.zip",
+      "expectedScores": {
+        "provisional": 0,
+        "system": 0
+      },
+      "source": {
+        "fileName": "submission-issue-299-root-tester-probe.zip",
+        "issue": 299,
+        "language": "python",
+        "purpose": "Benign regression probe that records /proc uid metadata for the isolated tester JVM and fails only if that JVM is running as root.",
+        "expectedBehavior": "Patched runner logs the isolated tester JVM as uid 10001 and completes with aggregateScore 0."
+      }
     }
   ]
 }

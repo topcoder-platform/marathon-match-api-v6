@@ -26,7 +26,11 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +79,8 @@ public class EcsRunnerMain {
         "/usr/local/bin/mm-runner-isolate";
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
+    private static final String RUNNER_EXECUTION_USER = "runner";
+    private static final String RUNNER_EXECUTION_GROUP = "runner";
     private static final String SCORER_EXECUTION_USER = "scorer";
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
@@ -551,6 +557,7 @@ public class EcsRunnerMain {
         if (submissionDir == null || !Files.isDirectory(submissionDir)) {
             throw new IOException("Submission directory is not available: " + submissionDir);
         }
+        grantRunnerWorkspaceAccess(submissionDir);
         secureRunnerOnlyFile(testerJarPath);
     }
 
@@ -595,6 +602,7 @@ public class EcsRunnerMain {
             );
 
             Path artifactsDir = ensureArtifactsDir(submissionDir);
+            grantRunnerWorkspaceAccess(artifactsDir);
             Path executionLogPath = artifactsDir.resolve(
                 "execution-" + submissionId + ".log"
             );
@@ -972,11 +980,10 @@ public class EcsRunnerMain {
     /**
      * Fails fast when the trusted parent process is not running as root.
      *
-     * <p>The runner helper installs socket restrictions for the child JVM. The
-     * child then invokes the scorer helper to drop generic submitted solution
-     * commands to the unprivileged {@code scorer} user. Starting the trusted
-     * parent as root avoids relying on nested setuid behavior after
-     * {@code no_new_privs} has been enabled for the child JVM.
+     * <p>The trusted parent owns bootstrap, artifact upload, and filesystem
+     * preparation. The child JVM runs as the unprivileged {@code runner} user,
+     * and generic submitted solution commands run as the separate
+     * unprivileged {@code scorer} user.
      *
      * @throws IllegalStateException When the runner process is not root.
      */
@@ -993,7 +1000,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Restricts a sensitive root-owned file to the trusted Java runner process.
+     * Restricts a sensitive file to the isolated Java runner user.
      *
      * <p>This is used for downloaded tester JARs and serialized scorer config.
      * The submitted solution process runs as {@code scorer}, so owner-only
@@ -1009,6 +1016,7 @@ public class EcsRunnerMain {
         }
 
         try {
+            setRunnerOwnerAndGroup(path);
             Files.setPosixFilePermissions(
                 path,
                 EnumSet.of(
@@ -1022,6 +1030,99 @@ public class EcsRunnerMain {
                 "POSIX permissions are not supported for " + path
             );
         }
+    }
+
+    /**
+     * Makes a runner workspace writable by the isolated tester JVM without
+     * granting the lower-privilege scorer user direct access to runner-only files.
+     *
+     * @param path Workspace directory or file prepared by the trusted parent.
+     * @throws IOException When walking the workspace fails.
+     */
+    private static void grantRunnerWorkspaceAccess(Path path) throws IOException {
+        if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+
+        try (java.util.stream.Stream<Path> stream = Files.walk(path)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                applyRunnerWorkspacePermissions(iterator.next());
+            }
+        }
+    }
+
+    /**
+     * Applies runner ownership and owner-only permissions to one workspace entry.
+     *
+     * @param path Workspace entry to update.
+     */
+    private static void applyRunnerWorkspacePermissions(Path path) {
+        try {
+            setRunnerOwnerAndGroup(path);
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.OWNER_EXECUTE
+                    )
+                );
+            } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE
+                    )
+                );
+            }
+        } catch (UnsupportedOperationException ignored) {
+            logWarn(
+                "filesystem.permissions",
+                "POSIX ownership or permissions are not supported for " + path
+            );
+        } catch (IOException error) {
+            throw new RuntimeException(
+                "Failed to update runner permissions for "
+                    + path
+                    + ": "
+                    + error.getMessage(),
+                error
+            );
+        }
+    }
+
+    /**
+     * Changes one path to the isolated runner user and group.
+     *
+     * @param path File or directory to chown without following symlinks.
+     * @throws IOException When ownership cannot be applied.
+     */
+    private static void setRunnerOwnerAndGroup(Path path) throws IOException {
+        PosixFileAttributeView view = Files.getFileAttributeView(
+            path,
+            PosixFileAttributeView.class,
+            LinkOption.NOFOLLOW_LINKS
+        );
+        if (view == null) {
+            throw new UnsupportedOperationException(
+                "POSIX attributes are not available for " + path
+            );
+        }
+
+        UserPrincipalLookupService lookupService = path
+            .getFileSystem()
+            .getUserPrincipalLookupService();
+        UserPrincipal runnerUser = lookupService.lookupPrincipalByName(
+            RUNNER_EXECUTION_USER
+        );
+        GroupPrincipal runnerGroup = lookupService.lookupPrincipalByGroupName(
+            RUNNER_EXECUTION_GROUP
+        );
+        view.setOwner(runnerUser);
+        view.setGroup(runnerGroup);
     }
 
     /**
