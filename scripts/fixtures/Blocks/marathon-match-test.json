@@ -244,6 +244,18 @@
         "language": "python",
         "validates": "Submitted code cannot open /tmp/tester-*.jar for write while normal Blocks scoring still runs."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-287-output-limit.zip",
+      "source": {
+        "fileName": "submission-issue-287-output-limit.zip",
+        "issue": "287",
+        "purpose": "Regression fixture for the ECS runner output size limit.",
+        "oversizedArtifact": "artifacts/public/output.txt is 10000001 bytes, one byte over the default 10000000-byte runner cap.",
+        "expectedRunnerBehavior": "Scoring fails before public artifact upload with an Output size limit exceeded error."
+      }
     }
   ]
 }

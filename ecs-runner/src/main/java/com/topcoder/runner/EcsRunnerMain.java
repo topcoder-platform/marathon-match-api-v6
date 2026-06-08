@@ -68,6 +68,10 @@ public class EcsRunnerMain {
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
     private static final int CHILD_OUTPUT_TAIL_LIMIT = 4000;
+    private static final long DEFAULT_MAX_OUTPUT_BYTES = 10_000_000L;
+    private static final String MAX_OUTPUT_BYTES_PROPERTY = "mm.runner.maxOutputBytes";
+    private static final String MAX_OUTPUT_BYTES_ENV = "MM_RUNNER_MAX_OUTPUT_BYTES";
+    private static final long MAX_OUTPUT_BYTES = resolveMaxOutputBytes();
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final long TOKEN_REFRESH_SKEW_SECONDS = 60L;
     private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
@@ -916,6 +920,7 @@ public class EcsRunnerMain {
         command.add(RUNNER_ISOLATION_WRAPPER_PATH);
         command.add(getCurrentJavaBinaryPath());
         command.addAll(getIsolatedChildJvmArguments());
+        command.add("-D" + MAX_OUTPUT_BYTES_PROPERTY + "=" + MAX_OUTPUT_BYTES);
         command.add("-cp");
         command.add(getCurrentRunnerArtifactPath().toString());
         command.add(EcsRunnerMain.class.getName());
@@ -1681,6 +1686,103 @@ public class EcsRunnerMain {
 
         String trimmed = value.trim();
         return trimmed.isEmpty() ? defaultValue : trimmed;
+    }
+
+    /**
+     * Resolves the maximum output bytes accepted by the runner.
+     *
+     * <p>The JVM property is checked first so the trusted parent can pass the
+     * same limit into the scrubbed isolated child. The environment variable is
+     * kept for ECS task configuration without requiring custom Java options.
+     *
+     * @return Positive byte limit for generated output and artifact content.
+     */
+    private static long resolveMaxOutputBytes() {
+        String configured = System.getProperty(MAX_OUTPUT_BYTES_PROPERTY);
+        if (configured == null || configured.trim().isEmpty()) {
+            configured = System.getenv(MAX_OUTPUT_BYTES_ENV);
+        }
+
+        if (configured == null || configured.trim().isEmpty()) {
+            return DEFAULT_MAX_OUTPUT_BYTES;
+        }
+
+        try {
+            long parsed = Long.parseLong(configured.trim());
+            return parsed > 0L ? parsed : DEFAULT_MAX_OUTPUT_BYTES;
+        } catch (NumberFormatException ignored) {
+            return DEFAULT_MAX_OUTPUT_BYTES;
+        }
+    }
+
+    /**
+     * Appends generated public output while enforcing the configured byte cap.
+     *
+     * @param target Destination buffer for {@code output.txt}.
+     * @param value Text to append.
+     * @param currentBytes UTF-8 bytes already appended.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated UTF-8 byte count after appending.
+     */
+    private static long appendLimitedOutput(
+        StringBuilder target,
+        String value,
+        long currentBytes,
+        String outputName
+    ) {
+        if (value == null || value.isEmpty()) {
+            return currentBytes;
+        }
+
+        long nextBytes = addOutputBytesWithLimit(
+            currentBytes,
+            value.getBytes(StandardCharsets.UTF_8).length,
+            outputName
+        );
+        target.append(value);
+        return nextBytes;
+    }
+
+    /**
+     * Adds output bytes to a running total and fails when the cap is exceeded.
+     *
+     * @param currentBytes Current byte total.
+     * @param additionalBytes Bytes being added.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated byte total.
+     */
+    private static long addOutputBytesWithLimit(
+        long currentBytes,
+        long additionalBytes,
+        String outputName
+    ) {
+        long nextBytes = Long.MAX_VALUE - currentBytes < additionalBytes
+            ? Long.MAX_VALUE
+            : currentBytes + additionalBytes;
+        enforceOutputByteLimit(nextBytes, outputName);
+        return nextBytes;
+    }
+
+    /**
+     * Fails the runner when generated output or artifacts exceed the configured limit.
+     *
+     * @param sizeBytes Output size in bytes.
+     * @param outputName Human-readable output label for errors.
+     */
+    private static void enforceOutputByteLimit(long sizeBytes, String outputName) {
+        if (sizeBytes <= MAX_OUTPUT_BYTES) {
+            return;
+        }
+
+        throw new RuntimeException(
+            "Output size limit exceeded for "
+                + outputName
+                + ": "
+                + sizeBytes
+                + " bytes exceeds maximum "
+                + MAX_OUTPUT_BYTES
+                + " bytes."
+        );
     }
 
     /**
@@ -2875,6 +2977,7 @@ public class EcsRunnerMain {
             return null;
         }
 
+        enforcePublicArtifactOutputLimit(artifactsDir, executionLog, errorLog, publicDir);
         Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(
             Files.newOutputStream(zipPath)
@@ -2917,6 +3020,7 @@ public class EcsRunnerMain {
             return null;
         }
 
+        enforceArtifactDirectoryOutputLimit(directoryPath, directoryPath, "private artifacts");
         Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(
             Files.newOutputStream(zipPath)
@@ -2945,6 +3049,164 @@ public class EcsRunnerMain {
 
         try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
             return stream.anyMatch(Files::isRegularFile);
+        }
+    }
+
+    /**
+     * Enforces the output byte cap across all files included in the public zip.
+     *
+     * @param artifactsDir Root artifacts directory.
+     * @param executionLog Runner execution log file.
+     * @param errorLog Runner error log file.
+     * @param publicDir Public artifact directory.
+     * @throws IOException When file size inspection fails.
+     */
+    private static void enforcePublicArtifactOutputLimit(
+        Path artifactsDir,
+        Path executionLog,
+        Path errorLog,
+        Path publicDir
+    ) throws IOException {
+        long totalBytes = 0L;
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            executionLog,
+            artifactsDir,
+            "public artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            errorLog,
+            artifactsDir,
+            "public artifacts"
+        );
+        totalBytes = enforceArtifactDirectoryOutputLimit(
+            publicDir,
+            artifactsDir,
+            "public artifacts",
+            totalBytes
+        );
+        logInfo(
+            "artifacts.output-limit",
+            "Public artifacts total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Enforces the output byte cap across a whole artifact directory.
+     *
+     * @param directoryPath Directory whose regular files are counted.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @throws IOException When walking the directory or reading file sizes fails.
+     */
+    private static void enforceArtifactDirectoryOutputLimit(
+        Path directoryPath,
+        Path rootPath,
+        String outputName
+    ) throws IOException {
+        long totalBytes = enforceArtifactDirectoryOutputLimit(
+            directoryPath,
+            rootPath,
+            outputName,
+            0L
+        );
+        logInfo(
+            "artifacts.output-limit",
+            outputName
+                + " total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Adds regular file sizes under a directory to a bounded output total.
+     *
+     * @param directoryPath Directory whose regular files are counted.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @param currentBytes Bytes already counted.
+     * @return Updated byte count.
+     * @throws IOException When walking the directory or reading file sizes fails.
+     */
+    private static long enforceArtifactDirectoryOutputLimit(
+        Path directoryPath,
+        Path rootPath,
+        String outputName,
+        long currentBytes
+    ) throws IOException {
+        if (!Files.isDirectory(directoryPath)) {
+            return currentBytes;
+        }
+
+        long totalBytes = currentBytes;
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Path entryPath = iterator.next();
+                totalBytes = addArtifactFileBytesWithLimit(
+                    totalBytes,
+                    entryPath,
+                    rootPath,
+                    outputName
+                );
+            }
+        }
+        return totalBytes;
+    }
+
+    /**
+     * Adds one artifact file's size to a bounded output total.
+     *
+     * @param currentBytes Bytes already counted.
+     * @param filePath File to count when it is regular.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated byte count.
+     * @throws IOException When reading file size fails.
+     */
+    private static long addArtifactFileBytesWithLimit(
+        long currentBytes,
+        Path filePath,
+        Path rootPath,
+        String outputName
+    ) throws IOException {
+        if (filePath == null) {
+            return currentBytes;
+        }
+
+        if (!Files.isRegularFile(filePath)) {
+            return currentBytes;
+        }
+
+        return addOutputBytesWithLimit(
+            currentBytes,
+            Files.size(filePath),
+            outputName + " including " + renderRelativeArtifactPath(rootPath, filePath)
+        );
+    }
+
+    /**
+     * Renders a stable artifact path for output-limit diagnostics.
+     *
+     * @param rootPath Artifact root.
+     * @param filePath Artifact file.
+     * @return Relative path when possible, otherwise the absolute path.
+     */
+    private static String renderRelativeArtifactPath(Path rootPath, Path filePath) {
+        if (rootPath == null || filePath == null) {
+            return String.valueOf(filePath);
+        }
+
+        try {
+            return rootPath.relativize(filePath).toString().replace('\\', '/');
+        } catch (IllegalArgumentException ignored) {
+            return filePath.toString();
         }
     }
 
@@ -3442,6 +3704,7 @@ public class EcsRunnerMain {
             double totalScore = 0.0;
             int failedTests = 0;
             StringBuilder outputText = new StringBuilder();
+            long outputBytes = 0L;
 
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
@@ -3467,24 +3730,31 @@ public class EcsRunnerMain {
                 seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
-                outputText.append("Test Case #").append(testCaseNumber).append(":\n");
-                outputText.append("Score = ").append(seedScore).append('\n');
-                outputText.append("Run Time = ")
+                StringBuilder testOutputText = new StringBuilder();
+                testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
+                testOutputText.append("Score = ").append(seedScore).append('\n');
+                testOutputText.append("Run Time = ")
                     .append(testResult.getRunTime())
                     .append("ms\n");
                 if (
                     testResult.getError() != null
                         && !testResult.getError().trim().isEmpty()
                 ) {
-                    outputText.append(testResult.getError().trim()).append('\n');
+                    testOutputText.append(testResult.getError().trim()).append('\n');
                 }
                 if (
                     testResult.getOutput() != null
                         && !testResult.getOutput().trim().isEmpty()
                 ) {
-                    outputText.append(testResult.getOutput().trim()).append('\n');
+                    testOutputText.append(testResult.getOutput().trim()).append('\n');
                 }
-                outputText.append('\n');
+                testOutputText.append('\n');
+                outputBytes = appendLimitedOutput(
+                    outputText,
+                    testOutputText.toString(),
+                    outputBytes,
+                    "artifacts/public/output.txt"
+                );
 
                 emitIsolatedTesterProgress(
                     testScores.size(),
