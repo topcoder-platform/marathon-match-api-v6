@@ -470,6 +470,17 @@
         "purpose": "Exercises scoring progress callbacks so IN PROGRESS summations render as unavailable instead of failed while final scoring still completes.",
         "derivedFrom": "submission-winner.zip"
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-23-java-workdir-lifetime.zip",
+      "source": {
+        "fileName": "submission-issue-23-java-workdir-lifetime.zip",
+        "issue": 23,
+        "language": "java",
+        "validates": "Java submission compilation keeps the temporary compile workspace available until compilation and tester execution have completed."
+      }
     }
   ]
 }
