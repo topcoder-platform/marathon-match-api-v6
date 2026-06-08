@@ -4,7 +4,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 
 ## What this image includes
 
-- Java 8 JDK/runtime (`eclipse-temurin:8-jdk-noble`) for runner execution and Java submission compilation (`javac`, `java`)
+- Java 11 JDK/runtime (`eclipse-temurin:11-jdk-noble`) for runner execution and Java submission compilation (`javac --release 11`, `java`)
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
 - C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
@@ -95,8 +95,7 @@ Set these in the API service environment:
 - `AWS_REGION`
 - `MARATHON_MATCH_API_URL`
 - `REVIEW_TYPE_ID`
-- `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log token preview + decoded JWT header/payload in runner logs)
-- `DEBUG_LOG_FULL_ACCESS_TOKEN` (optional, only with `DEBUG_LOG_ACCESS_TOKEN=true`; logs full bearer token)
+- `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log only redacted token presence/length in runner logs)
 
 Keep `ECS_SECURITY_GROUPS` least-privilege. The isolated child blocks untrusted submission egress, but the parent runner still needs trusted access to Marathon Match API and Submission API endpoints.
 

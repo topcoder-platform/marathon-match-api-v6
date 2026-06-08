@@ -158,6 +158,19 @@
         "issue": 186,
         "language": "rust",
         "validates": "The submission scans /proc/self/fd before playing Blocks and fails if any inherited descriptor numbered 1024 or higher remains visible in the sandbox."
+      "file": "submissions/submission-issue-261-java11-release.zip",
+      "source": {
+        "fileName": "submission-issue-261-java11-release.zip",
+        "issue": 261,
+        "language": "java",
+        "validates": "Java submissions compile with javac --release 11 by using ProcessHandle and List.of while completing the Blocks tester protocol."
+      "file": "submissions/submission-issue-16-token-redaction.zip",
+      "source": {
+        "fileName": "submission-issue-16-token-redaction.zip",
+        "issue": 16,
+        "language": "rust",
+        "purpose": "Regression for issue #16 runner credential redaction. Run the Blocks fixture with DEBUG_LOG_ACCESS_TOKEN=true and DEBUG_LOG_FULL_ACCESS_TOKEN=true, then verify runner logs contain only redacted ACCESS_TOKEN output and normal scoring completes.",
+        "proof": "The submission prints only ISSUE16_ACCESS_TOKEN_ABSENT or ISSUE16_ACCESS_TOKEN_PRESENT without printing any credential value; ACCESS_TOKEN should remain absent from the untrusted submission environment."
       }
     }
   ]

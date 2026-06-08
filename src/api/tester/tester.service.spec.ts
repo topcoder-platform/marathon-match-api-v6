@@ -92,6 +92,30 @@ describe('TesterService', () => {
     );
   });
 
+  it('returns compilation errors in tester details', async () => {
+    const { service, prisma } = createService();
+    const compilationError = 'Tester.java:12: error: cannot find symbol';
+
+    prisma.tester.findUnique.mockResolvedValue({
+      ...testerRecord,
+      compilationStatus: CompilationStatus.FAILED,
+      compilationError,
+    });
+
+    const result = await service.getTester('tester-1');
+
+    expect(result.compilationStatus).toBe(CompilationStatus.FAILED);
+    expect(result.compilationError).toBe(compilationError);
+    expect(prisma.tester.findUnique).toHaveBeenCalledWith({
+      where: { id: 'tester-1' },
+      select: expect.objectContaining({
+        compilationError: true,
+        compilationStatus: true,
+        sourceCode: true,
+      }),
+    });
+  });
+
   it('returns base64 jar data only when explicitly requested', async () => {
     const { service, prisma } = createService();
 
@@ -110,6 +134,41 @@ describe('TesterService', () => {
         sourceCode: true,
       }),
     });
+  });
+
+  it('returns compilation errors when listing testers', async () => {
+    const { service, prisma } = createService();
+    const compilationError = 'Tester.java:12: error: cannot find symbol';
+    const testerSummary = {
+      id: testerRecord.id,
+      name: testerRecord.name,
+      version: testerRecord.version,
+      className: testerRecord.className,
+      compilationStatus: CompilationStatus.FAILED,
+      compilationError,
+      createdAt: testerRecord.createdAt,
+      updatedAt: testerRecord.updatedAt,
+      createdBy: testerRecord.createdBy,
+      updatedBy: testerRecord.updatedBy,
+    };
+
+    prisma.tester.findMany.mockResolvedValue([testerSummary]);
+    prisma.tester.count.mockResolvedValue(1);
+
+    const result = await service.listTesters({
+      page: 1,
+      perPage: 20,
+    } as never);
+
+    expect(result.testers).toEqual([testerSummary]);
+    expect(prisma.tester.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          compilationError: true,
+          compilationStatus: true,
+        }),
+      }),
+    );
   });
 
   it('rejects creating a tester family when the tester name already exists', async () => {

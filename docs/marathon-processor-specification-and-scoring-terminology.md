@@ -50,11 +50,11 @@ g++ -std=gnu++23 -O3 -march=native Solution.cpp -o Solution
 Java submissions are compiled and executed with:
 
 ```bash
-javac Solution.java
+javac --release 11 Solution.java
 java -Xms1G -Xmx1G -cp <workdir> Solution
 ```
 
-The ECS runner image includes the Java 8 JDK, so Java source submissions can be compiled by the same runner task that executes the tester.
+The ECS runner image includes the Java 11 JDK, so Java source submissions can be compiled by the same runner task that executes the tester. The explicit `--release 11` flag makes the supported source and API level visible in compile artifacts.
 
 ### Python
 
@@ -111,15 +111,15 @@ The default values supplied by `marathon-match-api-v6` are environment-configura
 
 The current processor runs as an ECS/Fargate task using the configured task definition revision for the challenge scorer. CPU and memory are controlled by that ECS task definition, not by a fixed EC2 instance type.
 
-The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:8-jdk-noble`.
+The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:11-jdk-noble`.
 
 Tool versions verified from a local build of the current runner image:
 
 | Tool             | Version                            |
 | ---------------- | ---------------------------------- |
 | Operating system | Ubuntu 24.04.4 LTS                 |
-| Java runtime     | Temurin OpenJDK 8, `1.8.0_492-b09` |
-| Java compiler    | `javac 1.8.0_492`                  |
+| Java runtime     | Temurin OpenJDK 11, `11.0.31+11`   |
+| Java compiler    | `javac 11.0.31` with `--release 11` |
 | GCC              | `14.2.0` via `gcc-14`              |
 | G++              | `14.2.0` via `g++-14`              |
 | Python           | `3.12.3`                           |
@@ -131,7 +131,7 @@ Tool versions verified from a local build of the current runner image:
 
 The runner image includes:
 
-- Java 8 JDK/runtime for the runner, testers, and Java submissions
+- Java 11 JDK/runtime for the runner, testers, and Java submissions
 - `g++` backed by GCC 14 for C++23 submissions
 - `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
@@ -153,7 +153,7 @@ The ECS runner itself expects Topcoder service environment variables and normall
 The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
-FROM eclipse-temurin:8-jdk-noble
+FROM eclipse-temurin:11-jdk-noble
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
