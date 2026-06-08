@@ -143,6 +143,16 @@
     {
       "memberId": "88770029",
       "memberHandle": "devtest142",
+      "file": "submissions/submission-issue-212-symlink-artifact.zip",
+      "source": {
+        "fileName": "submission-issue-212-symlink-artifact.zip",
+        "issue": 212,
+        "purpose": "Regression submission creates public/private artifact symlinks to /etc/os-release plus regular proof files. The runner must archive the proof files without dereferencing the symlinks."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
       "file": "submissions/submission-rust-sample.zip",
       "source": {
         "fileName": "submission-rust-sample.zip",
