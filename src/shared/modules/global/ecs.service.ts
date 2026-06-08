@@ -133,10 +133,6 @@ export class EcsService {
     }
 
     this.appendOptionalEnvOverride(runnerEnvironment, 'DEBUG_LOG_ACCESS_TOKEN');
-    this.appendOptionalEnvOverride(
-      runnerEnvironment,
-      'DEBUG_LOG_FULL_ACCESS_TOKEN',
-    );
     this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_URL');
     this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_AUDIENCE');
     this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_PROXY_SERVER_URL');
