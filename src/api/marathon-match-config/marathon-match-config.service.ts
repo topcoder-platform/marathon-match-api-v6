@@ -26,7 +26,10 @@ import {
   SearchMarathonMatchConfigQueryDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
-import { EcsService } from 'src/shared/modules/global/ecs.service';
+import {
+  EcsService,
+  MarathonMatchScorerTaskLaunchResult,
+} from 'src/shared/modules/global/ecs.service';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
@@ -87,6 +90,8 @@ interface ChallengeResponse {
 @Injectable()
 export class MarathonMatchConfigService {
   private static readonly maxStartSeed = BigInt('9223372036854775807');
+  private static readonly scorerLaunchBatchSize = 8;
+  private static readonly scorerLaunchBatchDelayMs = 1100;
   private readonly logger = LoggerService.forRoot('MarathonMatchConfigService');
   private readonly challengeApiBaseUrl =
     process.env.CHALLENGE_API_URL?.replace(/\/+$/, '') ||
@@ -492,8 +497,9 @@ export class MarathonMatchConfigService {
    * Reruns scorer tasks for the latest submissions of an active marathon match challenge.
    * Uses the challenge's PROVISIONAL phase config to mirror active-challenge
    * submission scoring, validates active/open challenge runtime state through
-   * challenge-api, and reduces submission API results to one latest submission
-   * per member before delegating ECS orchestration to `EcsService`.
+   * challenge-api, reduces submission API results to one latest submission
+   * per member, and launches ECS scorer tasks in bounded batches to avoid
+   * RunTask API throttling.
    * @param challengeId Challenge ID from path params in POST /challenge/:challengeId/rerun.
    * @param user Authenticated user or machine token payload for audit-aware logging.
    * @returns Rerun dispatch summary mapped to `RerunResponseDto`.
@@ -960,22 +966,18 @@ export class MarathonMatchConfigService {
         };
       }
 
-      const launchResults = await Promise.allSettled(
-        submissions.map(({ submissionId }) =>
-          this.ecsService.launchScorerTask(
-            challengeId,
-            submissionId,
-            {
-              taskDefinitionName: config.taskDefinitionName,
-              taskDefinitionVersion: config.taskDefinitionVersion,
-            },
-            {
-              configType: provisionalPhaseConfig.configType,
-              startSeed: provisionalPhaseConfig.startSeed,
-              numberOfTests: provisionalPhaseConfig.numberOfTests,
-            },
-          ),
-        ),
+      const launchResults = await this.launchScorerTasksWithRateLimit(
+        challengeId,
+        submissions,
+        {
+          taskDefinitionName: config.taskDefinitionName,
+          taskDefinitionVersion: config.taskDefinitionVersion,
+        },
+        {
+          configType: provisionalPhaseConfig.configType,
+          startSeed: provisionalPhaseConfig.startSeed,
+          numberOfTests: provisionalPhaseConfig.numberOfTests,
+        },
       );
 
       const results: RerunResponseDto['results'] = submissions.map(
@@ -1029,6 +1031,73 @@ export class MarathonMatchConfigService {
         details: errorResponse.details,
       });
     }
+  }
+
+  /**
+   * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
+   * @param challengeId Challenge ID passed to each scorer task.
+   * @param submissions Latest submissions to rerun, in response order.
+   * @param mmConfig Task definition name and version from the marathon match config.
+   * @param scoringPhase PROVISIONAL phase settings passed to scorer tasks.
+   * @returns Settled launch results in the same order as `submissions`.
+   * @throws Does not throw for individual scorer launch failures; those are returned as rejected settled results.
+   */
+  private async launchScorerTasksWithRateLimit(
+    challengeId: string,
+    submissions: { submissionId: string }[],
+    mmConfig: {
+      taskDefinitionName: string;
+      taskDefinitionVersion: string;
+    },
+    scoringPhase: {
+      configType: PhaseConfigType;
+      startSeed: bigint;
+      numberOfTests: number;
+    },
+  ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
+    const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
+      [];
+
+    for (
+      let index = 0;
+      index < submissions.length;
+      index += MarathonMatchConfigService.scorerLaunchBatchSize
+    ) {
+      const batch = submissions.slice(
+        index,
+        index + MarathonMatchConfigService.scorerLaunchBatchSize,
+      );
+      const batchResults = await Promise.allSettled(
+        batch.map(({ submissionId }) =>
+          this.ecsService.launchScorerTask(
+            challengeId,
+            submissionId,
+            mmConfig,
+            scoringPhase,
+          ),
+        ),
+      );
+
+      launchResults.push(...batchResults);
+
+      if (
+        index + MarathonMatchConfigService.scorerLaunchBatchSize <
+        submissions.length
+      ) {
+        await this.delay(MarathonMatchConfigService.scorerLaunchBatchDelayMs);
+      }
+    }
+
+    return launchResults;
+  }
+
+  /**
+   * Waits for the requested number of milliseconds before resolving.
+   * @param delayMs Delay duration in milliseconds.
+   * @returns A promise that resolves after `delayMs`.
+   */
+  private async delay(delayMs: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   /**
