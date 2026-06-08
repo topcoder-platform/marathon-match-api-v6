@@ -492,6 +492,17 @@
         "language": "python",
         "validates": "Submitted code cannot read /etc/hostname, /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, or /proc/net TCP tables."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-19-tester-jar-read.zip",
+      "source": {
+        "fileName": "submission-issue-19-tester-jar-read.zip",
+        "issue": 19,
+        "language": "python",
+        "validates": "Submitted code cannot open any visible /tmp/tester-*.jar file for reading. The probe reads only the JAR magic bytes if the runner is vulnerable, emits ISSUE19_TESTER_JAR_READABLE, and otherwise continues with the normal Blocks sample strategy."
+      }
     }
   ]
 }

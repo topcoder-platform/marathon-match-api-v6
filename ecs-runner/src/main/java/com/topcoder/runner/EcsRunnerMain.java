@@ -34,9 +34,11 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
@@ -49,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -233,6 +236,7 @@ public class EcsRunnerMain {
                     + ", phaseNumberOfTests="
                     + phaseNumberOfTests
             );
+            requireTrustedRunnerProcess();
 
             if (debugLogAccessToken) {
                 logAccessTokenDebug(accessToken);
@@ -1059,6 +1063,16 @@ public class EcsRunnerMain {
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
     private static void secureRunnerOnlyFile(Path path) throws IOException {
+        setRunnerOnlyPermissions(path);
+    }
+
+    /**
+     * Applies runner-owned POSIX permissions to a sensitive runner file.
+     *
+     * @param path Sensitive regular file to restrict.
+     * @throws IOException When permissions cannot be applied on POSIX filesystems.
+     */
+    private static void setRunnerOnlyPermissions(Path path) throws IOException {
         if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
@@ -1067,9 +1081,7 @@ public class EcsRunnerMain {
             setRunnerOwnerAndGroup(path);
             Files.setPosixFilePermissions(
                 path,
-                EnumSet.of(
-                    PosixFilePermission.OWNER_READ
-                )
+                EnumSet.of(PosixFilePermission.OWNER_READ)
             );
         } catch (UnsupportedOperationException ignored) {
             logWarn(
@@ -1361,9 +1373,9 @@ public class EcsRunnerMain {
     /**
      * Deletes top-level entries owned by the low-privilege scorer user from writable locations.
      *
-     * <p>Runner-owned files remain root-owned and are not removed. Each selected entry is deleted
-     * with symlink-safe traversal so a malicious submission cannot redirect cleanup outside the
-     * selected writable directory.
+     * <p>Trusted runner files are not owned by the scorer user and are not removed. Each selected
+     * entry is deleted with symlink-safe traversal so a malicious submission cannot redirect
+     * cleanup outside the selected writable directory.
      *
      * @return Number of top-level scorer-owned entries deleted.
      */
@@ -3796,18 +3808,56 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Writes tester JAR bytes to deterministic tmp path.
+     * Writes tester JAR bytes to a unique runner-owned temporary path.
+     *
+     * @param testerConfigId Tester configuration ID used for diagnostics.
+     * @param jarBytes Downloaded tester JAR bytes.
+     * @return Path to the restricted tester JAR.
+     * @throws IOException When the temporary file cannot be created, written, or restricted.
      */
     private static Path writeTesterJar(String testerConfigId, byte[] jarBytes)
         throws IOException {
-        Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
+        Path jarPath = createRunnerOnlyTempFile("tester-", ".jar");
         Files.write(jarPath, jarBytes);
         secureRunnerOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
-            "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"
+            "Wrote tester JAR for testerConfigId="
+                + safeLogValue(testerConfigId)
+                + " to "
+                + jarPath
+                + " ("
+                + Files.size(jarPath)
+                + " bytes)"
         );
         return jarPath;
+    }
+
+    /**
+     * Creates a temporary file that is never backed by a predictable pre-existing
+     * path and is immediately restricted to the trusted runner owner.
+     *
+     * @param prefix File prefix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
+     * @param suffix File suffix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
+     * @return Newly created runner-only temporary file.
+     * @throws IOException When the temporary file cannot be created or restricted.
+     */
+    private static Path createRunnerOnlyTempFile(String prefix, String suffix)
+        throws IOException {
+        try {
+            FileAttribute<Set<PosixFilePermission>> permissions =
+                PosixFilePermissions.asFileAttribute(
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE
+                    )
+                );
+            return Files.createTempFile(prefix, suffix, permissions);
+        } catch (UnsupportedOperationException ignored) {
+            Path path = Files.createTempFile(prefix, suffix);
+            secureRunnerOnlyFile(path);
+            return path;
+        }
     }
 
     /**

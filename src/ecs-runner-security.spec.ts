@@ -22,10 +22,32 @@ describe('ECS runner isolation image wiring', () => {
     const helperSource = readRepoFile('ecs-runner/scripts/mm-net-isolate.c');
 
     expect(dockerfile).toMatch(
-      /-DMM_SUPERVISE_CHILD=1\s+\\\s+-DMM_DROP_SUPERVISOR_PRIVS=1\s+\\\s+-o \/usr\/local\/bin\/mm-scorer-isolate/,
+      /-DMM_SUPERVISE_CHILD=1\s+\\\s+-DMM_DROP_SUPERVISOR_PRIVS=1\s+\\\s+-DMM_ENABLE_FS_SANDBOX=1\s+\\\s+-o \/usr\/local\/bin\/mm-scorer-isolate/,
     );
     expect(dockerfile).toContain('chmod 4755 /usr/local/bin/mm-scorer-isolate');
     expect(helperSource).toContain('#define MM_DROP_SUPERVISOR_PRIVS 0');
+    expect(helperSource).toContain('#define MM_ENABLE_FS_SANDBOX 0');
     expect(helperSource).toContain('drop_supervisor_to_invoker');
+  });
+});
+
+describe('ECS runner tester JAR isolation', () => {
+  const runnerSource = readRepoFile(
+    'ecs-runner/src/main/java/com/topcoder/runner/EcsRunnerMain.java',
+  );
+
+  it('creates downloaded tester JARs as unique temp files', () => {
+    expect(runnerSource).toContain(
+      'Path jarPath = createRunnerOnlyTempFile("tester-", ".jar");',
+    );
+    expect(runnerSource).not.toContain(
+      'Paths.get("/tmp/tester-" + testerConfigId + ".jar")',
+    );
+  });
+
+  it('makes downloaded tester JARs runner-owned and read-only', () => {
+    expect(runnerSource).toContain('secureRunnerOnlyFile(jarPath);');
+    expect(runnerSource).toContain('setRunnerOnlyPermissions(path);');
+    expect(runnerSource).not.toContain('secureRunnerReadOnlyFile');
   });
 });
