@@ -73,6 +73,18 @@
 
 #define MM_SOCKET_DENY (SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
 
+#ifndef __NR_io_uring_setup
+#define __NR_io_uring_setup 425
+#endif
+
+#ifndef __NR_io_uring_enter
+#define __NR_io_uring_enter 426
+#endif
+
+#ifndef __NR_io_uring_register
+#define __NR_io_uring_register 427
+#endif
+
 #if MM_SUPERVISE_CHILD
 static volatile sig_atomic_t supervised_child_pid = -1;
 #endif
@@ -154,6 +166,13 @@ static int install_socket_filter(void) {
         BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
 #endif
+        /* io_uring can create sockets in-kernel through IORING_OP_SOCKET. */
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_setup, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_enter, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
+        BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_io_uring_register, 0, 1),
+        BPF_STMT(BPF_RET + BPF_K, MM_SOCKET_DENY),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socket, 0, 4),
         BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, args[0])),
         BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AF_UNIX, 1, 0),

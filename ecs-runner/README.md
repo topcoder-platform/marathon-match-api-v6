@@ -12,7 +12,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
 - C# (.NET 7 / C# 11 and .NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
 - Rust latest stable compiler support for tester-side submission compilation (`rustc`)
-- native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, and block non-`AF_UNIX` sockets for submitted solution processes
+- native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, block `io_uring`, and block non-`AF_UNIX` sockets for submitted solution processes
 
 ## Isolation model
 
@@ -22,7 +22,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - Generic submitted solution commands execute through the setuid-root `mm-scorer-isolate` bridge as uid/gid `10002` (`scorer`). The bridge drops its supervisor back to the invoking `runner` uid after it forks the solution child, then supervises the solution process group so tester timeouts can still terminate lower-privilege processes.
 - Downloaded tester JARs and serialized scorer config are mode `0400` runner-owned files. Submitted code running as `scorer` cannot read or modify them even if it can guess their `/tmp` paths.
 - Artifact previews and artifact zip uploads include only non-symlink regular files from the runner artifact directories. Submitted symlinks are ignored instead of being dereferenced by the trusted parent runner.
-- Submitted solution processes and their fork/exec children can create only `AF_UNIX` sockets. These restrictions are kernel seccomp filters inherited across fork/exec, so clearing `LD_PRELOAD` in a spawned child process does not restore INET or INET6 socket access. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
+- Submitted solution processes and their fork/exec children cannot use `io_uring` and can create only `AF_UNIX` sockets. These restrictions are kernel seccomp filters inherited across fork/exec, so clearing `LD_PRELOAD` in a spawned child process does not restore INET or INET6 socket access. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
 - The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
 
 ## Recommended ECR naming and tags
