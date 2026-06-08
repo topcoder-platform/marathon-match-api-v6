@@ -433,6 +433,17 @@
         "issue": 65,
         "purpose": "Regression fixture marker for submission events that are permanently skipped before ECS dispatch. The unit test covers the skipped-dispatch terminal summation; this benign Blocks submission keeps full-fixture validation exercising normal submission scoring."
       }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-issue-45-ignore-sigterm.zip",
+      "source": {
+        "fileName": "submission-issue-45-ignore-sigterm.zip",
+        "language": "cpp",
+        "issue": 45,
+        "validation": "Regression submission ignores SIGTERM and spins so per-test timeout must use destroyForcibly/SIGKILL."
+      }
     }
   ]
 }
