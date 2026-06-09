@@ -701,6 +701,75 @@ export class RerunResponseDto {
 }
 
 /**
+ * Response payload for a SYSTEM rerun request across existing Marathon Match
+ * system review records. Returned by POST /challenge/:challengeId/rerun/system
+ * after SYSTEM scorer tasks are dispatched.
+ */
+export class SystemRerunResponseDto {
+  @ApiProperty({
+    description: 'Challenge ID for the SYSTEM rerun request',
+    example: '30000123',
+  })
+  challengeId: string;
+
+  @ApiProperty({
+    description: 'Number of SYSTEM reviews selected for rerun dispatch',
+    example: 12,
+  })
+  reviewsQueued: number;
+
+  @ApiProperty({
+    description:
+      'Per-review launch results for the SYSTEM rerun request, including any dispatch errors.',
+    type: 'array',
+    items: {
+      type: 'object',
+      required: ['reviewId', 'submissionId'],
+      properties: {
+        reviewId: {
+          type: 'string',
+          description: 'Review identifier selected for SYSTEM rerun',
+          example: '7af90e06-d65a-4c0f-acaf-61d4f0c71234',
+        },
+        submissionId: {
+          type: 'string',
+          description: 'Submission identifier attached to the SYSTEM review',
+          example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
+        },
+        taskArn: {
+          type: 'string',
+          description: 'AWS ECS task ARN when the scorer task launch succeeded',
+          example:
+            'arn:aws:ecs:us-east-1:123456789012:task/cluster/0123456789abcdef',
+          nullable: true,
+        },
+        taskId: {
+          type: 'string',
+          description:
+            'Short ECS task identifier when the scorer task launch succeeded',
+          example: '0123456789abcdef',
+          nullable: true,
+        },
+        error: {
+          type: 'string',
+          description:
+            'Launch error message when dispatch failed for that review',
+          example: 'Tester tester-1 is not ready for SYSTEM scoring.',
+          nullable: true,
+        },
+      },
+    },
+  })
+  results: Array<{
+    reviewId: string;
+    submissionId: string;
+    taskArn?: string;
+    taskId?: string;
+    error?: string;
+  }>;
+}
+
+/**
  * Pagination metadata for marathon match config list endpoints.
  */
 export class PaginationMetaDto {

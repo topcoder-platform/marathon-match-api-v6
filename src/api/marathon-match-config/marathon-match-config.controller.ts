@@ -30,6 +30,7 @@ import {
   MarathonMatchDefaultsResponseDto,
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
+  SystemRerunResponseDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
@@ -143,6 +144,50 @@ export class MarathonMatchConfigController {
     @User() user: JwtUser,
   ): Promise<RerunResponseDto> {
     return await this.marathonMatchConfigService.rerunLatestSubmissions(
+      challengeId,
+      user,
+    );
+  }
+
+  /**
+   * Reruns existing SYSTEM review tests for a marathon match configuration.
+   * @param challengeId Challenge ID.
+   * @param user Authenticated user for audit context.
+   * @returns Accepted SYSTEM rerun dispatch summary.
+   */
+  @Post('/:challengeId/rerun/system')
+  @Roles(UserRole.Admin, UserRole.Copilot, UserRole.User)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @ApiOperation({
+    summary: 'Rerun existing SYSTEM tests for a Marathon Match challenge',
+    description:
+      'Roles: Admin or challenge Copilot resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the marathon match SYSTEM rerun request',
+    example: '30000123',
+  })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiResponse({
+    status: 202,
+    description:
+      'Existing SYSTEM reviews queued for asynchronous rerun dispatch.',
+    type: SystemRerunResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Challenge/config inactive, tester is not compiled successfully, or SYSTEM phase config is missing.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
+  async rerunSystemTests(
+    @Param('challengeId') challengeId: string,
+    @User() user: JwtUser,
+  ): Promise<SystemRerunResponseDto> {
+    return await this.marathonMatchConfigService.rerunSystemTests(
       challengeId,
       user,
     );

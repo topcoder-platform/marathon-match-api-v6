@@ -29,7 +29,7 @@ interface ChallengeResource {
 /**
  * Allows marathon match score reruns for admins, scoped machine tokens, or the
  * authenticated copilot resource assigned to the target challenge.
- * Used on the rerun endpoint after the global token guard has validated the JWT.
+ * Used on marathon match rerun endpoints after the global token guard has validated the JWT.
  */
 @Injectable()
 export class ChallengeCopilotResourceGuard implements CanActivate {
@@ -46,7 +46,7 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
    * @param context Nest execution context containing the HTTP request.
    * @returns `true` when the user is an admin, scoped M2M caller, or challenge copilot resource.
    * @throws ForbiddenException When a non-admin user is not assigned as the challenge copilot.
-   * Used by `MarathonMatchConfigController.rerunLatestSubmissions`.
+   * Used by Marathon Match provisional and SYSTEM rerun routes.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();

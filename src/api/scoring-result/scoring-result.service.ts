@@ -12,7 +12,10 @@ import {
 } from '@prisma/client';
 import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
-import { EcsService } from 'src/shared/modules/global/ecs.service';
+import {
+  EcsService,
+  MarathonMatchScorerTaskLaunchResult,
+} from 'src/shared/modules/global/ecs.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
@@ -442,7 +445,7 @@ export class ScoringResultService {
     reviewId: string,
     submissionId: string,
     challengeId: string,
-  ): Promise<void> {
+  ): Promise<MarathonMatchScorerTaskLaunchResult> {
     const config = await this.prisma.marathonMatchConfig.findUnique({
       where: { challengeId },
       include: {
@@ -521,6 +524,8 @@ export class ScoringResultService {
       taskId: launchResult.taskId,
       systemTestTimeout,
     });
+
+    return launchResult;
   }
 
   /**

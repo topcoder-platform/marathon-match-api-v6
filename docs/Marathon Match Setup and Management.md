@@ -285,22 +285,35 @@ Use this flow when the tester source changes after the challenge is active.
 3. Create the new version with the updated Java source.
 4. Wait until compilation reaches `SUCCESS`.
 5. Save the scorer config so the challenge points at the new tester ID.
-6. Trigger a rerun of latest submissions using the `Rerun scores` button on the UI.
-7. Monitor the rerun ECS tasks, runner logs, artifacts, and review scores.
+6. Trigger a rerun of latest submissions for the open Submission/Provisional phase using the Work app rerun control or `POST /v6/marathon-match/challenge/:challengeId/rerun`.
+7. If Review/System scores also need to be regenerated, call `POST /v6/marathon-match/challenge/:challengeId/rerun/system`.
+8. Monitor the rerun ECS tasks, runner logs, artifacts, and review scores.
 
 
-Rerun behavior:
+Submission/Provisional rerun behavior:
 
 - Requires the challenge to be `ACTIVE`.
 - Requires at least one open challenge phase.
 - Requires the scorer config to be active.
 - Requires the selected tester to be compiled successfully.
-- Requires a `PROVISIONAL` phase config.
+- Requires a phase config that matches the currently open challenge phase.
 - Fetches `isLatest=true` submissions from Submission API.
 - Queues one ECS task for the latest submission per member.
-- Uses the current `PROVISIONAL` seeds and test count.
+- Uses the current open phase's scorer seeds and test count. During Submission this is normally the `PROVISIONAL` config.
 
-The response includes the queued submission IDs and ECS task IDs or per-submission errors. Because the standard rerun endpoint is provisional-oriented, coordinate separately if a late tester change also needs Review/System scores regenerated.
+The response includes the queued submission IDs and ECS task IDs or per-submission errors.
+
+System rerun behavior:
+
+- Requires the challenge to be `ACTIVE`.
+- Requires the scorer config to be active.
+- Requires the selected tester to be compiled successfully.
+- Requires a `SYSTEM` phase config.
+- Fetches existing non-cancelled Review API reviews for the challenge that match the configured Marathon Match review scorecard.
+- Queues one SYSTEM scorer task per matching review and passes the existing `reviewId` to the runner.
+- Uses the current `SYSTEM` seeds, test count, per-test timeout, and `systemTestTimeout`.
+
+Use the SYSTEM rerun endpoint after lowering timings or changing a tester while Review is open. It restarts the existing review records instead of creating duplicate reviews.
 
 ## Monitoring Submissions
 

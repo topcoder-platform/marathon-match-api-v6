@@ -52,6 +52,9 @@ describe('MarathonMatchConfigService', () => {
     const prismaErrorService = {
       handleError: jest.fn(),
     };
+    const scoringResultService = {
+      triggerSystemScore: jest.fn(),
+    };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
 
@@ -61,6 +64,7 @@ describe('MarathonMatchConfigService', () => {
       m2mService as never,
       prisma as never,
       prismaErrorService as never,
+      scoringResultService as never,
     );
 
     return {
@@ -70,6 +74,7 @@ describe('MarathonMatchConfigService', () => {
       m2mService,
       prisma,
       prismaErrorService,
+      scoringResultService,
     };
   };
 
@@ -595,6 +600,146 @@ describe('MarathonMatchConfigService', () => {
 
     expect(httpService.get).toHaveBeenCalledTimes(1);
     expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+  });
+
+  it('reruns all matching existing system reviews', async () => {
+    const { service, httpService, m2mService, prisma, scoringResultService } =
+      createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      reviewScorecardId: 'legacy-scorecard-1',
+      testerId: 'tester-1',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-system',
+          configType: PhaseConfigType.SYSTEM,
+          phaseId: 'system-phase',
+          startSeed: BigInt(1000),
+          numberOfTests: 5000,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: 'canonical-scorecard-1',
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'review-2',
+                  submissionId: 'submission-2',
+                  scorecardId: 'canonical-scorecard-1',
+                  status: 'COMPLETED',
+                },
+                {
+                  id: 'review-1',
+                  submissionId: 'submission-1',
+                  scoreCardId: 'legacy-scorecard-1',
+                  status: 'IN_PROGRESS',
+                },
+                {
+                  id: 'review-cancelled',
+                  submissionId: 'submission-cancelled',
+                  scorecardId: 'canonical-scorecard-1',
+                  status: 'CANCELLED',
+                },
+                {
+                  id: 'review-other',
+                  submissionId: 'submission-other',
+                  scorecardId: 'scorecard-other',
+                  status: 'PENDING',
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+    scoringResultService.triggerSystemScore
+      .mockResolvedValueOnce({
+        taskArn: 'arn:aws:ecs:task/task-1',
+        taskId: 'task-1',
+      })
+      .mockResolvedValueOnce({
+        taskArn: 'arn:aws:ecs:task/task-2',
+        taskId: 'task-2',
+      });
+
+    const result = await service.rerunSystemTests('30000123', user);
+
+    expect(result).toEqual({
+      challengeId: '30000123',
+      reviewsQueued: 2,
+      results: [
+        {
+          reviewId: 'review-1',
+          submissionId: 'submission-1',
+          taskArn: 'arn:aws:ecs:task/task-1',
+          taskId: 'task-1',
+        },
+        {
+          reviewId: 'review-2',
+          submissionId: 'submission-2',
+          taskArn: 'arn:aws:ecs:task/task-2',
+          taskId: 'task-2',
+        },
+      ],
+    });
+    expect(scoringResultService.triggerSystemScore).toHaveBeenCalledTimes(2);
+    expect(scoringResultService.triggerSystemScore).toHaveBeenNthCalledWith(
+      1,
+      'review-1',
+      'submission-1',
+      '30000123',
+    );
+    expect(scoringResultService.triggerSystemScore).toHaveBeenNthCalledWith(
+      2,
+      'review-2',
+      'submission-2',
+      '30000123',
+    );
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      3,
+      'https://api.topcoder-dev.com/v6/reviews',
+      {
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+        params: {
+          challengeId: '30000123',
+          page: 1,
+          perPage: 100,
+          thin: 'true',
+        },
+      },
+    );
   });
 
   it('normalizes large startSeed strings to BigInt when creating phase configs', async () => {

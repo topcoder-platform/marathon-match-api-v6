@@ -118,6 +118,12 @@ Use:
 
 `POST /v6/marathon-match/challenge/:challengeId/rerun`
 
-This endpoint selects the latest submission for each member in received order and launches ECS scorer tasks in parallel using the challenge's `PROVISIONAL` phase config. Use it after changing the tester or when current latest submissions need to be rescored without waiting for new submission events.
+This endpoint selects the latest submission for each member in received order and launches ECS scorer tasks in parallel using the scorer config that matches the currently open challenge phase. During Submission this is normally the challenge's `PROVISIONAL` phase config. Use it after changing the tester or when current latest submissions need to be rescored without waiting for new submission events.
+
+For Review/System scoring reruns, use:
+
+`POST /v6/marathon-match/challenge/:challengeId/rerun/system`
+
+The SYSTEM rerun endpoint restarts existing non-cancelled Review API reviews that match the challenge's configured Marathon Match review scorecard and passes each existing `reviewId` into the SYSTEM scorer.
 
 Rerun access is limited to admins, M2M tokens with `update:marathon-match`, and the `Copilot` resource assigned to the challenge.

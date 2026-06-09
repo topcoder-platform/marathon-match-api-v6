@@ -24,6 +24,7 @@ import {
   PhaseConfigResponseDto,
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
+  SystemRerunResponseDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import {
@@ -35,6 +36,7 @@ import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
+import { ScoringResultService } from '../scoring-result/scoring-result.service';
 
 type MarathonMatchConfigWithPhaseConfigs =
   Prisma.marathonMatchConfigGetPayload<{
@@ -55,6 +57,11 @@ type NormalizedPhaseConfigInput = {
       })
     | undefined;
   configType: PhaseConfigType;
+};
+
+type SystemReviewRerunCandidate = {
+  reviewId: string;
+  submissionId: string;
 };
 
 interface ChallengePhaseResponse {
@@ -83,8 +90,8 @@ interface ChallengeResponse {
 
 /**
  * Handles marathon match configuration CRUD operations, default retrieval,
- * manual rerun dispatching for the latest challenge submissions, and
- * tester-change reruns for active challenges.
+ * manual rerun dispatching for latest challenge submissions and existing
+ * SYSTEM reviews, and tester-change reruns for active challenges.
  * Maps persistence records to API response DTOs for challenge config endpoints.
  */
 @Injectable()
@@ -108,6 +115,7 @@ export class MarathonMatchConfigService {
     private readonly m2mService: M2MService,
     private readonly prisma: PrismaService,
     private readonly prismaErrorService: PrismaErrorService,
+    private readonly scoringResultService: ScoringResultService,
   ) {}
 
   /**
@@ -1056,6 +1064,329 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Restarts SYSTEM scorer tasks for existing system review records on an active
+   * Marathon Match challenge. The method finds non-cancelled review-api reviews
+   * that use the challenge's configured review scorecard, then dispatches each
+   * through the SYSTEM scoring path so review IDs and timeout guards are
+   * preserved.
+   * @param challengeId Challenge ID from path params in POST /challenge/:challengeId/rerun/system.
+   * @param user Authenticated user or machine token payload for audit-aware logging.
+   * @returns SYSTEM rerun dispatch summary mapped to `SystemRerunResponseDto`.
+   * @throws NotFoundException When the marathon match config does not exist.
+   * @throws BadRequestException When the config/challenge is inactive, the tester is not compiled
+   * successfully, or SYSTEM phase config is missing.
+   * @throws InternalServerErrorException When review lookup or SYSTEM dispatch fails unexpectedly.
+   */
+  async rerunSystemTests(
+    challengeId: string,
+    user: JwtUser,
+  ): Promise<SystemRerunResponseDto> {
+    try {
+      const config = await this.prisma.marathonMatchConfig.findUnique({
+        where: { challengeId },
+        include: {
+          phaseConfigs: true,
+          tester: true,
+        },
+      });
+
+      if (!config) {
+        throw new NotFoundException(
+          `Marathon match config with challenge ID ${challengeId} not found.`,
+        );
+      }
+
+      if (config.active === false) {
+        throw new BadRequestException(
+          `Marathon match config ${challengeId} is inactive. SYSTEM rerun is allowed only for ACTIVE Marathon Match configurations.`,
+        );
+      }
+
+      if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
+        const compilationError = config.tester.compilationError?.trim();
+        throw new BadRequestException(
+          `Tester ${config.testerId} for challenge ${challengeId} is not ready for SYSTEM rerun. Current compilation status: ${config.tester.compilationStatus}.${compilationError ? ` compilationError: ${compilationError}` : ''}`,
+        );
+      }
+
+      if (
+        !config.phaseConfigs.some(
+          (phaseConfigData) =>
+            phaseConfigData.configType === PhaseConfigType.SYSTEM,
+        )
+      ) {
+        throw new BadRequestException(
+          `Marathon match config ${challengeId} requires a SYSTEM phase config for SYSTEM rerun dispatch.`,
+        );
+      }
+
+      const challengePayload = await this.fetchChallengePayload(challengeId);
+      const challengeStatus =
+        this.asString(challengePayload.status)?.trim().toUpperCase() ??
+        'UNKNOWN';
+      if (challengeStatus !== 'ACTIVE') {
+        throw new BadRequestException(
+          `Challenge ${challengeId} is not active. Current challenge status: ${this.asString(challengePayload.status)?.trim() || 'UNKNOWN'}.`,
+        );
+      }
+
+      const token = await this.m2mService.getM2MToken();
+      if (!token) {
+        throw new Error('Unable to get M2M token for review API calls.');
+      }
+
+      const configuredScorecardIds = await this.getConfiguredReviewScorecardIds(
+        config.reviewScorecardId,
+      );
+      const systemReviews = await this.fetchSystemReviewsForRerun(
+        token,
+        challengeId,
+        configuredScorecardIds,
+      );
+
+      if (systemReviews.length === 0) {
+        this.logger.log({
+          message:
+            'No existing SYSTEM reviews found for marathon match SYSTEM rerun.',
+          challengeId,
+          actor: this.getActor(user),
+        });
+
+        return {
+          challengeId,
+          reviewsQueued: 0,
+          results: [],
+        };
+      }
+
+      const launchResults = await this.triggerSystemReviewsWithRateLimit(
+        challengeId,
+        systemReviews,
+      );
+      const results: SystemRerunResponseDto['results'] = systemReviews.map(
+        ({ reviewId, submissionId }, index) => {
+          const launchResult = launchResults[index];
+          if (launchResult.status === 'fulfilled') {
+            return {
+              reviewId,
+              submissionId,
+              taskArn: launchResult.value.taskArn,
+              taskId: launchResult.value.taskId,
+            };
+          }
+
+          const reason = launchResult.reason;
+          return {
+            reviewId,
+            submissionId,
+            error: reason instanceof Error ? reason.message : String(reason),
+          };
+        },
+      );
+
+      this.logger.log({
+        message: 'Marathon match SYSTEM rerun dispatch completed.',
+        challengeId,
+        actor: this.getActor(user),
+        reviewsQueued: systemReviews.length,
+        launchedCount: results.filter((result) => !!result.taskId).length,
+        failedCount: results.filter((result) => !!result.error).length,
+      });
+
+      return {
+        challengeId,
+        reviewsQueued: systemReviews.length,
+        results,
+      };
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+
+      const errorResponse = this.prismaErrorService.handleError(
+        error,
+        `rerunning marathon match SYSTEM tests with challenge ID: ${challengeId} for actor: ${this.getActor(user)}`,
+      );
+      this.logger.error(errorResponse.message);
+      throw new InternalServerErrorException({
+        message: errorResponse.message,
+        code: errorResponse.code,
+        details: errorResponse.details,
+      });
+    }
+  }
+
+  /**
+   * Resolves the configured review scorecard to all accepted identifiers that
+   * may be present on review-api review records.
+   * @param reviewScorecardId Stored config scorecard identifier.
+   * @returns Set containing the stored ID and, when resolvable, the canonical review-api ID.
+   */
+  private async getConfiguredReviewScorecardIds(
+    reviewScorecardId: string,
+  ): Promise<Set<string>> {
+    const scorecardIds = new Set<string>();
+    const configuredScorecardId = reviewScorecardId.trim();
+    if (configuredScorecardId) {
+      scorecardIds.add(configuredScorecardId);
+    }
+
+    const resolvedScorecardId = await this.resolveReviewScorecardId(
+      configuredScorecardId,
+    );
+    if (resolvedScorecardId) {
+      scorecardIds.add(resolvedScorecardId);
+    }
+
+    return scorecardIds;
+  }
+
+  /**
+   * Loads review-api review records for a challenge and filters them down to
+   * non-cancelled SYSTEM review candidates matching the configured scorecard.
+   * @param token M2M bearer token for review-api.
+   * @param challengeId Challenge ID whose system reviews should be restarted.
+   * @param configuredScorecardIds Scorecard IDs accepted for SYSTEM review matching.
+   * @returns Review/submission pairs ready for SYSTEM scorer dispatch.
+   */
+  private async fetchSystemReviewsForRerun(
+    token: string,
+    challengeId: string,
+    configuredScorecardIds: Set<string>,
+  ): Promise<SystemReviewRerunCandidate[]> {
+    const reviews: SystemReviewRerunCandidate[] = [];
+    const seenReviewIds = new Set<string>();
+    const url = `${this.buildReviewApiBaseUrl()}/reviews`;
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: {
+            challengeId,
+            page,
+            perPage: 100,
+            thin: 'true',
+          },
+        }),
+      );
+
+      for (const review of this.extractReviewArray(response.data)) {
+        const candidate = this.getSystemReviewRerunCandidate(
+          review,
+          configuredScorecardIds,
+        );
+        if (!candidate || seenReviewIds.has(candidate.reviewId)) {
+          continue;
+        }
+
+        seenReviewIds.add(candidate.reviewId);
+        reviews.push(candidate);
+      }
+
+      totalPages = this.parseTotalPages(
+        response.data,
+        response.headers as Record<string, unknown> | undefined,
+      );
+      page += 1;
+    } while (page <= totalPages);
+
+    return reviews.sort((left, right) =>
+      left.submissionId === right.submissionId
+        ? left.reviewId.localeCompare(right.reviewId)
+        : left.submissionId.localeCompare(right.submissionId),
+    );
+  }
+
+  /**
+   * Converts one review-api record into a SYSTEM rerun candidate when it matches
+   * the configured scorecard and has enough identity data to dispatch scoring.
+   * @param review Review object returned by review-api.
+   * @param configuredScorecardIds Scorecard IDs accepted for SYSTEM review matching.
+   * @returns Candidate review/submission IDs, or undefined when the review should not rerun.
+   */
+  private getSystemReviewRerunCandidate(
+    review: Record<string, unknown>,
+    configuredScorecardIds: Set<string>,
+  ): SystemReviewRerunCandidate | undefined {
+    const reviewId = this.asString(review.id)?.trim();
+    const submissionId = this.asString(review.submissionId)?.trim();
+    if (!reviewId || !submissionId) {
+      return undefined;
+    }
+
+    const normalizedStatus = this.asString(review.status)?.trim().toUpperCase();
+    if (normalizedStatus === 'CANCELLED' || normalizedStatus === 'DELETED') {
+      return undefined;
+    }
+
+    const reviewScorecardId =
+      this.asString(review.scorecardId)?.trim() ||
+      this.asString(review.scoreCardId)?.trim();
+    if (!reviewScorecardId || !configuredScorecardIds.has(reviewScorecardId)) {
+      return undefined;
+    }
+
+    return {
+      reviewId,
+      submissionId,
+    };
+  }
+
+  /**
+   * Dispatches SYSTEM scoring reruns in small batches so ECS RunTask requests
+   * remain below service throttling limits.
+   * @param challengeId Challenge ID passed to each SYSTEM dispatch.
+   * @param reviews Existing review/submission pairs selected for rerun.
+   * @returns Settled dispatch results in the same order as `reviews`.
+   */
+  private async triggerSystemReviewsWithRateLimit(
+    challengeId: string,
+    reviews: SystemReviewRerunCandidate[],
+  ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
+    const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
+      [];
+
+    for (
+      let index = 0;
+      index < reviews.length;
+      index += MarathonMatchConfigService.scorerLaunchBatchSize
+    ) {
+      const batch = reviews.slice(
+        index,
+        index + MarathonMatchConfigService.scorerLaunchBatchSize,
+      );
+      const batchResults = await Promise.allSettled(
+        batch.map(({ reviewId, submissionId }) =>
+          this.scoringResultService.triggerSystemScore(
+            reviewId,
+            submissionId,
+            challengeId,
+          ),
+        ),
+      );
+
+      launchResults.push(...batchResults);
+
+      if (
+        index + MarathonMatchConfigService.scorerLaunchBatchSize <
+        reviews.length
+      ) {
+        await this.delay(MarathonMatchConfigService.scorerLaunchBatchDelayMs);
+      }
+    }
+
+    return launchResults;
+  }
+
+  /**
    * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
    * @param challengeId Challenge ID passed to each scorer task.
    * @param submissions Latest submissions to rerun, in response order.
@@ -1833,6 +2164,144 @@ export class MarathonMatchConfigService {
     }
 
     return parsed;
+  }
+
+  /**
+   * Extracts review-api review arrays from common direct, paginated, and
+   * wrapped response payload shapes.
+   * @param data Raw review-api response body.
+   * @returns Normalized review records.
+   */
+  private extractReviewArray(data: unknown): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const wrapper = this.asRecord(data);
+    if (Array.isArray(wrapper.data)) {
+      return wrapper.data.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(wrapper.result);
+    if (Array.isArray(resultRecord.content)) {
+      return resultRecord.content.map((entry) => this.asRecord(entry));
+    }
+
+    if (Array.isArray(resultRecord.data)) {
+      return resultRecord.data.map((entry) => this.asRecord(entry));
+    }
+
+    return [];
+  }
+
+  /**
+   * Parses total page count from response body metadata or pagination headers.
+   * @param data Raw response body.
+   * @param headers HTTP response headers, if available.
+   * @returns Positive total page count, defaulting to 1.
+   */
+  private parseTotalPages(
+    data: unknown,
+    headers: Record<string, unknown> | undefined,
+  ): number {
+    const bodyTotalPages = this.extractBodyTotalPages(data);
+    if (bodyTotalPages !== null) {
+      return bodyTotalPages;
+    }
+
+    const totalPagesValue =
+      headers?.['x-total-pages'] ??
+      headers?.['X-Total-Pages'] ??
+      headers?.['x-total-page'];
+    return this.parsePositiveInteger(totalPagesValue) ?? 1;
+  }
+
+  /**
+   * Extracts total page count from common API response metadata shapes.
+   * @param data Raw response body.
+   * @returns Positive total page count, or null when no value exists.
+   */
+  private extractBodyTotalPages(data: unknown): number | null {
+    const wrapper = this.asRecord(data);
+    const resultRecord = this.asRecord(wrapper.result);
+    const resultContentRecord = this.asRecord(resultRecord.content);
+    const dataRecord = this.asRecord(wrapper.data);
+    const candidates = [
+      this.asRecord(wrapper.meta),
+      this.asRecord(resultRecord.meta),
+      this.asRecord(resultContentRecord.meta),
+      this.asRecord(dataRecord.meta),
+      this.asRecord(wrapper.pagination),
+      this.asRecord(resultRecord.pagination),
+      this.asRecord(resultContentRecord.pagination),
+      this.asRecord(dataRecord.pagination),
+      wrapper,
+      resultRecord,
+      resultContentRecord,
+      dataRecord,
+    ];
+
+    for (const candidate of candidates) {
+      const totalPages = this.parsePositiveInteger(candidate.totalPages);
+      if (totalPages !== null) {
+        return totalPages;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Parses a positive integer from scalar or array-like API metadata values.
+   * @param value Candidate positive integer value.
+   * @returns Parsed positive integer, or null when unavailable.
+   */
+  private parsePositiveInteger(value: unknown): number | null {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const parsed = this.parsePositiveInteger(entry);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+
+      return null;
+    }
+
+    const parsed = Number.parseInt(this.asString(value) ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  /**
+   * Normalizes unknown values into plain records for response parsing.
+   * @param value Candidate object value.
+   * @returns Plain record or an empty record when not object-like.
+   */
+  private asRecord(value: unknown): Record<string, unknown> {
+    return typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  /**
+   * Normalizes primitive API values to strings when possible.
+   * @param value Candidate string, number, bigint, or boolean.
+   * @returns String representation, or undefined for unsupported values.
+   */
+  private asString(value: unknown): string | undefined {
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (
+      typeof value === 'number' ||
+      typeof value === 'bigint' ||
+      typeof value === 'boolean'
+    ) {
+      return String(value);
+    }
+
+    return undefined;
   }
 
   /**

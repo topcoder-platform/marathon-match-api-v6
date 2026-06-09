@@ -10,6 +10,8 @@ When the Review phase opens for a Marathon Match challenge, `autopilot-v6` route
 
 Manual phase changes are supported through the same path. If Review is opened directly in challenge-api, autopilot's challenge-update handling replays the phase-open work; startup recovery also replays already-open Review phases so missed update events still create and dispatch SYSTEM reviews.
 
+Existing SYSTEM reviews can be restarted through `POST /v6/marathon-match/challenge/:challengeId/rerun/system`. This endpoint is intended for operator reruns after lowering timing settings or changing the tester while Review is open. It finds non-cancelled Review API reviews matching the challenge's configured Marathon Match scorecard, then dispatches SYSTEM scorer tasks with each existing `reviewId`.
+
 ## Flow
 
 ```mermaid
