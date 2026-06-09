@@ -15,6 +15,7 @@ Swagger UI:
 ## Documentation
 
 - [Marathon Match Setup](docs/marathon-match-setup.md) - for challenge administrators
+- [ECS Runner Lifetime](ECS_RUNNER_LIFETIME.md) - how scorer tasks are launched, monitored, and stopped
 - [Submission Phase Scoring](docs/submission-phase-scoring.md) - for DevOps
 - [Review Phase Scoring](docs/review-phase-scoring.md) - for DevOps
 - [Full Marathon Match Test Script](docs/full-marathon-match-test.md) - for end-to-end smoke tests with production baseline fixtures
