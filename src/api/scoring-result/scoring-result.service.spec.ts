@@ -1585,7 +1585,12 @@ describe('ScoringResultService', () => {
           basePayload.submissionId,
           basePayload.challengeId,
         ),
-      ).resolves.toBe(undefined);
+      ).resolves.toEqual(
+        expect.objectContaining({
+          taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+          taskId: 'task-1',
+        }),
+      );
     } finally {
       if (originalReviewTypeId === undefined) {
         delete process.env.REVIEW_TYPE_ID;

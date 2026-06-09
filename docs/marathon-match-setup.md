@@ -160,7 +160,13 @@ To switch an active challenge to a newer tester:
 3. Update the challenge config with `PUT /v6/marathon-match/challenge/:challengeId` and the new `testerId`
 4. Trigger a rescore of current competitors with `POST /v6/marathon-match/challenge/:challengeId/rerun`
 
-The rerun endpoint selects `isLatest` submissions for the challenge in received order and launches ECS scorer tasks for them in parallel. This does not happen automatically when `testerId` changes, so the rerun call is the operational step that recalculates scores.
+The standard rerun endpoint selects `isLatest` submissions for the challenge in received order and launches ECS scorer tasks for them in parallel using the scorer config for the currently open challenge phase. This does not happen automatically when `testerId` changes, so the rerun call is the operational step that recalculates Submission/Provisional scores.
+
+To restart Review/System tests, call:
+
+`POST /v6/marathon-match/challenge/:challengeId/rerun/system`
+
+The SYSTEM rerun endpoint reuses existing non-cancelled Review API review records that match the challenge's configured Marathon Match scorecard and dispatches each one through SYSTEM scoring with its existing `reviewId`.
 
 Reruns can be requested by admins, M2M tokens with `update:marathon-match`, or the `Copilot` resource assigned to the challenge.
 
