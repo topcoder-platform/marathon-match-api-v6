@@ -11,6 +11,8 @@ import { MarathonMatchConfigService } from './marathon-match-config/marathon-mat
 import { ScoringResultController } from './scoring-result/scoring-result.controller';
 import { ScoringCompletionEmailService } from './scoring-result/scoring-completion-email.service';
 import { ScoringResultService } from './scoring-result/scoring-result.service';
+import { SystemTestTimeoutSchedulerService } from './scoring-result/system-test-timeout-scheduler.service';
+import { SystemTestTimeoutWorkerService } from './scoring-result/system-test-timeout-worker.service';
 import { SubmissionRunnerLogController } from './submission-runner-log/submission-runner-log.controller';
 import { SubmissionRunnerLogService } from './submission-runner-log/submission-runner-log.service';
 import { CompilationWorkerService } from './tester/compilation-worker.service';
@@ -39,6 +41,8 @@ import { TesterService } from './tester/tester.service';
     MarathonMatchConfigService,
     ScoringCompletionEmailService,
     ScoringResultService,
+    SystemTestTimeoutSchedulerService,
+    SystemTestTimeoutWorkerService,
     SubmissionRunnerLogService,
     ChallengeCopilotResourceGuard,
     SubmissionRunnerLogAccessGuard,

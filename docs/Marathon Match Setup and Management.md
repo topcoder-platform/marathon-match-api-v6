@@ -140,6 +140,7 @@ The `Scorer Settings` section controls the persisted Marathon Match config for t
 | `Review Scorecard ID` | `reviewScorecardId` | Review API scorecard ID or legacy scorecard ID. The API validates this before saving. |
 | `Test Timeout (ms)` | `testTimeout` | Timeout for tester execution. |
 | `Compile Timeout (ms)` | `compileTimeout` | Timeout for submission compilation inside the ECS runner. |
+| `System Test Timeout (ms)` | `systemTestTimeout` | Total SYSTEM scoring timeout per submission. Defaults to 24 hours; timed-out SYSTEM tasks are stopped and failed with `metadata.timed_out = true`. |
 | `Task Definition Name` | `taskDefinitionName` | ECS task definition family, for example `mm-ecs-runner`. |
 | `Task Definition Version` | `taskDefinitionVersion` | ECS task definition revision to run. |
 
@@ -186,7 +187,7 @@ Relative scoring applies when:
 - `Relative Scoring` is enabled on the scorer config.
 - The ECS runner callback metadata includes `testScores`.
 
-For each testcase, the API finds the best raw score among the latest scored submission for each member. `scoreDirection` controls whether the best raw score is the maximum or minimum value. The stored relative testcase score is normalized to `0..100`, with zero raw or zero best scores counted as `0`, and the aggregate review score is the average of those relative testcase scores.
+For each testcase, the API finds the best raw score among the latest scored submission for each member. `scoreDirection` controls whether the best raw score is the maximum or minimum value. The stored relative testcase score is normalized to `0..100`, with zero raw or zero best scores counted as `0` for `MAXIMIZE` challenges. For `MINIMIZE` challenges, a raw score of `0` tied with the best score of `0` receives `100`. The aggregate review score is the average of those relative testcase scores.
 
 Implications:
 

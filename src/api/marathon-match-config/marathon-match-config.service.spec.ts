@@ -3,7 +3,11 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { PhaseConfigType, ScoreDirection } from '@prisma/client';
+import {
+  CompilationStatus,
+  PhaseConfigType,
+  ScoreDirection,
+} from '@prisma/client';
 import { of, throwError } from 'rxjs';
 
 jest.mock('nanoid', () => ({
@@ -24,7 +28,9 @@ describe('MarathonMatchConfigService', () => {
     const httpService = {
       get: jest.fn(),
     };
-    const ecsService = {};
+    const ecsService = {
+      launchScorerTask: jest.fn(),
+    };
     const m2mService = {
       getM2MToken: jest.fn(),
     };
@@ -59,6 +65,7 @@ describe('MarathonMatchConfigService', () => {
 
     return {
       service,
+      ecsService,
       httpService,
       m2mService,
       prisma,
@@ -66,11 +73,18 @@ describe('MarathonMatchConfigService', () => {
     };
   };
 
+  const flushPromises = async () => {
+    for (let index = 0; index < 5; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -82,6 +96,32 @@ describe('MarathonMatchConfigService', () => {
     compileTimeout: 120000,
     taskDefinitionName: 'mm-runner',
     taskDefinitionVersion: '7',
+  });
+
+  it('defaults total system test timeout to 24 hours', () => {
+    const originalReviewScorecardId = process.env.DEFAULT_REVIEW_SCORECARD_ID;
+    const originalSystemTestTimeout =
+      process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+    process.env.DEFAULT_REVIEW_SCORECARD_ID = 'scorecard-1';
+    delete process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+
+    try {
+      const { service } = createService();
+      const defaults = service.getDefaults();
+
+      expect(defaults.systemTestTimeout).toBe(86400000);
+    } finally {
+      if (originalReviewScorecardId === undefined) {
+        delete process.env.DEFAULT_REVIEW_SCORECARD_ID;
+      } else {
+        process.env.DEFAULT_REVIEW_SCORECARD_ID = originalReviewScorecardId;
+      }
+      if (originalSystemTestTimeout === undefined) {
+        delete process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+      } else {
+        process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS = originalSystemTestTimeout;
+      }
+    }
   });
 
   it('resolves legacy review scorecard ids when loading one config', async () => {
@@ -264,6 +304,297 @@ describe('MarathonMatchConfigService', () => {
     });
     expect(rerunSpy).toHaveBeenCalledTimes(1);
     expect(rerunSpy).toHaveBeenCalledWith('30000123', user);
+  });
+
+  it('reruns latest submissions with the currently open system phase config', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-example',
+          configType: PhaseConfigType.EXAMPLE,
+          phaseId: 'example-phase',
+          startSeed: BigInt(1),
+          numberOfTests: 10,
+        },
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+        {
+          id: 'phase-system',
+          configType: PhaseConfigType.SYSTEM,
+          phaseId: 'system-phase',
+          startSeed: BigInt(1000),
+          numberOfTests: 5000,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+            phases: [
+              {
+                phaseId: 'provisional-phase',
+                isOpen: false,
+                actualStartDate: '2026-05-01T00:00:00.000Z',
+              },
+              {
+                phaseId: 'system-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'submission-system',
+                  memberId: '40051399',
+                  submittedDate: '2026-06-02T00:00:00.000Z',
+                  isLatest: true,
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster-1',
+      containerName: 'runner',
+      taskDefinition: 'mm-runner:7',
+    });
+
+    const result = await service.rerunLatestSubmissions('30000123', user);
+
+    expect(result.submissionsQueued).toBe(1);
+    expect(ecsService.launchScorerTask).toHaveBeenCalledWith(
+      '30000123',
+      'submission-system',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.SYSTEM,
+        startSeed: BigInt(1000),
+        numberOfTests: 5000,
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+  });
+
+  it('rate limits rerun scorer task launches in batches', async () => {
+    jest.useFakeTimers();
+
+    try {
+      const { service, httpService, ecsService, m2mService, prisma } =
+        createService();
+      const challengeId = '30000123';
+      const submissionRows = Array.from({ length: 10 }, (_, index) => ({
+        id: `submission-${index + 1}`,
+        memberId: `member-${index + 1}`,
+        submittedDate: `2026-06-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+        isLatest: true,
+      }));
+      const submissionIds = submissionRows.map((submission) => submission.id);
+      const launchResolvers: Array<() => void> = [];
+
+      prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+        id: 'config-1',
+        challengeId,
+        active: true,
+        testerId: 'tester-1',
+        submissionApiUrl: 'https://submissions.example/v5',
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+        tester: {
+          compilationStatus: CompilationStatus.SUCCESS,
+          compilationError: null,
+        },
+        phaseConfigs: [
+          {
+            id: 'phase-provisional',
+            phaseId: 'provisional-phase',
+            configType: PhaseConfigType.PROVISIONAL,
+            startSeed: BigInt(100),
+            numberOfTests: 50,
+          },
+        ],
+      });
+      m2mService.getM2MToken.mockResolvedValue('m2m-token');
+      httpService.get
+        .mockReturnValueOnce(
+          of({
+            data: {
+              status: 'ACTIVE',
+              phases: [
+                {
+                  phaseId: 'provisional-phase',
+                  isOpen: true,
+                  actualStartDate: '2026-06-01T00:00:00.000Z',
+                },
+              ],
+            },
+          }),
+        )
+        .mockReturnValueOnce(
+          of({
+            data: {
+              result: submissionRows,
+            },
+            headers: {
+              'x-total-pages': '1',
+            },
+          }),
+        );
+      ecsService.launchScorerTask.mockImplementation((...args: unknown[]) => {
+        const submissionId = String(args[1]);
+        return new Promise((resolve) => {
+          launchResolvers.push(() =>
+            resolve({
+              taskArn: `arn:aws:ecs:us-east-1:123456789012:task/${submissionId}`,
+              taskId: `task-${submissionId}`,
+            }),
+          );
+        });
+      });
+      const launchedSubmissionIds = () =>
+        ecsService.launchScorerTask.mock.calls.map((call) => String(call[1]));
+
+      const rerunPromise = service.rerunLatestSubmissions(challengeId, {
+        isMachine: false,
+        userId: '40051399',
+      } as never);
+
+      await flushPromises();
+
+      expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(8);
+      expect(launchedSubmissionIds()).toEqual(submissionIds.slice(0, 8));
+
+      launchResolvers.splice(0).forEach((resolve) => resolve());
+      await flushPromises();
+      await jest.advanceTimersByTimeAsync(1099);
+
+      expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(8);
+
+      await jest.advanceTimersByTimeAsync(1);
+      await flushPromises();
+
+      expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(10);
+      expect(launchedSubmissionIds()).toEqual(submissionIds);
+
+      launchResolvers.splice(0).forEach((resolve) => resolve());
+
+      const result = await rerunPromise;
+
+      expect(result).toEqual({
+        challengeId,
+        submissionsQueued: 10,
+        results: submissionIds.map((submissionId) => ({
+          submissionId,
+          taskArn: `arn:aws:ecs:us-east-1:123456789012:task/${submissionId}`,
+          taskId: `task-${submissionId}`,
+        })),
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('rejects reruns when currentPhase is closed and no phase is open', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValueOnce(
+      of({
+        data: {
+          status: 'ACTIVE',
+          phases: [
+            {
+              phaseId: 'provisional-phase',
+              isOpen: false,
+              actualStartDate: '2026-05-01T00:00:00.000Z',
+            },
+          ],
+          currentPhase: {
+            phaseId: 'provisional-phase',
+            isOpen: false,
+          },
+        },
+      }),
+    );
+
+    await expect(
+      service.rerunLatestSubmissions('30000123', {
+        isMachine: false,
+        userId: '40051399',
+      } as never),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(httpService.get).toHaveBeenCalledTimes(1);
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
   });
 
   it('normalizes large startSeed strings to BigInt when creating phase configs', async () => {

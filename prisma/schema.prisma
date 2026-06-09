@@ -49,6 +49,7 @@ model tester {
   @@index([id])
   @@index([name])
   @@index([compilationStatus])
+  @@unique([name, version])
   @@schema("marathon_match")
 }
 
@@ -64,6 +65,7 @@ model marathonMatchConfig {
   testerId              String        @db.VarChar(14)
   testTimeout           Int
   compileTimeout        Int
+  systemTestTimeout     Int           @default(86400000)
   taskDefinitionName    String
   taskDefinitionVersion String
   createdAt             DateTime      @default(now())

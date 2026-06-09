@@ -10,6 +10,7 @@ import {
   PhaseConfigType,
   ScoreDirection,
 } from '@prisma/client';
+import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 import { EcsService } from 'src/shared/modules/global/ecs.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
@@ -21,6 +22,10 @@ import {
   SubmissionScoringCompletionEmailDetails,
   SystemScoringCompletionEmailDetails,
 } from './scoring-completion-email.service';
+import {
+  SystemTestTimeoutJobData,
+  SystemTestTimeoutSchedulerService,
+} from './system-test-timeout-scheduler.service';
 
 export interface ScoringResultCallbackPayload {
   challengeId: string;
@@ -40,6 +45,9 @@ export enum ScoringTestStatus {
   Success = 'SUCCESS',
   Failed = 'FAILED',
 }
+
+const MAX_REVIEW_SCORE_LABEL = '9223372036854775807';
+const MAX_REVIEW_SCORE = Number(MAX_REVIEW_SCORE_LABEL);
 
 export interface ScoringProgressCallbackPayload {
   challengeId: string;
@@ -74,6 +82,7 @@ interface SummationBuildInput {
   score: number;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
+  preserveReviewedDate?: boolean;
   reviewObject?: Record<string, unknown>;
   testPhase: string;
 }
@@ -83,6 +92,11 @@ interface RelativeScoringSettings {
   submissionApiUrl?: string;
   enabled: boolean;
   scoreDirection: ScoreDirection;
+}
+
+interface RelativeScoringLockIds {
+  classId: number;
+  objectId: number;
 }
 
 interface ScoringResultConfigSummary {
@@ -101,11 +115,16 @@ interface RelativeTestScoreEntry {
 
 interface RelativeReviewRecord {
   submissionId: string;
-  memberId?: string;
+  memberKey?: string;
   createdAt?: string;
   reviewObject: Record<string, unknown>;
   metadata: Record<string, unknown>;
   rawTestScores: RelativeTestScoreEntry[];
+}
+
+interface RelativeReviewPayload {
+  reviewObject: Record<string, unknown>;
+  payload: ReviewSummationPayload;
 }
 
 interface SystemReviewCompletionContext {
@@ -125,6 +144,12 @@ interface LatestMemberSubmissionCandidate {
   submittedDate?: string;
   isLatest?: boolean;
   sequence: number;
+}
+
+interface LatestRelativeReviewCandidate extends LatestMemberSubmissionCandidate {
+  submissionId: string;
+  memberId?: string;
+  reviewObject: Record<string, unknown>;
 }
 
 interface SubmissionMemberIdentity {
@@ -161,15 +186,19 @@ export class ScoringResultService {
     private readonly ecsService: EcsService,
     @Optional()
     private readonly scoringCompletionEmailService?: ScoringCompletionEmailService,
+    @Optional()
+    private readonly systemTestTimeoutSchedulerService?: SystemTestTimeoutSchedulerService,
   ) {}
 
   /**
    * Processes one scorer callback payload after verifying the challenge config exists,
-   * then upserts all required review summations.
+   * then completes any SYSTEM review before final summation writes.
    */
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
   ): Promise<void> {
+    this.validateReviewScore(payload.score, 'Scoring callback score');
+
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     const config = await this.requireScoringResultConfig(payload.challengeId);
     const token = await this.m2mService.getM2MToken();
@@ -206,17 +235,6 @@ export class ScoringResultService {
         relativeScoringSettings,
       );
       if (currentRelativeScore !== undefined) {
-        await this.completeSystemReviewIfNeeded(
-          token,
-          payload.reviewId,
-          currentRelativeScore,
-          normalizedPhase,
-          {
-            challengeId: payload.challengeId,
-            scorecardId: fallbackScorecardId,
-            submissionId: payload.submissionId,
-          },
-        );
         await this.notifyScoringCompletionEmailIfReady(
           token,
           payload,
@@ -231,28 +249,11 @@ export class ScoringResultService {
       payload.currentReview &&
       Object.keys(payload.currentReview).length > 0
     ) {
-      const currentReviewScore = await this.upsertFromLegacyReviewPayload(
-        token,
-        {
-          legacyReview: payload.currentReview,
-          fallbackSubmissionId: payload.submissionId,
-          fallbackScore: payload.score,
-          fallbackScorecardId,
-          fallbackMetadata,
-          testPhase: normalizedPhase,
-        },
+      const currentReviewScore = this.resolveReviewScore(
+        this.asRecord(payload.currentReview),
+        normalizedPhase,
+        payload.score,
       );
-
-      for (const impactedReview of payload.impactedReviews ?? []) {
-        await this.upsertFromLegacyReviewPayload(token, {
-          legacyReview: impactedReview,
-          fallbackSubmissionId: payload.submissionId,
-          fallbackScore: payload.score,
-          fallbackScorecardId,
-          fallbackMetadata,
-          testPhase: normalizedPhase,
-        });
-      }
 
       await this.completeSystemReviewIfNeeded(
         token,
@@ -265,6 +266,27 @@ export class ScoringResultService {
           submissionId: payload.submissionId,
         },
       );
+
+      await this.upsertFromLegacyReviewPayload(token, {
+        legacyReview: payload.currentReview,
+        fallbackSubmissionId: payload.submissionId,
+        fallbackScore: payload.score,
+        fallbackScorecardId,
+        fallbackMetadata,
+        testPhase: normalizedPhase,
+      });
+
+      for (const impactedReview of payload.impactedReviews ?? []) {
+        await this.upsertFromLegacyReviewPayload(token, {
+          legacyReview: impactedReview,
+          fallbackSubmissionId: payload.submissionId,
+          fallbackScore: payload.score,
+          fallbackScorecardId,
+          fallbackMetadata,
+          testPhase: normalizedPhase,
+        });
+      }
+
       await this.notifyScoringCompletionEmailIfReady(
         token,
         payload,
@@ -282,7 +304,6 @@ export class ScoringResultService {
       testPhase: normalizedPhase,
     });
 
-    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.completeSystemReviewIfNeeded(
       token,
       payload.reviewId,
@@ -294,6 +315,7 @@ export class ScoringResultService {
         submissionId: payload.submissionId,
       },
     );
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.notifyScoringCompletionEmailIfReady(
       token,
       payload,
@@ -341,13 +363,73 @@ export class ScoringResultService {
 
     const reviewPayload = this.buildSummationPayload({
       submissionId: payload.submissionId,
-      score: payload.status === ScoringTestStatus.Success ? 0 : -1,
+      score: this.progressPlaceholderScore(payload.status),
       scorecardId: fallbackScorecardId,
       metadata,
       testPhase: normalizedPhase,
     });
 
     await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+  }
+
+  /**
+   * Checks whether a phase review summation has reached a terminal state.
+   * Used by the SYSTEM timeout worker before stopping a runner task so a delayed
+   * timeout job cannot overwrite an already completed success or failure.
+   * @param challengeId Challenge identifier that owns the submission.
+   * @param submissionId Submission identifier to inspect.
+   * @param testPhase Example, provisional, or system phase name.
+   * @returns True when any matching review summation is complete.
+   */
+  async isPhaseScoringComplete(
+    challengeId: string,
+    submissionId: string,
+    testPhase: string,
+  ): Promise<boolean> {
+    const normalizedPhase = this.normalizeTestPhase(testPhase);
+    await this.requireScoringResultConfig(challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error('Unable to get M2M token for review summation lookup.');
+    }
+
+    const existingReviews = await this.findExistingReviewSummations(
+      token,
+      submissionId,
+      normalizedPhase,
+    );
+
+    return existingReviews.some((review) =>
+      Boolean(this.resolveCompletedPhaseScoringResult(review)),
+    );
+  }
+
+  /**
+   * Persists a failed SYSTEM review summation caused by the total timeout guard.
+   * The summation metadata includes `timed_out: true` so downstream consumers can
+   * distinguish timeout failures from runner/tester failures.
+   * @param data Timeout job data containing challenge, submission, review, and task context.
+   * @returns Promise that resolves after the failed scoring result is processed.
+   */
+  async markSystemTestTimedOut(data: SystemTestTimeoutJobData): Promise<void> {
+    const timeoutMs = this.resolveSystemTestTimeout(data.timeoutMs);
+
+    await this.processScoringResult({
+      challengeId: data.challengeId,
+      submissionId: data.submissionId,
+      score: -1,
+      testPhase: 'system',
+      reviewTypeId: data.reviewTypeId,
+      reviewId: data.reviewId,
+      scorecardId: data.scorecardId,
+      metadata: {
+        timed_out: true,
+        timeoutMs,
+        taskArn: data.taskArn,
+        timeoutMessage: `SYSTEM scoring timed out after ${timeoutMs} ms.`,
+      },
+    });
   }
 
   /**
@@ -417,6 +499,18 @@ export class ScoringResultService {
       },
       reviewId,
     );
+    const systemTestTimeout = this.resolveSystemTestTimeout(
+      config.systemTestTimeout,
+    );
+    await this.scheduleSystemScoringTimeout({
+      challengeId,
+      submissionId,
+      reviewId,
+      scorecardId: config.reviewScorecardId,
+      taskArn: launchResult.taskArn,
+      cluster: launchResult.cluster,
+      timeoutMs: systemTestTimeout,
+    });
 
     this.logger.log({
       message: 'Triggered Marathon Match SYSTEM score dispatch.',
@@ -425,13 +519,97 @@ export class ScoringResultService {
       reviewId,
       taskArn: launchResult.taskArn,
       taskId: launchResult.taskId,
+      systemTestTimeout,
     });
   }
 
   /**
-   * Recomputes relative scores for the latest submission from each member.
-   * Returns false when relative scoring cannot be applied and the caller should
-   * fall back to direct review upserts.
+   * Schedules a delayed timeout guard for a launched SYSTEM scorer task.
+   * @param args Scoring task context produced by ECS launch.
+   * @returns Promise that resolves after scheduling or when timeout scheduling is unavailable.
+   */
+  private async scheduleSystemScoringTimeout(args: {
+    challengeId: string;
+    submissionId: string;
+    reviewId?: string;
+    scorecardId?: string;
+    taskArn: string;
+    cluster: string;
+    timeoutMs: number;
+  }): Promise<void> {
+    if (!this.systemTestTimeoutSchedulerService) {
+      this.logger.warn({
+        message:
+          'SYSTEM test timeout scheduler is unavailable; timeout guard was not scheduled.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+      });
+      return;
+    }
+
+    const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    if (!reviewTypeId) {
+      this.logger.warn({
+        message:
+          'REVIEW_TYPE_ID is not configured; SYSTEM test timeout guard was not scheduled.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+      });
+      return;
+    }
+
+    try {
+      await this.systemTestTimeoutSchedulerService.scheduleSystemTestTimeout(
+        {
+          challengeId: args.challengeId,
+          submissionId: args.submissionId,
+          reviewId: args.reviewId,
+          taskArn: args.taskArn,
+          cluster: args.cluster,
+          testPhase: 'system',
+          reviewTypeId,
+          scorecardId: args.scorecardId,
+          timeoutMs: args.timeoutMs,
+          launchedAt: new Date().toISOString(),
+        },
+        args.timeoutMs,
+      );
+    } catch (error) {
+      this.logger.error({
+        message:
+          'Failed to schedule SYSTEM test timeout guard after ECS launch.',
+        challengeId: args.challengeId,
+        submissionId: args.submissionId,
+        taskArn: args.taskArn,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Normalizes configured total SYSTEM scoring timeout values.
+   * @param value Candidate timeout in milliseconds.
+   * @returns Positive integer timeout in milliseconds, defaulting to 24 hours.
+   */
+  private resolveSystemTestTimeout(value: unknown): number {
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : Number.parseInt(this.asString(value) ?? '', 10);
+
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : 86400000;
+  }
+
+  /**
+   * Recomputes relative scores for the latest submission from each member while
+   * holding a challenge/phase advisory lock for the read-compute-write cycle.
+   * Completes the current SYSTEM review before writing the recomputed summations.
+   * Returns undefined when relative scoring cannot be applied and the caller
+   * should fall back to direct review upserts.
    */
   private async processRelativeScoring(
     token: string,
@@ -441,28 +619,71 @@ export class ScoringResultService {
     fallbackScorecardId: string | undefined,
     settings: RelativeScoringSettings,
   ): Promise<number | undefined> {
-    if (!settings.challengeId || !settings.submissionApiUrl) {
+    const challengeId = settings.challengeId;
+    const submissionApiUrl = settings.submissionApiUrl;
+    if (!challengeId || !submissionApiUrl) {
       this.logger.warn({
         message:
           'Relative scoring is enabled but challenge context is incomplete. Falling back to direct review upsert.',
-        challengeId: settings.challengeId ?? null,
-        submissionApiUrl: settings.submissionApiUrl ?? null,
+        challengeId: challengeId ?? null,
+        submissionApiUrl: submissionApiUrl ?? null,
         submissionId: payload.submissionId,
         testPhase,
       });
       return undefined;
     }
+    const lockedSettings: Required<RelativeScoringSettings> = {
+      ...settings,
+      challengeId,
+      submissionApiUrl,
+    };
 
+    return this.withRelativeScoringLock(challengeId, testPhase, async () =>
+      this.recomputeRelativeScoring(
+        token,
+        payload,
+        testPhase,
+        fallbackMetadata,
+        fallbackScorecardId,
+        lockedSettings,
+      ),
+    );
+  }
+
+  /**
+   * Runs the relative scoring read-compute-write sequence after the caller has
+   * acquired the challenge/phase lock.
+   * @param token M2M token for submission-api and review-api requests.
+   * @param payload Scorer callback payload for the completed submission.
+   * @param testPhase Normalized scoring phase.
+   * @param fallbackMetadata Metadata built from the callback body.
+   * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
+   * @param settings Relative scoring configuration for the challenge.
+   * @returns The current submission's recomputed aggregate score, or undefined
+   * when relative scoring cannot be applied.
+   * @throws Error when submission-api or review-api calls fail.
+   */
+  private async recomputeRelativeScoring(
+    token: string,
+    payload: ScoringResultCallbackPayload,
+    testPhase: string,
+    fallbackMetadata: Record<string, unknown>,
+    fallbackScorecardId: string | undefined,
+    settings: Required<RelativeScoringSettings>,
+  ): Promise<number | undefined> {
     const submissions = await this.fetchChallengeSubmissions(
       token,
       settings.submissionApiUrl,
       settings.challengeId,
     );
+    const currentSubmissionId = payload.submissionId.trim();
     const currentSubmission = submissions.find(
       (submission) =>
-        this.asString(submission.id) === payload.submissionId.trim(),
+        this.extractSubmissionId(submission) === currentSubmissionId,
     );
-    const currentMemberId = this.asString(currentSubmission?.memberId);
+    const currentMemberKey = currentSubmission
+      ? this.extractSubmissionMemberKey(currentSubmission)
+      : undefined;
 
     const currentReview = this.buildCurrentRelativeReviewRecord({
       payload,
@@ -472,7 +693,7 @@ export class ScoringResultService {
         currentSubmission,
         testPhase,
       ),
-      memberId: currentMemberId,
+      memberKey: currentMemberKey,
       createdAt: this.resolveSubmissionDate(currentSubmission),
       testPhase,
     });
@@ -493,7 +714,7 @@ export class ScoringResultService {
       testPhase,
       payload.reviewTypeId,
       payload.submissionId,
-      currentMemberId,
+      currentMemberKey,
     );
 
     const reviewsToRecompute = [...impactedReviews, currentReview];
@@ -502,23 +723,46 @@ export class ScoringResultService {
       settings.scoreDirection,
     );
 
-    const relativeReviewPayloads = reviewsToRecompute.map((reviewRecord) =>
-      this.buildRelativeReviewPayload(
-        reviewRecord,
-        bestScores,
-        settings.scoreDirection,
-        fallbackScorecardId,
-        testPhase,
-      ),
+    const relativeReviewPayloads =
+      this.sortRelativeReviewPayloadsForLeaderboard(
+        reviewsToRecompute.map((reviewRecord, index) =>
+          this.buildRelativeReviewPayload(
+            reviewRecord,
+            bestScores,
+            settings.scoreDirection,
+            fallbackScorecardId,
+            testPhase,
+            index < impactedReviews.length,
+          ),
+        ),
+      );
+
+    const currentReviewPayload = relativeReviewPayloads.find(
+      (reviewPayload) =>
+        reviewPayload.payload.submissionId === payload.submissionId,
     );
 
-    const currentReviewPayload =
-      relativeReviewPayloads[relativeReviewPayloads.length - 1];
+    if (!currentReviewPayload) {
+      return undefined;
+    }
+
+    await this.completeSystemReviewIfNeeded(
+      token,
+      payload.reviewId,
+      currentReviewPayload.payload.aggregateScore,
+      testPhase,
+      {
+        challengeId: payload.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: payload.submissionId,
+      },
+    );
 
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
       const reviewId = this.asString(reviewPayload.reviewObject.id);
-      const isCurrentReview = index === relativeReviewPayloads.length - 1;
+      const isCurrentReview =
+        reviewPayload.payload.submissionId === payload.submissionId;
 
       if (!reviewId && !isCurrentReview) {
         this.logger.warn({
@@ -539,6 +783,55 @@ export class ScoringResultService {
     }
 
     return currentReviewPayload?.payload.aggregateScore;
+  }
+
+  /**
+   * Serializes relative-score recomputation for one challenge and phase across
+   * API instances sharing the same PostgreSQL database.
+   * @param challengeId Challenge whose relative scores are being recomputed.
+   * @param testPhase Normalized scoring phase.
+   * @param work Async work to run while the transaction-scoped advisory lock is held.
+   * @returns The value returned by the locked work.
+   * @throws Error when the lock transaction or locked work fails.
+   */
+  private async withRelativeScoringLock<T>(
+    challengeId: string,
+    testPhase: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const { classId, objectId } = this.buildRelativeScoringLockIds(
+      challengeId,
+      testPhase,
+    );
+
+    return this.prisma.$transaction(async (prisma) => {
+      await prisma.$queryRaw`
+        SELECT pg_advisory_xact_lock(${classId}::integer, ${objectId}::integer)
+      `;
+      return work();
+    });
+  }
+
+  /**
+   * Builds deterministic PostgreSQL advisory lock identifiers for relative scoring.
+   * @param challengeId Challenge whose score set should be locked.
+   * @param testPhase Scoring phase included so provisional and system callbacks do not block each other.
+   * @returns Two signed 32-bit integers accepted by `pg_advisory_xact_lock`.
+   */
+  private buildRelativeScoringLockIds(
+    challengeId: string,
+    testPhase: string,
+  ): RelativeScoringLockIds {
+    const digest = createHash('sha256')
+      .update(
+        `marathon-match-api-v6:relative-scoring:${challengeId}:${this.normalizeTestPhase(testPhase)}`,
+      )
+      .digest();
+
+    return {
+      classId: digest.readInt32BE(0),
+      objectId: digest.readInt32BE(4),
+    };
   }
 
   /**
@@ -1290,32 +1583,34 @@ export class ScoringResultService {
 
   /**
    * Selects the latest scored submission per member for the requested phase.
+   * Member keys are resolved from all supported submission identity fields so
+   * legacy payloads without top-level `memberId` still collapse to one record.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @param testPhase Requested scoring phase.
+   * @param reviewTypeId Review type identifier to preserve in normalized metadata.
+   * @param excludedSubmissionId Current callback submission ID to skip.
+   * @param excludedMemberKey Current callback member key to skip when present.
+   * @returns Recomputable latest scored review records for other members.
    */
   private selectLatestRelativeReviewRecords(
     submissions: Record<string, unknown>[],
     testPhase: string,
     reviewTypeId: string,
     excludedSubmissionId: string,
-    excludedMemberId?: string,
+    excludedMemberKey?: string,
   ): RelativeReviewRecord[] {
-    const latestByMember = new Map<
-      string,
-      {
-        submissionId: string;
-        memberId?: string;
-        createdAt?: string;
-        reviewObject: Record<string, unknown>;
-      }
-    >();
+    const latestByMember = new Map<string, LatestRelativeReviewCandidate>();
+    const normalizedExcludedSubmissionId = excludedSubmissionId.trim();
 
-    for (const submission of submissions) {
-      const submissionId = this.asString(submission.id);
-      if (!submissionId || submissionId === excludedSubmissionId) {
+    for (const [sequence, submission] of submissions.entries()) {
+      const submissionId = this.extractSubmissionId(submission);
+      if (!submissionId || submissionId === normalizedExcludedSubmissionId) {
         continue;
       }
 
-      const memberId = this.asString(submission.memberId);
-      if (excludedMemberId && memberId === excludedMemberId) {
+      const rawMemberKey = this.extractSubmissionMemberKey(submission);
+      const memberKey = rawMemberKey ?? `submission:${submissionId}`;
+      if (excludedMemberKey && rawMemberKey === excludedMemberKey) {
         continue;
       }
 
@@ -1324,35 +1619,63 @@ export class ScoringResultService {
         continue;
       }
 
-      const key = memberId ?? `submission:${submissionId}`;
-      const createdAt = this.resolveSubmissionDate(submission);
-      const existing = latestByMember.get(key);
+      const memberIdentity = this.extractSubmissionMemberIdentity(submission);
+      const candidate: LatestRelativeReviewCandidate = {
+        submission,
+        submissionId,
+        memberKey,
+        memberId: memberIdentity.memberId,
+        submittedDate: this.resolveSubmissionDate(submission),
+        isLatest:
+          this.parseBooleanFlag(submission.isLatest) ??
+          this.parseBooleanFlag(submission.latest) ??
+          undefined,
+        sequence,
+        reviewObject,
+      };
+      const existing = latestByMember.get(memberKey);
 
       if (
         !existing ||
-        this.compareIsoDateStrings(createdAt, existing.createdAt) >= 0
+        this.compareRelativeReviewCandidates(candidate, existing) > 0
       ) {
-        latestByMember.set(key, {
-          submissionId,
-          memberId,
-          createdAt,
-          reviewObject,
-        });
+        latestByMember.set(memberKey, candidate);
       }
     }
 
     return Array.from(latestByMember.values())
-      .map((entry) =>
+      .map((candidate) =>
         this.buildRelativeReviewRecord({
-          createdAt: entry.createdAt,
-          memberId: entry.memberId,
-          reviewObject: entry.reviewObject,
+          createdAt: candidate.submittedDate,
+          memberKey: candidate.memberKey,
+          reviewObject: candidate.reviewObject,
           reviewTypeId,
-          submissionId: entry.submissionId,
+          submissionId: candidate.submissionId,
           testPhase,
         }),
       )
       .filter((entry): entry is RelativeReviewRecord => entry !== null);
+  }
+
+  /**
+   * Compares scored relative-review candidates for per-member latest selection.
+   * `isLatest=true` is authoritative when present; otherwise timestamp and
+   * response order decide the winner.
+   * @param left Candidate being evaluated.
+   * @param right Current selected candidate.
+   * @returns Positive when left should replace right, negative when right wins.
+   */
+  private compareRelativeReviewCandidates(
+    left: LatestRelativeReviewCandidate,
+    right: LatestRelativeReviewCandidate,
+  ): number {
+    const leftIsLatest = left.isLatest === true;
+    const rightIsLatest = right.isLatest === true;
+    if (leftIsLatest !== rightIsLatest) {
+      return leftIsLatest ? 1 : -1;
+    }
+
+    return this.compareSubmissionCandidates(left, right);
   }
 
   /**
@@ -1363,7 +1686,7 @@ export class ScoringResultService {
     fallbackMetadata: Record<string, unknown>;
     fallbackScorecardId?: string;
     existingReviewObject: Record<string, unknown> | null;
-    memberId?: string;
+    memberKey?: string;
     createdAt?: string;
     testPhase: string;
   }): RelativeReviewRecord | null {
@@ -1400,7 +1723,7 @@ export class ScoringResultService {
 
     return this.buildRelativeReviewRecord({
       createdAt: args.createdAt,
-      memberId: args.memberId,
+      memberKey: args.memberKey,
       reviewObject: mergedReviewObject,
       reviewTypeId: args.payload.reviewTypeId,
       submissionId: args.payload.submissionId,
@@ -1413,7 +1736,7 @@ export class ScoringResultService {
    */
   private buildRelativeReviewRecord(args: {
     createdAt?: string;
-    memberId?: string;
+    memberKey?: string;
     reviewObject: Record<string, unknown>;
     reviewTypeId: string;
     submissionId: string;
@@ -1433,7 +1756,7 @@ export class ScoringResultService {
 
     return {
       submissionId: args.submissionId,
-      memberId: args.memberId,
+      memberKey: args.memberKey,
       createdAt: args.createdAt,
       reviewObject: {
         ...reviewObject,
@@ -1447,6 +1770,8 @@ export class ScoringResultService {
 
   /**
    * Calculates the best raw testcase score currently achieved for each seed.
+   * Error scores, negative sentinel scores, and MINIMIZE zero scores are excluded
+   * so invalid/no-credit results cannot become normalization baselines.
    */
   private computeBestScores(
     reviewRecords: RelativeReviewRecord[],
@@ -1456,7 +1781,11 @@ export class ScoringResultService {
 
     for (const reviewRecord of reviewRecords) {
       for (const testScore of reviewRecord.rawTestScores) {
-        if (testScore.score < 0) {
+        if (
+          testScore.score < 0 ||
+          testScore.error ||
+          (scoreDirection === ScoreDirection.MINIMIZE && testScore.score === 0)
+        ) {
           continue;
         }
 
@@ -1489,10 +1818,8 @@ export class ScoringResultService {
     scoreDirection: ScoreDirection,
     fallbackScorecardId: string | undefined,
     testPhase: string,
-  ): {
-    reviewObject: Record<string, unknown>;
-    payload: ReviewSummationPayload;
-  } {
+    preserveReviewedDate = false,
+  ): RelativeReviewPayload {
     let totalTests = 0;
     let failedTests = 0;
     let aggregateScore = 0;
@@ -1505,6 +1832,7 @@ export class ScoringResultService {
       const relativeScore = this.calculateRelativeScore(
         rawTestScore.score,
         bestScore,
+        scoreDirection,
       );
 
       if (rawTestScore.score < 0 || rawTestScore.error) {
@@ -1573,6 +1901,7 @@ export class ScoringResultService {
         score: aggregateScore,
         scorecardId,
         metadata,
+        preserveReviewedDate,
         reviewObject,
         testPhase,
       }),
@@ -1580,18 +1909,45 @@ export class ScoringResultService {
   }
 
   /**
+   * Orders recomputed relative review summation writes to match leaderboard order.
+   * Review API assigns provisional/final rank values from the persisted update
+   * sequence, so passing higher aggregate scores must be written before lower
+   * or failed results.
+   * @param reviewPayloads Recomputed relative review summation payloads.
+   * @returns A new payload list sorted by leaderboard position.
+   */
+  private sortRelativeReviewPayloadsForLeaderboard(
+    reviewPayloads: RelativeReviewPayload[],
+  ): RelativeReviewPayload[] {
+    return [...reviewPayloads].sort((left, right) => {
+      if (left.payload.isPassing !== right.payload.isPassing) {
+        return left.payload.isPassing ? -1 : 1;
+      }
+
+      return right.payload.aggregateScore - left.payload.aggregateScore;
+    });
+  }
+
+  /**
    * Converts one raw testcase score into its 0..100 relative score.
-   * Zero raw or best scores receive no relative credit, including a 0-to-0 tie.
+   * Zero best scores are guarded explicitly to avoid NaN/Infinity.
    */
   private calculateRelativeScore(
     rawScore: number,
     bestScore: number | undefined,
+    scoreDirection: ScoreDirection,
   ): number {
     if (rawScore < 0 || bestScore === undefined) {
       return 0;
     }
 
-    if (bestScore === 0 || rawScore === 0) {
+    if (bestScore === 0) {
+      return rawScore === 0 && scoreDirection === ScoreDirection.MINIMIZE
+        ? 100
+        : 0;
+    }
+
+    if (rawScore === 0) {
       return 0;
     }
 
@@ -1620,15 +1976,28 @@ export class ScoringResultService {
       const entry = this.asRecord(rawEntry);
       const testcase = this.asString(entry.testcase);
       const score = this.toNumber(entry.score);
+      const error = this.asString(entry.error);
+      const hasScore = Object.prototype.hasOwnProperty.call(entry, 'score');
 
-      if (!testcase || score === null) {
+      if (!testcase || (!hasScore && score === null)) {
+        continue;
+      }
+
+      if (score === null || score > MAX_REVIEW_SCORE) {
+        result.push({
+          testcase,
+          score: -1,
+          error:
+            error ??
+            `Invalid score value suppressed; scores must be finite and no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+        });
         continue;
       }
 
       result.push({
         testcase,
         score,
-        error: this.asString(entry.error),
+        error,
       });
     }
 
@@ -1714,7 +2083,12 @@ export class ScoringResultService {
   private buildSummationPayload(
     input: SummationBuildInput,
   ): ReviewSummationPayload {
+    this.validateReviewScore(input.score, 'Review summation score');
+
     const metadata = this.asRecord(input.metadata);
+    const existingReviewedDate = input.preserveReviewedDate
+      ? this.asString(input.reviewObject?.reviewedDate)
+      : undefined;
 
     const normalizedTestType = this.normalizeTestPhase(
       this.coalesceString(this.asString(metadata.testType), input.testPhase),
@@ -1747,7 +2121,7 @@ export class ScoringResultService {
         input.score >= 0 &&
         testStatus !== ScoringTestStatus.InProgress &&
         testStatus !== ScoringTestStatus.Failed,
-      reviewedDate: new Date().toISOString(),
+      reviewedDate: existingReviewedDate ?? new Date().toISOString(),
       ...(input.scorecardId ? { scorecardId: input.scorecardId } : {}),
       ...(shouldSetFinal ? { isFinal: true } : {}),
       ...(shouldSetProvisional ? { isProvisional: true } : {}),
@@ -1935,6 +2309,18 @@ export class ScoringResultService {
         sanitizedEntry[key] = value;
       }
 
+      const score = this.toNumber(entry.score);
+      if (
+        Object.prototype.hasOwnProperty.call(entry, 'score') &&
+        (score === null || score > MAX_REVIEW_SCORE)
+      ) {
+        sanitizedEntry.score = -1;
+        sanitizedEntry.error = this.coalesceString(
+          this.asString(sanitizedEntry.error),
+          `Invalid score value suppressed; scores must be finite and no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+        );
+      }
+
       sanitizedEntry.testcase = String(index + 1);
       return sanitizedEntry;
     });
@@ -2070,6 +2456,15 @@ export class ScoringResultService {
       testStatus: progress.status,
       testProgressDetails: details,
     };
+  }
+
+  /**
+   * Chooses a neutral placeholder score for active progress updates.
+   * @param status Runner progress status being persisted.
+   * @returns `-1` only for explicit failed progress; otherwise `0` until the final callback writes the real score.
+   */
+  private progressPlaceholderScore(status: ScoringTestStatus): number {
+    return status === ScoringTestStatus.Failed ? -1 : 0;
   }
 
   /**
@@ -2247,7 +2642,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Completes the originating review record after SYSTEM scoring has been persisted.
+   * Completes the originating review record before final SYSTEM summations are persisted.
    */
   private async completeSystemReviewIfNeeded(
     token: string,
@@ -2616,7 +3011,12 @@ export class ScoringResultService {
       const entry = this.asRecord(testScore);
       const score = this.toNumber(entry.score);
       const error = this.asString(entry.error);
-      if ((score !== null && score < 0) || error) {
+      const hasScore = Object.prototype.hasOwnProperty.call(entry, 'score');
+      if (
+        (hasScore && score === null) ||
+        (score !== null && (score < 0 || score > MAX_REVIEW_SCORE)) ||
+        error
+      ) {
         failedTests += 1;
       }
     }
@@ -2690,6 +3090,29 @@ export class ScoringResultService {
     }
 
     return null;
+  }
+
+  /**
+   * Ensures review scores can be safely persisted in review-api summations.
+   * Negative values remain valid because the scorer uses them as failed-test
+   * sentinels; non-finite values and values above Java Long.MAX_VALUE are rejected.
+   * @param score Score value received from the runner or legacy review payload.
+   * @param label Human-readable score context for error messages.
+   * @throws BadRequestException when the score is non-numeric, non-finite, or too large.
+   */
+  private validateReviewScore(
+    score: unknown,
+    label: string,
+  ): asserts score is number {
+    if (
+      typeof score !== 'number' ||
+      !Number.isFinite(score) ||
+      score > MAX_REVIEW_SCORE
+    ) {
+      throw new BadRequestException(
+        `${label} must be a finite number no greater than ${MAX_REVIEW_SCORE_LABEL}.`,
+      );
+    }
   }
 
   /**

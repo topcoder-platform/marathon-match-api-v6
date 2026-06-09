@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.management.ManagementFactory;
@@ -21,12 +22,25 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -63,7 +78,12 @@ public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int HTTP_BODY_PREVIEW_LIMIT = 8000;
     private static final int ARTIFACT_LOG_PREVIEW_LIMIT = 120000;
+    private static final int STREAM_COPY_BUFFER_SIZE = 8192;
     private static final int CHILD_OUTPUT_TAIL_LIMIT = 4000;
+    private static final long DEFAULT_MAX_OUTPUT_BYTES = 10_000_000L;
+    private static final String MAX_OUTPUT_BYTES_PROPERTY = "mm.runner.maxOutputBytes";
+    private static final String MAX_OUTPUT_BYTES_ENV = "MM_RUNNER_MAX_OUTPUT_BYTES";
+    private static final long MAX_OUTPUT_BYTES = resolveMaxOutputBytes();
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final long TOKEN_REFRESH_SKEW_SECONDS = 60L;
     private static final String ISOLATED_TESTER_CHILD_MODE = "--isolated-tester-run";
@@ -75,13 +95,27 @@ public class EcsRunnerMain {
         "/usr/local/bin/mm-runner-isolate";
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
+    private static final String RUNNER_EXECUTION_USER = "runner";
+    private static final String RUNNER_EXECUTION_GROUP = "runner";
     private static final String SCORER_EXECUTION_USER = "scorer";
+    private static final List<String> SCORER_WRITABLE_STATE_DIRS = Arrays.asList(
+        "/tmp",
+        "/var/tmp",
+        "/dev/shm",
+        "/home/scorer"
+    );
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final String JAVA_SUBMISSION_RELEASE = "11";
+    private static final String CXX_MARCH_FLAG = "-march=x86-64";
+    private static final String CXX_MTUNE_FLAG = "-mtune=generic";
+    private static final double FAILED_TEST_SCORE = -1.0;
+    private static final double MAX_SCORE_VALUE = Long.MAX_VALUE;
+    private static final String MAX_SCORE_VALUE_LABEL = Long.toString(Long.MAX_VALUE);
     private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
         ".cpp",
         ".java",
@@ -91,6 +125,10 @@ public class EcsRunnerMain {
         ".cs_net7",
         ".rs"
     );
+    private static final String SUPPORTED_SOURCE_EXTENSIONS_TEXT =
+        String.join(", ", SUPPORTED_SOURCE_EXTENSIONS);
+    private static final String NO_SUPPORTED_SOURCE_ERROR =
+        "No supported source file found.";
     private static final Pattern JAVA_PACKAGE_PATTERN = Pattern.compile(
         "(?m)^\\s*package\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)\\s*;"
     );
@@ -100,6 +138,22 @@ public class EcsRunnerMain {
     private static final Pattern JAVA_CLASS_PATTERN = Pattern.compile(
         "\\bclass\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b"
     );
+    private static final String JAVA_STARTUP_CHECK_CLASS_NAME =
+        "com.topcoder.runner.startupcheck.JavaStartupCheck";
+    private static final String JAVA_STARTUP_CHECK_SOURCE =
+        "package com.topcoder.runner.startupcheck;\n"
+            + "\n"
+            + "public final class JavaStartupCheck {\n"
+            + "    private JavaStartupCheck() {\n"
+            + "    }\n"
+            + "\n"
+            + "    public static void main(String[] args) throws Exception {\n"
+            + "        if (args.length != 1 || args[0].trim().isEmpty()) {\n"
+            + "            throw new IllegalArgumentException(\"Submitted class name is required.\");\n"
+            + "        }\n"
+            + "        Class.forName(args[0], true, Thread.currentThread().getContextClassLoader());\n"
+            + "    }\n"
+            + "}\n";
     private static final Pattern MEMBER_ARTIFACT_JSON_SEED_PATTERN = Pattern.compile(
         "(?i)(\"(?:seed|startSeed|endSeed|phaseStartSeed)\"\\s*:\\s*\"?)\\d+(\"?)"
     );
@@ -112,6 +166,8 @@ public class EcsRunnerMain {
     private static final Pattern MEMBER_ARTIFACT_TEST_CASE_SEED_PATTERN = Pattern.compile(
         "(?i)(\\btest\\s*case\\s*#)\\d+"
     );
+    private static final ThreadLocal<List<Path>> DEFERRED_ISOLATED_CLEANUP_PATHS =
+        new ThreadLocal<List<Path>>();
 
     private static String logChallengeId = "<unset>";
     private static String logSubmissionId = "<unset>";
@@ -180,6 +236,7 @@ public class EcsRunnerMain {
                     + ", phaseNumberOfTests="
                     + phaseNumberOfTests
             );
+            requireTrustedRunnerProcess();
 
             if (debugLogAccessToken) {
                 logAccessTokenDebug(accessToken);
@@ -483,6 +540,8 @@ public class EcsRunnerMain {
      * result back to the trusted parent process over stdout.
      */
     private static int runIsolatedTesterChild(String[] args) {
+        List<Path> deferredCleanupPaths = new ArrayList<Path>();
+        DEFERRED_ISOLATED_CLEANUP_PATHS.set(deferredCleanupPaths);
         try {
             if (args.length != 8) {
                 throw new IllegalArgumentException(
@@ -504,9 +563,8 @@ public class EcsRunnerMain {
                 "Running isolated tester child for testerClass=" + testerClassName
             );
 
-            ScorerConfig scorerConfig = OBJECT_MAPPER.readValue(
-                scorerConfigPath.toFile(),
-                ScorerConfig.class
+            ScorerConfig scorerConfig = loadAndDeleteIsolatedScorerConfig(
+                scorerConfigPath
             );
             logScorerConfig(scorerConfig);
 
@@ -531,7 +589,32 @@ public class EcsRunnerMain {
                 error
             );
             return 1;
+        } finally {
+            cleanupDeferredIsolatedChildPaths(deferredCleanupPaths);
+            DEFERRED_ISOLATED_CLEANUP_PATHS.remove();
         }
+    }
+
+    /**
+     * Loads the short-lived scorer config handoff file and removes it before any
+     * tester or submitted solution code can execute.
+     *
+     * @param scorerConfigPath Runner-owned scorer config file written by the parent runner.
+     * @return Parsed scorer configuration for the isolated child JVM.
+     * @throws IOException When the config cannot be read or deleted.
+     */
+    private static ScorerConfig loadAndDeleteIsolatedScorerConfig(Path scorerConfigPath)
+        throws IOException {
+        ScorerConfig scorerConfig = OBJECT_MAPPER.readValue(
+            scorerConfigPath.toFile(),
+            ScorerConfig.class
+        );
+        Files.delete(scorerConfigPath);
+        logInfo(
+            "tester.isolated",
+            "Deleted isolated scorer config before tester execution."
+        );
+        return scorerConfig;
     }
 
     /**
@@ -546,6 +629,7 @@ public class EcsRunnerMain {
         if (submissionDir == null || !Files.isDirectory(submissionDir)) {
             throw new IOException("Submission directory is not available: " + submissionDir);
         }
+        grantRunnerWorkspaceAccess(submissionDir);
         secureRunnerOnlyFile(testerJarPath);
     }
 
@@ -590,6 +674,7 @@ public class EcsRunnerMain {
             );
 
             Path artifactsDir = ensureArtifactsDir(submissionDir);
+            grantRunnerWorkspaceAccess(artifactsDir);
             Path executionLogPath = artifactsDir.resolve(
                 "execution-" + submissionId + ".log"
             );
@@ -903,6 +988,7 @@ public class EcsRunnerMain {
         command.add(RUNNER_ISOLATION_WRAPPER_PATH);
         command.add(getCurrentJavaBinaryPath());
         command.addAll(getIsolatedChildJvmArguments());
+        command.add("-D" + MAX_OUTPUT_BYTES_PROPERTY + "=" + MAX_OUTPUT_BYTES);
         command.add("-cp");
         command.add(getCurrentRunnerArtifactPath().toString());
         command.add(EcsRunnerMain.class.getName());
@@ -967,11 +1053,10 @@ public class EcsRunnerMain {
     /**
      * Fails fast when the trusted parent process is not running as root.
      *
-     * <p>The runner helper installs socket restrictions for the child JVM. The
-     * child then invokes the scorer helper to drop generic submitted solution
-     * commands to the unprivileged {@code scorer} user. Starting the trusted
-     * parent as root avoids relying on nested setuid behavior after
-     * {@code no_new_privs} has been enabled for the child JVM.
+     * <p>The trusted parent owns bootstrap, artifact upload, and filesystem
+     * preparation. The child JVM runs as the unprivileged {@code runner} user,
+     * and generic submitted solution commands run as the separate
+     * unprivileged {@code scorer} user.
      *
      * @throws IllegalStateException When the runner process is not root.
      */
@@ -988,28 +1073,36 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Restricts a sensitive root-owned file to the trusted Java runner process.
+     * Restricts a sensitive file to read-only access by the isolated Java runner user.
      *
      * <p>This is used for downloaded tester JARs and serialized scorer config.
-     * The submitted solution process runs as {@code scorer}, so owner-only
-     * permissions prevent shell probes from reading those files even when they
-     * can guess the path.
+     * The submitted solution process runs as {@code scorer}, so runner-owned
+     * read-only permissions prevent shell probes from reading or modifying
+     * those files even when they can guess the path.
      *
      * @param path Sensitive regular file to restrict.
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
     private static void secureRunnerOnlyFile(Path path) throws IOException {
+        setRunnerOnlyPermissions(path);
+    }
+
+    /**
+     * Applies runner-owned POSIX permissions to a sensitive runner file.
+     *
+     * @param path Sensitive regular file to restrict.
+     * @throws IOException When permissions cannot be applied on POSIX filesystems.
+     */
+    private static void setRunnerOnlyPermissions(Path path) throws IOException {
         if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
 
         try {
+            setRunnerOwnerAndGroup(path);
             Files.setPosixFilePermissions(
                 path,
-                EnumSet.of(
-                    PosixFilePermission.OWNER_READ,
-                    PosixFilePermission.OWNER_WRITE
-                )
+                EnumSet.of(PosixFilePermission.OWNER_READ)
             );
         } catch (UnsupportedOperationException ignored) {
             logWarn(
@@ -1017,6 +1110,99 @@ public class EcsRunnerMain {
                 "POSIX permissions are not supported for " + path
             );
         }
+    }
+
+    /**
+     * Makes a runner workspace writable by the isolated tester JVM without
+     * granting the lower-privilege scorer user direct access to runner-only files.
+     *
+     * @param path Workspace directory or file prepared by the trusted parent.
+     * @throws IOException When walking the workspace fails.
+     */
+    private static void grantRunnerWorkspaceAccess(Path path) throws IOException {
+        if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+
+        try (java.util.stream.Stream<Path> stream = Files.walk(path)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                applyRunnerWorkspacePermissions(iterator.next());
+            }
+        }
+    }
+
+    /**
+     * Applies runner ownership and owner-only permissions to one workspace entry.
+     *
+     * @param path Workspace entry to update.
+     */
+    private static void applyRunnerWorkspacePermissions(Path path) {
+        try {
+            setRunnerOwnerAndGroup(path);
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.OWNER_EXECUTE
+                    )
+                );
+            } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                Files.setPosixFilePermissions(
+                    path,
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE
+                    )
+                );
+            }
+        } catch (UnsupportedOperationException ignored) {
+            logWarn(
+                "filesystem.permissions",
+                "POSIX ownership or permissions are not supported for " + path
+            );
+        } catch (IOException error) {
+            throw new RuntimeException(
+                "Failed to update runner permissions for "
+                    + path
+                    + ": "
+                    + error.getMessage(),
+                error
+            );
+        }
+    }
+
+    /**
+     * Changes one path to the isolated runner user and group.
+     *
+     * @param path File or directory to chown without following symlinks.
+     * @throws IOException When ownership cannot be applied.
+     */
+    private static void setRunnerOwnerAndGroup(Path path) throws IOException {
+        PosixFileAttributeView view = Files.getFileAttributeView(
+            path,
+            PosixFileAttributeView.class,
+            LinkOption.NOFOLLOW_LINKS
+        );
+        if (view == null) {
+            throw new UnsupportedOperationException(
+                "POSIX attributes are not available for " + path
+            );
+        }
+
+        UserPrincipalLookupService lookupService = path
+            .getFileSystem()
+            .getUserPrincipalLookupService();
+        UserPrincipal runnerUser = lookupService.lookupPrincipalByName(
+            RUNNER_EXECUTION_USER
+        );
+        GroupPrincipal runnerGroup = lookupService.lookupPrincipalByGroupName(
+            RUNNER_EXECUTION_GROUP
+        );
+        view.setOwner(runnerUser);
+        view.setGroup(runnerGroup);
     }
 
     /**
@@ -1098,15 +1284,27 @@ public class EcsRunnerMain {
      * that survive until the isolated child JVM exits.
      */
     private static void killLingeringIsolatedProcesses() {
+        killLingeringIsolatedProcesses(false);
+    }
+
+    /**
+     * Cleans up scorer-owned processes after isolated execution.
+     *
+     * @param quietWhenNone Suppresses the normal "none found" log for per-test cleanup.
+     * @return {@code true} when at least one lingering scorer process was killed.
+     */
+    private static boolean killLingeringIsolatedProcesses(boolean quietWhenNone) {
         if (!"root".equals(System.getProperty("user.name", ""))) {
-            logInfo(
-                "tester.isolated",
-                "Skipping scorer process cleanup from non-root runner. User="
-                    + System.getProperty("user.name", "")
-                    + ", target="
-                    + SCORER_EXECUTION_USER
-            );
-            return;
+            if (!quietWhenNone) {
+                logInfo(
+                    "tester.isolated",
+                    "Skipping scorer process cleanup from non-root runner. User="
+                        + System.getProperty("user.name", "")
+                        + ", target="
+                        + SCORER_EXECUTION_USER
+                );
+            }
+            return false;
         }
 
         try {
@@ -1132,17 +1330,19 @@ public class EcsRunnerMain {
                         + SCORER_EXECUTION_USER
                         + "."
                 );
-                return;
+                return true;
             }
 
             if (exitCode == 1) {
-                logInfo(
-                    "tester.isolated",
-                    "No lingering processes found for user "
-                        + SCORER_EXECUTION_USER
-                        + "."
-                );
-                return;
+                if (!quietWhenNone) {
+                    logInfo(
+                        "tester.isolated",
+                        "No lingering processes found for user "
+                            + SCORER_EXECUTION_USER
+                            + "."
+                    );
+                }
+                return false;
             }
 
             logWarn(
@@ -1158,6 +1358,167 @@ public class EcsRunnerMain {
                     + error.getMessage()
             );
         }
+        return false;
+    }
+
+    /**
+     * Removes untrusted scorer process and filesystem state around one seed execution.
+     *
+     * <p>Standard Marathon testers run each seed as a separate submitted solution process, but
+     * those processes share container filesystem locations such as {@code /tmp}. Resetting
+     * scorer-owned writable entries before and after every seed prevents a submission from
+     * passing information to later seeds through files it created.
+     *
+     * @param boundary Text describing whether cleanup is running before or after the test case.
+     * @param testCaseNumber Member-visible ordinal for the seed being isolated.
+     */
+    private static void resetScorerWritableStateForTestCase(
+        String boundary,
+        int testCaseNumber
+    ) {
+        killLingeringIsolatedProcesses(true);
+        int deletedEntries = deleteScorerOwnedWritableStateEntries();
+        if (deletedEntries > 0) {
+            logInfo(
+                "tester.tmp-isolation",
+                "Deleted "
+                    + deletedEntries
+                    + " scorer-owned writable entries "
+                    + boundary
+                    + " testCase="
+                    + testCaseNumber
+            );
+        }
+    }
+
+    /**
+     * Deletes top-level entries owned by the low-privilege scorer user from writable locations.
+     *
+     * <p>Trusted runner files are not owned by the scorer user and are not removed. Each selected
+     * entry is deleted with symlink-safe traversal so a malicious submission cannot redirect
+     * cleanup outside the selected writable directory.
+     *
+     * @return Number of top-level scorer-owned entries deleted.
+     */
+    private static int deleteScorerOwnedWritableStateEntries() {
+        int deletedEntries = 0;
+        for (String directory : SCORER_WRITABLE_STATE_DIRS) {
+            deletedEntries += deleteScorerOwnedDirectoryEntries(Paths.get(directory));
+        }
+        return deletedEntries;
+    }
+
+    /**
+     * Deletes top-level entries owned by scorer under one writable directory.
+     *
+     * @param directory Writable directory to reset.
+     * @return Number of top-level scorer-owned entries deleted.
+     */
+    private static int deleteScorerOwnedDirectoryEntries(Path directory) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return 0;
+        }
+
+        int deletedEntries = 0;
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+            for (Path entry : stream) {
+                if (!isScorerOwnedPath(entry)) {
+                    continue;
+                }
+
+                try {
+                    deleteUntrustedPathRecursively(entry);
+                    deletedEntries += 1;
+                } catch (NoSuchFileException ignored) {
+                    // Entry disappeared between listing and deletion.
+                } catch (IOException cleanupError) {
+                    logWarn(
+                        "tester.tmp-isolation",
+                        "Failed to delete scorer-owned entry "
+                            + entry
+                            + ": "
+                            + cleanupError.getMessage()
+                    );
+                }
+            }
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Failed to list scorer-owned entries under "
+                    + directory
+                    + ": "
+                    + error.getMessage()
+            );
+        }
+
+        return deletedEntries;
+    }
+
+    /**
+     * Checks ownership without following symlinks.
+     *
+     * @param path Candidate writable-state entry.
+     * @return {@code true} when the entry is owned by the scorer user.
+     */
+    private static boolean isScorerOwnedPath(Path path) {
+        try {
+            return SCORER_EXECUTION_USER.equals(
+                Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName()
+            );
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Unable to read owner for writable entry "
+                    + path
+                    + ": "
+                    + error.getMessage()
+            );
+            return false;
+        }
+    }
+
+    /**
+     * Deletes an untrusted path tree without following symbolic links.
+     *
+     * @param path Top-level scorer-owned writable-state entry to remove.
+     * @throws IOException When deletion fails.
+     */
+    private static void deleteUntrustedPathRecursively(Path path) throws IOException {
+        Files.walkFileTree(
+            path,
+            new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(
+                    Path file,
+                    BasicFileAttributes attributes
+                ) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(
+                    Path directory,
+                    IOException error
+                ) throws IOException {
+                    if (error != null) {
+                        throw error;
+                    }
+
+                    Files.deleteIfExists(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(
+                    Path file,
+                    IOException error
+                ) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+            }
+        );
     }
 
     /**
@@ -1423,7 +1784,7 @@ public class EcsRunnerMain {
         String description
     ) {
         Path artifactPath = findArtifactFile(submissionDir, relativePath);
-        if (artifactPath == null || !Files.isRegularFile(artifactPath)) {
+        if (artifactPath == null || !isNonSymlinkRegularFile(artifactPath)) {
             logInfo(
                 "artifacts.preview",
                 "No " + description + " file found at artifacts/" + relativePath
@@ -1432,14 +1793,15 @@ public class EcsRunnerMain {
         }
 
         try {
-            String content = new String(Files.readAllBytes(artifactPath), StandardCharsets.UTF_8);
+            byte[] contentBytes = readRegularFileBytesNoFollow(artifactPath);
+            String content = new String(contentBytes, StandardCharsets.UTF_8);
             logInfo(
                 "artifacts.preview",
                 description
                     + " path="
                     + artifactPath
                     + ", sizeBytes="
-                    + Files.size(artifactPath)
+                    + contentBytes.length
                     + ", content=\n"
                     + truncate(content, ARTIFACT_LOG_PREVIEW_LIMIT)
             );
@@ -1576,6 +1938,103 @@ public class EcsRunnerMain {
 
         String trimmed = value.trim();
         return trimmed.isEmpty() ? defaultValue : trimmed;
+    }
+
+    /**
+     * Resolves the maximum output bytes accepted by the runner.
+     *
+     * <p>The JVM property is checked first so the trusted parent can pass the
+     * same limit into the scrubbed isolated child. The environment variable is
+     * kept for ECS task configuration without requiring custom Java options.
+     *
+     * @return Positive byte limit for generated output and artifact content.
+     */
+    private static long resolveMaxOutputBytes() {
+        String configured = System.getProperty(MAX_OUTPUT_BYTES_PROPERTY);
+        if (configured == null || configured.trim().isEmpty()) {
+            configured = System.getenv(MAX_OUTPUT_BYTES_ENV);
+        }
+
+        if (configured == null || configured.trim().isEmpty()) {
+            return DEFAULT_MAX_OUTPUT_BYTES;
+        }
+
+        try {
+            long parsed = Long.parseLong(configured.trim());
+            return parsed > 0L ? parsed : DEFAULT_MAX_OUTPUT_BYTES;
+        } catch (NumberFormatException ignored) {
+            return DEFAULT_MAX_OUTPUT_BYTES;
+        }
+    }
+
+    /**
+     * Appends generated public output while enforcing the configured byte cap.
+     *
+     * @param target Destination buffer for {@code output.txt}.
+     * @param value Text to append.
+     * @param currentBytes UTF-8 bytes already appended.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated UTF-8 byte count after appending.
+     */
+    private static long appendLimitedOutput(
+        StringBuilder target,
+        String value,
+        long currentBytes,
+        String outputName
+    ) {
+        if (value == null || value.isEmpty()) {
+            return currentBytes;
+        }
+
+        long nextBytes = addOutputBytesWithLimit(
+            currentBytes,
+            value.getBytes(StandardCharsets.UTF_8).length,
+            outputName
+        );
+        target.append(value);
+        return nextBytes;
+    }
+
+    /**
+     * Adds output bytes to a running total and fails when the cap is exceeded.
+     *
+     * @param currentBytes Current byte total.
+     * @param additionalBytes Bytes being added.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated byte total.
+     */
+    private static long addOutputBytesWithLimit(
+        long currentBytes,
+        long additionalBytes,
+        String outputName
+    ) {
+        long nextBytes = Long.MAX_VALUE - currentBytes < additionalBytes
+            ? Long.MAX_VALUE
+            : currentBytes + additionalBytes;
+        enforceOutputByteLimit(nextBytes, outputName);
+        return nextBytes;
+    }
+
+    /**
+     * Fails the runner when generated output or artifacts exceed the configured limit.
+     *
+     * @param sizeBytes Output size in bytes.
+     * @param outputName Human-readable output label for errors.
+     */
+    private static void enforceOutputByteLimit(long sizeBytes, String outputName) {
+        if (sizeBytes <= MAX_OUTPUT_BYTES) {
+            return;
+        }
+
+        throw new RuntimeException(
+            "Output size limit exceeded for "
+                + outputName
+                + ": "
+                + sizeBytes
+                + " bytes exceeds maximum "
+                + MAX_OUTPUT_BYTES
+                + " bytes."
+        );
     }
 
     /**
@@ -2474,7 +2933,8 @@ public class EcsRunnerMain {
 
     /**
      * Writes the private review payload consumed by internal Marathon Match tooling.
-     * Existing non-empty tester-provided {@code reviews.json} files are preserved.
+     * Any existing {@code reviews.json} path is replaced with the trusted parent
+     * payload because this filename is reserved for canonical internal reviews.
      *
      * @param submissionDir Extracted submission directory or workspace root.
      * @param submissionId Submission whose review payload is being archived.
@@ -2496,13 +2956,6 @@ public class EcsRunnerMain {
     ) throws IOException {
         Path privateArtifactsDir = ensurePrivateArtifactsDir(submissionDir);
         Path reviewsJsonPath = privateArtifactsDir.resolve("reviews.json");
-        if (Files.isRegularFile(reviewsJsonPath) && Files.size(reviewsJsonPath) > 0L) {
-            logInfo(
-                "artifacts.internal-review",
-                "Preserving tester-provided internal reviews artifact " + reviewsJsonPath
-            );
-            return;
-        }
 
         Map<String, Object> payload = buildInternalReviewArtifactPayload(
             submissionId,
@@ -2513,13 +2966,74 @@ public class EcsRunnerMain {
             callbackMetadata
         );
 
-        OBJECT_MAPPER
-            .writerWithDefaultPrettyPrinter()
-            .writeValue(reviewsJsonPath.toFile(), payload);
+        Path tempReviewsJsonPath = Files.createTempFile(
+            privateArtifactsDir,
+            ".reviews-",
+            ".json"
+        );
+        try {
+            OBJECT_MAPPER
+                .writerWithDefaultPrettyPrinter()
+                .writeValue(tempReviewsJsonPath.toFile(), payload);
+            replaceReservedInternalReviewArtifact(tempReviewsJsonPath, reviewsJsonPath);
+        } finally {
+            Files.deleteIfExists(tempReviewsJsonPath);
+        }
+
         logInfo(
             "artifacts.internal-review",
             "Wrote internal reviews artifact " + reviewsJsonPath
         );
+    }
+
+    /**
+     * Replaces the reserved internal reviews artifact with the trusted payload.
+     *
+     * <p>Submitted code can write inside {@code artifacts/private}, so the parent
+     * must not append to or preserve an existing path at this reserved filename.
+     * Symlinks are replaced by the move operation, and real directories are
+     * removed without following nested symlinks before the final replace.
+     *
+     * @param sourcePath Parent-created temporary file containing canonical JSON.
+     * @param targetPath Reserved {@code reviews.json} artifact path.
+     * @throws IOException when an existing reserved path cannot be removed or replaced.
+     */
+    private static void replaceReservedInternalReviewArtifact(
+        Path sourcePath,
+        Path targetPath
+    ) throws IOException {
+        if (Files.isDirectory(targetPath, LinkOption.NOFOLLOW_LINKS)) {
+            deleteDirectoryTreeNoFollow(targetPath);
+        }
+
+        try {
+            Files.move(
+                sourcePath,
+                targetPath,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            );
+        } catch (AtomicMoveNotSupportedException error) {
+            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /**
+     * Deletes a real directory tree without following symlinks inside it.
+     *
+     * @param directoryPath Directory to delete.
+     * @throws IOException when walking or deleting the directory fails.
+     */
+    private static void deleteDirectoryTreeNoFollow(Path directoryPath) throws IOException {
+        List<Path> paths = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            stream.forEach(paths::add);
+        }
+
+        paths.sort(Comparator.reverseOrder());
+        for (Path path : paths) {
+            Files.deleteIfExists(path);
+        }
     }
 
     /**
@@ -2679,7 +3193,7 @@ public class EcsRunnerMain {
         }
 
         Path artifactsDir = artifactBaseDir.resolve("artifacts");
-        if (!Files.isDirectory(artifactsDir)) {
+        if (!isNonSymlinkDirectory(artifactsDir)) {
             logWarn(
                 "artifacts.upload",
                 "Artifact directory does not exist: " + artifactsDir
@@ -2758,8 +3272,8 @@ public class EcsRunnerMain {
         Path publicDir = artifactsDir.resolve("public");
 
         boolean hasPublicArtifacts =
-            Files.isRegularFile(executionLog)
-                || Files.isRegularFile(errorLog)
+            isNonSymlinkRegularFile(executionLog)
+                || isNonSymlinkRegularFile(errorLog)
                 || directoryHasRegularFiles(publicDir);
 
         if (!hasPublicArtifacts) {
@@ -2770,6 +3284,7 @@ public class EcsRunnerMain {
             return null;
         }
 
+        enforcePublicArtifactOutputLimit(artifactsDir, executionLog, errorLog, publicDir);
         Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(
             Files.newOutputStream(zipPath)
@@ -2796,7 +3311,7 @@ public class EcsRunnerMain {
      */
     private static Path createDirectoryZip(Path directoryPath, String artifactName)
         throws Exception {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
                 "artifacts.zip.private",
                 "Directory does not exist, skipping zip: " + directoryPath
@@ -2812,6 +3327,7 @@ public class EcsRunnerMain {
             return null;
         }
 
+        enforceArtifactDirectoryOutputLimit(directoryPath, directoryPath, "private artifacts");
         Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(
             Files.newOutputStream(zipPath)
@@ -2834,25 +3350,188 @@ public class EcsRunnerMain {
      * @throws IOException when walking the directory fails.
      */
     private static boolean directoryHasRegularFiles(Path directoryPath) throws IOException {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             return false;
         }
 
         try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
-            return stream.anyMatch(Files::isRegularFile);
+            return stream.anyMatch(EcsRunnerMain::isNonSymlinkRegularFile);
         }
     }
 
     /**
-     * Adds a file to zip when it exists.
+     * Enforces the output byte cap across all files included in the public zip.
+     *
+     * @param artifactsDir Root artifacts directory.
+     * @param executionLog Runner execution log file.
+     * @param errorLog Runner error log file.
+     * @param publicDir Public artifact directory.
+     * @throws IOException When file size inspection fails.
+     */
+    private static void enforcePublicArtifactOutputLimit(
+        Path artifactsDir,
+        Path executionLog,
+        Path errorLog,
+        Path publicDir
+    ) throws IOException {
+        long totalBytes = 0L;
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            executionLog,
+            artifactsDir,
+            "public artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            errorLog,
+            artifactsDir,
+            "public artifacts"
+        );
+        totalBytes = enforceArtifactDirectoryOutputLimit(
+            publicDir,
+            artifactsDir,
+            "public artifacts",
+            totalBytes
+        );
+        logInfo(
+            "artifacts.output-limit",
+            "Public artifacts total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Enforces the output byte cap across a whole artifact directory.
+     *
+     * @param directoryPath Directory whose regular files are counted.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @throws IOException When walking the directory or reading file sizes fails.
+     */
+    private static void enforceArtifactDirectoryOutputLimit(
+        Path directoryPath,
+        Path rootPath,
+        String outputName
+    ) throws IOException {
+        long totalBytes = enforceArtifactDirectoryOutputLimit(
+            directoryPath,
+            rootPath,
+            outputName,
+            0L
+        );
+        logInfo(
+            "artifacts.output-limit",
+            outputName
+                + " total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Adds regular file sizes under a directory to a bounded output total.
+     *
+     * @param directoryPath Directory whose regular files are counted.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @param currentBytes Bytes already counted.
+     * @return Updated byte count.
+     * @throws IOException When walking the directory or reading file sizes fails.
+     */
+    private static long enforceArtifactDirectoryOutputLimit(
+        Path directoryPath,
+        Path rootPath,
+        String outputName,
+        long currentBytes
+    ) throws IOException {
+        if (!Files.isDirectory(directoryPath)) {
+            return currentBytes;
+        }
+
+        long totalBytes = currentBytes;
+        try (java.util.stream.Stream<Path> stream = Files.walk(directoryPath)) {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Path entryPath = iterator.next();
+                totalBytes = addArtifactFileBytesWithLimit(
+                    totalBytes,
+                    entryPath,
+                    rootPath,
+                    outputName
+                );
+            }
+        }
+        return totalBytes;
+    }
+
+    /**
+     * Adds one artifact file's size to a bounded output total.
+     *
+     * @param currentBytes Bytes already counted.
+     * @param filePath File to count when it is a non-symlink regular file.
+     * @param rootPath Root used to render relative paths in errors.
+     * @param outputName Human-readable output label for errors.
+     * @return Updated byte count.
+     * @throws IOException When reading file size fails.
+     */
+    private static long addArtifactFileBytesWithLimit(
+        long currentBytes,
+        Path filePath,
+        Path rootPath,
+        String outputName
+    ) throws IOException {
+        if (filePath == null) {
+            return currentBytes;
+        }
+
+        if (!isNonSymlinkRegularFile(filePath)) {
+            return currentBytes;
+        }
+
+        return addOutputBytesWithLimit(
+            currentBytes,
+            Files.size(filePath),
+            outputName + " including " + renderRelativeArtifactPath(rootPath, filePath)
+        );
+    }
+
+    /**
+     * Renders a stable artifact path for output-limit diagnostics.
+     *
+     * @param rootPath Artifact root.
+     * @param filePath Artifact file.
+     * @return Relative path when possible, otherwise the absolute path.
+     */
+    private static String renderRelativeArtifactPath(Path rootPath, Path filePath) {
+        if (rootPath == null || filePath == null) {
+            return String.valueOf(filePath);
+        }
+
+        try {
+            return rootPath.relativize(filePath).toString().replace('\\', '/');
+        } catch (IllegalArgumentException ignored) {
+            return filePath.toString();
+        }
+    }
+
+    /**
+     * Adds a file to zip when it exists and is not a symbolic link.
+     *
+     * @param zipOutputStream Destination zip stream receiving the entry.
+     * @param filePath Candidate file path to archive.
+     * @param entryName Zip entry name to use for the file.
+     * @throws Exception when a non-symlink regular file cannot be read or archived.
      */
     private static void addFileToZip(
         ZipOutputStream zipOutputStream,
         Path filePath,
         String entryName
     ) throws Exception {
-        if (!Files.isRegularFile(filePath)) {
-            logInfo("artifacts.zip.add-file", "Skipping missing file: " + filePath);
+        if (!isNonSymlinkRegularFile(filePath)) {
+            logInfo("artifacts.zip.add-file", "Skipping missing or non-regular file: " + filePath);
             return;
         }
 
@@ -2860,20 +3539,30 @@ public class EcsRunnerMain {
             "artifacts.zip.add-file",
             "Adding file to zip entry " + entryName + " from " + filePath
         );
-        zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
-        Files.copy(filePath, zipOutputStream);
-        zipOutputStream.closeEntry();
+        try (InputStream inputStream = openRegularFileInputStreamNoFollow(filePath)) {
+            zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
+            try {
+                copyStream(inputStream, zipOutputStream);
+            } finally {
+                zipOutputStream.closeEntry();
+            }
+        }
     }
 
     /**
-     * Recursively adds directory contents to a zip stream.
+     * Recursively adds non-symlink regular directory contents to a zip stream.
+     *
+     * @param zipOutputStream Destination zip stream receiving directory entries.
+     * @param directoryPath Directory to traverse without following symlinked directories.
+     * @param entryPrefix Prefix prepended to each zip entry name.
+     * @throws Exception when walking the directory or archiving a regular file fails.
      */
     private static void addDirectoryToZip(
         ZipOutputStream zipOutputStream,
         Path directoryPath,
         String entryPrefix
     ) throws Exception {
-        if (!Files.isDirectory(directoryPath)) {
+        if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
                 "artifacts.zip.add-directory",
                 "Skipping missing directory: " + directoryPath
@@ -2886,7 +3575,7 @@ public class EcsRunnerMain {
             stream.forEach(paths::add);
 
             for (Path entryPath : paths) {
-                if (!Files.isRegularFile(entryPath)) {
+                if (!isNonSymlinkRegularFile(entryPath)) {
                     continue;
                 }
 
@@ -2900,10 +3589,89 @@ public class EcsRunnerMain {
                     "artifacts.zip.add-directory",
                     "Adding entry " + entryName + " from " + entryPath
                 );
-                zipOutputStream.putNextEntry(new ZipEntry(entryName));
-                Files.copy(entryPath, zipOutputStream);
-                zipOutputStream.closeEntry();
+                try (InputStream inputStream = openRegularFileInputStreamNoFollow(entryPath)) {
+                    zipOutputStream.putNextEntry(new ZipEntry(entryName));
+                    try {
+                        copyStream(inputStream, zipOutputStream);
+                    } finally {
+                        zipOutputStream.closeEntry();
+                    }
+                }
             }
+        }
+    }
+
+    /**
+     * Checks whether a path is a regular file without dereferencing symlinks.
+     *
+     * @param path Path to inspect.
+     * @return {@code true} only for non-symlink regular files.
+     */
+    private static boolean isNonSymlinkRegularFile(Path path) {
+        return path != null && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Checks whether a path is a directory without dereferencing symlinks.
+     *
+     * @param path Path to inspect.
+     * @return {@code true} only for non-symlink directories.
+     */
+    private static boolean isNonSymlinkDirectory(Path path) {
+        return path != null && Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Reads a regular artifact file without following symbolic links.
+     *
+     * @param filePath Non-symlink regular file path to read.
+     * @return Complete file contents.
+     * @throws IOException when the file is missing, is not a regular file, is a symlink,
+     *                     or cannot be read.
+     */
+    private static byte[] readRegularFileBytesNoFollow(Path filePath) throws IOException {
+        try (
+            InputStream inputStream = openRegularFileInputStreamNoFollow(filePath);
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream()
+        ) {
+            copyStream(inputStream, outputStream);
+            return outputStream.toByteArray();
+        }
+    }
+
+    /**
+     * Opens a regular file for reading without following symbolic links.
+     *
+     * @param filePath Non-symlink regular file path to open.
+     * @return Input stream positioned at the start of the file.
+     * @throws IOException when the path is missing, not regular, a symlink, or unreadable.
+     */
+    private static InputStream openRegularFileInputStreamNoFollow(Path filePath)
+        throws IOException {
+        if (!isNonSymlinkRegularFile(filePath)) {
+            throw new IOException("Artifact is not a non-symlink regular file: " + filePath);
+        }
+
+        return Files.newInputStream(
+            filePath,
+            StandardOpenOption.READ,
+            LinkOption.NOFOLLOW_LINKS
+        );
+    }
+
+    /**
+     * Copies bytes between streams using a bounded reusable buffer.
+     *
+     * @param inputStream Source stream.
+     * @param outputStream Destination stream.
+     * @throws IOException when reading or writing fails.
+     */
+    private static void copyStream(InputStream inputStream, OutputStream outputStream)
+        throws IOException {
+        byte[] buffer = new byte[STREAM_COPY_BUFFER_SIZE];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, bytesRead);
         }
     }
 
@@ -3022,7 +3790,7 @@ public class EcsRunnerMain {
     private static Path findArtifactFile(Path submissionDir, String relativePath) {
         for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
             Path candidate = baseDir.resolve("artifacts").resolve(relativePath);
-            if (Files.isRegularFile(candidate)) {
+            if (isNonSymlinkRegularFile(candidate)) {
                 return candidate;
             }
         }
@@ -3035,7 +3803,7 @@ public class EcsRunnerMain {
      */
     private static Path resolveArtifactBaseDir(Path submissionDir) {
         for (Path baseDir : getArtifactBaseCandidates(submissionDir)) {
-            if (Files.isDirectory(baseDir.resolve("artifacts"))) {
+            if (isNonSymlinkDirectory(baseDir.resolve("artifacts"))) {
                 return baseDir;
             }
         }
@@ -3061,18 +3829,56 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Writes tester JAR bytes to deterministic tmp path.
+     * Writes tester JAR bytes to a unique runner-owned temporary path.
+     *
+     * @param testerConfigId Tester configuration ID used for diagnostics.
+     * @param jarBytes Downloaded tester JAR bytes.
+     * @return Path to the restricted tester JAR.
+     * @throws IOException When the temporary file cannot be created, written, or restricted.
      */
     private static Path writeTesterJar(String testerConfigId, byte[] jarBytes)
         throws IOException {
-        Path jarPath = Paths.get("/tmp/tester-" + testerConfigId + ".jar");
+        Path jarPath = createRunnerOnlyTempFile("tester-", ".jar");
         Files.write(jarPath, jarBytes);
         secureRunnerOnlyFile(jarPath);
         logInfo(
             "filesystem.testerJar",
-            "Wrote tester JAR to " + jarPath + " (" + Files.size(jarPath) + " bytes)"
+            "Wrote tester JAR for testerConfigId="
+                + safeLogValue(testerConfigId)
+                + " to "
+                + jarPath
+                + " ("
+                + Files.size(jarPath)
+                + " bytes)"
         );
         return jarPath;
+    }
+
+    /**
+     * Creates a temporary file that is never backed by a predictable pre-existing
+     * path and is immediately restricted to the trusted runner owner.
+     *
+     * @param prefix File prefix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
+     * @param suffix File suffix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
+     * @return Newly created runner-only temporary file.
+     * @throws IOException When the temporary file cannot be created or restricted.
+     */
+    private static Path createRunnerOnlyTempFile(String prefix, String suffix)
+        throws IOException {
+        try {
+            FileAttribute<Set<PosixFilePermission>> permissions =
+                PosixFilePermissions.asFileAttribute(
+                    EnumSet.of(
+                        PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE
+                    )
+                );
+            return Files.createTempFile(prefix, suffix, permissions);
+        } catch (UnsupportedOperationException ignored) {
+            Path path = Files.createTempFile(prefix, suffix);
+            secureRunnerOnlyFile(path);
+            return path;
+        }
     }
 
     /**
@@ -3285,10 +4091,21 @@ public class EcsRunnerMain {
         Files.createDirectories(artifactsPrivateDir);
 
         String expectedSolutionBaseName = deriveExpectedSolutionBaseName(testerClassName);
-        Path submissionSource = locateSubmissionSource(
-            submissionRoot,
-            expectedSolutionBaseName
-        );
+        Path submissionSource;
+        try {
+            submissionSource = locateSubmissionSource(
+                submissionRoot,
+                expectedSolutionBaseName
+            );
+        } catch (IllegalArgumentException error) {
+            logWarn(
+                "submission.validation",
+                NO_SUPPORTED_SOURCE_ERROR
+                    + " Supported extensions: "
+                    + SUPPORTED_SOURCE_EXTENSIONS_TEXT
+            );
+            return buildNoSupportedSourceResult(testerClassName, artifactsPublicDir);
+        }
 
         int timeLimitMs = resolvePositiveInt(
             scorerConfig.getTimeLimit(),
@@ -3309,6 +4126,7 @@ public class EcsRunnerMain {
             );
         }
         Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
+        boolean cleanupDeferred = deferIsolatedChildCleanup(compileWorkDir);
         Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
 
         try {
@@ -3326,20 +4144,36 @@ public class EcsRunnerMain {
             double totalScore = 0.0;
             int failedTests = 0;
             StringBuilder outputText = new StringBuilder();
+            long outputBytes = 0L;
 
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
                 int testCaseNumber = testScores.size() + 1;
-                MarathonTestResult testResult = controller.run(
-                    testerClassName,
-                    seed,
-                    compiledSubmission.getExecutionCommand(),
-                    timeLimitMs
-                );
+                resetScorerWritableStateForTestCase("before", testCaseNumber);
+                MarathonTestResult testResult;
+                try {
+                    testResult = controller.run(
+                        testerClassName,
+                        seed,
+                        compiledSubmission.getExecutionCommand(),
+                        timeLimitMs
+                    );
+                } finally {
+                    resetScorerWritableStateForTestCase("after", testCaseNumber);
+                }
 
                 double seedScore = testResult.getScore();
-                totalScore += seedScore;
                 String seedError = testResult.getError();
+                String scoreValidationError = validateScoreValue(
+                    seedScore,
+                    "Test Case #" + testCaseNumber + " score"
+                );
+                if (scoreValidationError != null) {
+                    logWarn("tester.score", scoreValidationError);
+                    seedScore = FAILED_TEST_SCORE;
+                    seedError = appendErrorMessage(seedError, scoreValidationError);
+                }
+                totalScore += seedScore;
                 if (seedScore < 0 || (seedError != null && !seedError.trim().isEmpty())) {
                     failedTests += 1;
                 }
@@ -3351,24 +4185,41 @@ public class EcsRunnerMain {
                 seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
-                outputText.append("Test Case #").append(testCaseNumber).append(":\n");
-                outputText.append("Score = ").append(seedScore).append('\n');
-                outputText.append("Run Time = ")
+                StringBuilder testOutputText = new StringBuilder();
+                testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
+                testOutputText.append("Score = ").append(seedScore).append('\n');
+                testOutputText.append("Run Time = ")
                     .append(testResult.getRunTime())
                     .append("ms\n");
                 if (
                     testResult.getError() != null
                         && !testResult.getError().trim().isEmpty()
                 ) {
-                    outputText.append(testResult.getError().trim()).append('\n');
+                    testOutputText.append(testResult.getError().trim()).append('\n');
                 }
                 if (
-                    testResult.getOutput() != null
-                        && !testResult.getOutput().trim().isEmpty()
+                    testResult.getStdout() != null
+                        && !testResult.getStdout().trim().isEmpty()
                 ) {
-                    outputText.append(testResult.getOutput().trim()).append('\n');
+                    testOutputText.append("stdout:\n")
+                        .append(testResult.getStdout().trim())
+                        .append('\n');
                 }
-                outputText.append('\n');
+                if (
+                    testResult.getStderr() != null
+                        && !testResult.getStderr().trim().isEmpty()
+                ) {
+                    testOutputText.append("stderr:\n")
+                        .append(testResult.getStderr().trim())
+                        .append('\n');
+                }
+                testOutputText.append('\n');
+                outputBytes = appendLimitedOutput(
+                    outputText,
+                    testOutputText.toString(),
+                    outputBytes,
+                    "artifacts/public/output.txt"
+                );
 
                 emitIsolatedTesterProgress(
                     testScores.size(),
@@ -3382,6 +4233,14 @@ public class EcsRunnerMain {
             double averageScore = testScores.isEmpty()
                 ? 0.0
                 : totalScore / testScores.size();
+            String averageScoreValidationError = validateScoreValue(
+                averageScore,
+                "Aggregate score"
+            );
+            if (averageScoreValidationError != null) {
+                logWarn("tester.score", averageScoreValidationError);
+                averageScore = FAILED_TEST_SCORE;
+            }
 
             try (BufferedWriter writer = Files.newBufferedWriter(
                 artifactsPublicDir.resolve("output.txt"),
@@ -3413,8 +4272,100 @@ public class EcsRunnerMain {
                 new ArrayList<Map<String, Object>>()
             );
         } finally {
-            deletePathRecursively(compileWorkDir);
+            if (!cleanupDeferred) {
+                deletePathRecursively(compileWorkDir);
+            }
         }
+    }
+
+    /**
+     * Defers an isolated child temporary path until the child has emitted its
+     * final success or failure output.
+     *
+     * <p>Compiler start failures include the working directory in the JVM error
+     * message. Cleaning that directory from the generic runner's inner
+     * {@code finally} block before the child reports the failure makes logs look
+     * like cleanup raced ahead of compilation. Deferring child-scoped paths keeps
+     * cleanup after compilation/execution and after the child has reported its
+     * result.
+     *
+     * @param path Temporary file or directory to delete at child process exit.
+     * @return {@code true} when cleanup was registered with the child scope;
+     *         {@code false} when no child cleanup scope is active.
+     */
+    private static boolean deferIsolatedChildCleanup(Path path) {
+        if (path == null) {
+            return false;
+        }
+
+        List<Path> cleanupPaths = DEFERRED_ISOLATED_CLEANUP_PATHS.get();
+        if (cleanupPaths == null) {
+            return false;
+        }
+
+        cleanupPaths.add(path);
+        return true;
+    }
+
+    /**
+     * Deletes temporary paths registered for the isolated child process.
+     *
+     * @param cleanupPaths Child-scoped paths collected during tester execution.
+     */
+    private static void cleanupDeferredIsolatedChildPaths(List<Path> cleanupPaths) {
+        if (cleanupPaths == null || cleanupPaths.isEmpty()) {
+            return;
+        }
+
+        for (int index = cleanupPaths.size() - 1; index >= 0; index--) {
+            deletePathRecursively(cleanupPaths.get(index));
+        }
+    }
+
+    /**
+     * Writes a member-visible validation error for submissions that do not contain
+     * a supported source file and returns a structured failed result.
+     *
+     * @param testerClassName Fully qualified Marathon tester class name.
+     * @param artifactsPublicDir Public artifact directory where {@code output.txt} is written.
+     * @return Failed tester execution result with validation metadata.
+     * @throws IOException When the public output artifact cannot be written.
+     */
+    private static TesterExecutionResult buildNoSupportedSourceResult(
+        String testerClassName,
+        Path artifactsPublicDir
+    ) throws IOException {
+        String outputText =
+            "Submission error: "
+                + NO_SUPPORTED_SOURCE_ERROR
+                + "\nSupported extensions: "
+                + SUPPORTED_SOURCE_EXTENSIONS_TEXT
+                + "\n";
+        Files.write(
+            artifactsPublicDir.resolve("output.txt"),
+            outputText.getBytes(StandardCharsets.UTF_8)
+        );
+
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("testerClass", testerClassName);
+        metadata.put("submissionError", NO_SUPPORTED_SOURCE_ERROR);
+        metadata.put(
+            "supportedExtensions",
+            new ArrayList<String>(SUPPORTED_SOURCE_EXTENSIONS)
+        );
+        metadata.put("numberOfTests", 0);
+
+        Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
+        currentReview.put("score", -1.0);
+        currentReview.put("aggregateScore", -1.0);
+        currentReview.put("metadata", metadata);
+
+        return new TesterExecutionResult(
+            -1.0,
+            metadata,
+            currentReview,
+            new ArrayList<Map<String, Object>>()
+        );
     }
 
     /**
@@ -3494,10 +4445,7 @@ public class EcsRunnerMain {
 
         if (candidates.isEmpty()) {
             throw new IllegalArgumentException(
-                "No supported submission source was found under "
-                    + submissionRoot
-                    + ". Expected one of: "
-                    + SUPPORTED_SOURCE_EXTENSIONS
+                NO_SUPPORTED_SOURCE_ERROR
             );
         }
 
@@ -3580,7 +4528,7 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, .NET 10 C#, or Rust submissions.
+     * @return {@code true} for C++, Java, Python, Mono C#, .NET 7/10 C#, or Rust submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -3691,12 +4639,18 @@ public class EcsRunnerMain {
             Files.copy(sourceFile, normalizedSource, StandardCopyOption.REPLACE_EXISTING);
 
             runCommand(
-                Arrays.asList("javac", workDir.relativize(normalizedSource).toString()),
+                Arrays.asList(
+                    "javac",
+                    "--release",
+                    JAVA_SUBMISSION_RELEASE,
+                    workDir.relativize(normalizedSource).toString()
+                ),
                 workDir,
                 compileTimeoutMs,
                 "Java compilation failed.",
                 compileLogPath
             );
+            runJavaStartupCheck(workDir, entryPoint, compileTimeoutMs, compileLogPath);
             return new CompiledSubmission(
                 buildScorerExecutionCommand(
                     "java -Xms1G -Xmx1G -cp "
@@ -3722,7 +4676,8 @@ public class EcsRunnerMain {
                     "g++",
                     "-std=gnu++23",
                     "-O3",
-                    "-march=native",
+                    CXX_MARCH_FLAG,
+                    CXX_MTUNE_FLAG,
                     normalizedSource.getFileName().toString(),
                     "-o",
                     binaryPath
@@ -3798,13 +4753,14 @@ public class EcsRunnerMain {
         }
 
         if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+            String targetFramework = dotNetTargetFramework(extension);
             Path csproj = workDir.resolve(GENERIC_SOLUTION_BASE_NAME + ".csproj");
             Files.write(
                 csproj,
                 Arrays.asList(
                     "<Project Sdk=\"Microsoft.NET.Sdk\">",
                     "  <PropertyGroup>",
-                    "    <TargetFramework>net10.0</TargetFramework>",
+                    "    <TargetFramework>" + targetFramework + "</TargetFramework>",
                     "    <OutputType>Exe</OutputType>",
                     "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
                     "  </PropertyGroup>",
@@ -3828,7 +4784,7 @@ public class EcsRunnerMain {
                 ),
                 workDir,
                 compileTimeoutMs,
-                "C# (.NET 10) compilation failed.",
+                "C# (" + targetFramework + ") compilation failed.",
                 compileLogPath
             );
             return new CompiledSubmission(
@@ -3844,6 +4800,97 @@ public class EcsRunnerMain {
         }
 
         throw new IllegalArgumentException("Unsupported submission extension: " + extension);
+    }
+
+    /**
+     * Maps a .NET C# submission extension to the project target framework.
+     *
+     * @param extension Supported .NET C# source extension.
+     * @return Target framework moniker used in the generated project file.
+     * @throws IllegalArgumentException When the extension is not a .NET C# submission extension.
+     */
+    private static String dotNetTargetFramework(String extension) {
+        if (".cs_net7".equals(extension)) {
+            return "net7.0";
+        }
+        if (".cs_net10".equals(extension)) {
+            return "net10.0";
+        }
+        throw new IllegalArgumentException("Unsupported .NET C# extension: " + extension);
+    }
+
+    /**
+     * Loads the compiled Java submission class in an isolated JVM so static initializers
+     * are covered by the configured compile timeout before seed execution starts.
+     *
+     * @param workDir Temporary compile workspace containing the compiled submission.
+     * @param entryPoint Resolved Java submission entry point.
+     * @param compileTimeoutMs Compile/startup timeout in milliseconds.
+     * @param compileLogPath Public artifact file that receives check output.
+     * @throws Exception When the helper cannot be written/compiled, the class fails to load,
+     *                   or the startup check times out.
+     */
+    private static void runJavaStartupCheck(
+        Path workDir,
+        JavaEntryPoint entryPoint,
+        int compileTimeoutMs,
+        Path compileLogPath
+    ) throws Exception {
+        Path checkRoot = workDir.resolve(".topcoder-java-startup-check");
+        Path sourcePath = checkRoot.resolve(
+            Paths.get(
+                "src",
+                "com",
+                "topcoder",
+                "runner",
+                "startupcheck",
+                "JavaStartupCheck.java"
+            )
+        );
+        Path classesDir = checkRoot.resolve("classes");
+        Path checkWorkDir = checkRoot.resolve("work");
+
+        try {
+            Files.createDirectories(sourcePath.getParent());
+            Files.createDirectories(classesDir);
+            Files.createDirectories(checkWorkDir);
+            Files.write(sourcePath, JAVA_STARTUP_CHECK_SOURCE.getBytes(StandardCharsets.UTF_8));
+
+            runCommand(
+                Arrays.asList(
+                    "javac",
+                    "-d",
+                    classesDir.toAbsolutePath().toString(),
+                    sourcePath.toAbsolutePath().toString()
+                ),
+                workDir,
+                compileTimeoutMs,
+                "Java startup check helper compilation failed.",
+                compileLogPath
+            );
+
+            grantScorerReadExecuteAccess(workDir);
+            runCommand(
+                Arrays.asList(
+                    SCORER_ISOLATION_WRAPPER_PATH,
+                    "java",
+                    "-Xms1G",
+                    "-Xmx1G",
+                    "-cp",
+                    classesDir.toAbsolutePath().toString()
+                        + System.getProperty("path.separator")
+                        + workDir.toAbsolutePath().toString(),
+                    JAVA_STARTUP_CHECK_CLASS_NAME,
+                    entryPoint.getQualifiedClassName()
+                ),
+                checkWorkDir,
+                compileTimeoutMs,
+                "Java startup check failed.",
+                compileLogPath
+            );
+        } finally {
+            deletePathRecursively(checkRoot);
+        }
     }
 
     /**
@@ -3880,8 +4927,11 @@ public class EcsRunnerMain {
         if (".cs".equals(extension)) {
             return "csharp-mono";
         }
-        if (".cs_net10".equals(extension) || ".cs_net7".equals(extension)) {
+        if (".cs_net10".equals(extension)) {
             return "csharp-net10";
+        }
+        if (".cs_net7".equals(extension)) {
+            return "csharp-net7";
         }
         if (".rs".equals(extension)) {
             return "rust";
@@ -4067,6 +5117,53 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Validates a score before it is included in runner output or callback JSON.
+     *
+     * <p>Negative values are preserved because Marathon Match uses negative scores as failed
+     * test sentinels. Non-finite values and values larger than Java {@code Long.MAX_VALUE}
+     * cannot be safely persisted by review summations.
+     *
+     * @param score Score value to validate.
+     * @param label Human-readable score context for diagnostics.
+     * @return Error message when invalid, otherwise {@code null}.
+     */
+    private static String validateScoreValue(double score, String label) {
+        if (Double.isNaN(score) || Double.isInfinite(score)) {
+            return label
+                + " is invalid: "
+                + score
+                + ". Scores must be finite and no greater than "
+                + MAX_SCORE_VALUE_LABEL
+                + ".";
+        }
+
+        if (score > MAX_SCORE_VALUE) {
+            return label
+                + " is invalid: "
+                + score
+                + ". Scores must be no greater than "
+                + MAX_SCORE_VALUE_LABEL
+                + ".";
+        }
+
+        return null;
+    }
+
+    /**
+     * Appends a validation error to an existing testcase error string.
+     *
+     * @param existing Existing tester error text, possibly blank.
+     * @param addition Validation error to append.
+     * @return Combined error text.
+     */
+    private static String appendErrorMessage(String existing, String addition) {
+        if (existing == null || existing.trim().isEmpty()) {
+            return addition;
+        }
+        return existing.trim() + "\n" + addition;
+    }
+
+    /**
      * Parses tester return values. Supports numeric score, ScoringResult, and map payloads.
      */
     @SuppressWarnings("unchecked")
@@ -4082,16 +5179,20 @@ public class EcsRunnerMain {
 
         if (runResult instanceof Number) {
             logInfo("tester.result", "runTester returned Number score.");
+            double score = ((Number) runResult).doubleValue();
+            requireValidScoreValue(score, "runTester Number score");
             return new TesterExecutionResult(
-                ((Number) runResult).doubleValue(),
+                score,
                 new LinkedHashMap<String, Object>()
             );
         }
 
         if (runResult instanceof ScoringResult) {
             logInfo("tester.result", "runTester returned ScoringResult object.");
+            double score = ((ScoringResult) runResult).getScore();
+            requireValidScoreValue(score, "runTester ScoringResult score");
             return new TesterExecutionResult(
-                ((ScoringResult) runResult).getScore(),
+                score,
                 new LinkedHashMap<String, Object>()
             );
         }
@@ -4109,6 +5210,7 @@ public class EcsRunnerMain {
                         + testerClassName
                 );
             }
+            requireValidScoreValue(mapScore.doubleValue(), "runTester map score");
 
             logInfo(
                 "tester.result",
@@ -4135,6 +5237,20 @@ public class EcsRunnerMain {
                 + " for class "
                 + testerClassName
         );
+    }
+
+    /**
+     * Throws when a score cannot be safely serialized and persisted.
+     *
+     * @param score Score to validate.
+     * @param label Human-readable score context for diagnostics.
+     * @throws RuntimeException When the score is non-finite or larger than {@code Long.MAX_VALUE}.
+     */
+    private static void requireValidScoreValue(double score, String label) {
+        String validationError = validateScoreValue(score, label);
+        if (validationError != null) {
+            throw new RuntimeException(validationError);
+        }
     }
 
     /**
@@ -4227,7 +5343,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Reads all bytes from an input stream for Java 8 compatibility.
+     * Reads all bytes from an input stream using a bounded reusable buffer.
      */
     private static byte[] readAllBytes(InputStream inputStream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -4780,6 +5896,7 @@ public class EcsRunnerMain {
             Map<String, Object> currentReview,
             List<Map<String, Object>> impactedReviews
         ) {
+            requireValidScoreValue(score, "TesterExecutionResult score");
             this.score = score;
             this.metadata = metadata == null
                 ? new LinkedHashMap<String, Object>()

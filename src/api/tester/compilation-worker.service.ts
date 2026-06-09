@@ -8,6 +8,7 @@ import {
 import PgBoss = require('pg-boss');
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PG_BOSS_TOKEN } from 'src/shared/modules/pg-boss/pg-boss.module';
+import { PgBossLifecycleService } from 'src/shared/modules/pg-boss/pg-boss-lifecycle.service';
 import {
   CompileTesterJobData,
   TesterCompilationService,
@@ -30,6 +31,7 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
     'PG_BOSS_COMPILE_TEAM_CONCURRENCY',
     1,
   );
+  private workerId?: string;
   private readonly handlePgBossError = (error: unknown): void => {
     const trace =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -38,6 +40,7 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(PG_BOSS_TOKEN) private readonly pgBoss: PgBoss,
+    private readonly pgBossLifecycleService: PgBossLifecycleService,
     private readonly testerCompilationService: TesterCompilationService,
   ) {}
 
@@ -56,10 +59,10 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.pgBoss.on('error', this.handlePgBossError);
-    await this.pgBoss.start();
+    await this.pgBossLifecycleService.ensureStarted();
     await this.pgBoss.createQueue(this.compileQueueName);
 
-    await this.pgBoss.work<CompileTesterJobData>(
+    this.workerId = await this.pgBoss.work<CompileTesterJobData>(
       this.compileQueueName,
       {
         teamSize: this.compileWorkerTeamSize,
@@ -93,7 +96,19 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.pgBoss.off('error', this.handlePgBossError);
-    await this.pgBoss.stop();
+    if (!this.workerId) {
+      return;
+    }
+
+    try {
+      await this.pgBoss.offWork({ id: this.workerId });
+    } catch (error) {
+      this.logger.warn({
+        message: 'Unable to unregister compile-tester pg-boss worker cleanly.',
+        workerId: this.workerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**

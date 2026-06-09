@@ -43,6 +43,28 @@ interface OpenPhaseResolution {
   phaseIdentifiers: string[];
 }
 
+interface SkippedSubmissionScoringConfig {
+  reviewScorecardId?: string | null;
+}
+
+interface SkippedSubmissionScoringPayload {
+  submissionId: string;
+  challengeId: string;
+  scorecardId?: string;
+  reason: string;
+  details?: Record<string, unknown>;
+}
+
+interface SkippedReviewSummationPayload {
+  submissionId: string;
+  aggregateScore: number;
+  isPassing: boolean;
+  reviewedDate: string;
+  scorecardId?: string;
+  isProvisional: boolean;
+  metadata: Record<string, unknown>;
+}
+
 /**
  * Consumes `marathonmatch.submission.received` events and prepares scorer task
  * orchestration by resolving configured challenge phase and tester readiness.
@@ -110,6 +132,7 @@ export class MarathonMatchSubmissionHandler
       const submissionPayload = this.resolveSubmissionPayload(message);
       const submissionId = (submissionPayload.submissionId ?? '').trim();
       const challengeId = (submissionPayload.challengeId ?? '').trim();
+      const memberId = (submissionPayload.memberId ?? '').trim();
       if (!submissionId || !challengeId) {
         throw new Error(
           'Missing required message fields: submissionId and challengeId are required.',
@@ -128,6 +151,13 @@ export class MarathonMatchSubmissionHandler
       }
 
       if (config.active === false) {
+        await this.markSubmissionScoringSkipped(
+          submissionId,
+          challengeId,
+          'Marathon Match scoring skipped because the challenge configuration is inactive.',
+          config,
+          { configId: config.id },
+        );
         this.logger.log(
           `Marathon match config ${config.id} is inactive. Skipping submission ${submissionId}.`,
         );
@@ -137,6 +167,13 @@ export class MarathonMatchSubmissionHandler
       const openPhaseResolution =
         await this.getOpenPhaseResolution(challengeId);
       if (openPhaseResolution.phaseIdentifiers.length === 0) {
+        await this.markSubmissionScoringSkipped(
+          submissionId,
+          challengeId,
+          'Marathon Match scoring skipped because the challenge has no open scoring phase.',
+          config,
+          { configId: config.id },
+        );
         this.logger.log(
           `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
         );
@@ -148,6 +185,17 @@ export class MarathonMatchSubmissionHandler
         openPhaseResolution.phaseIdentifiers,
       );
       if (matchingPhaseConfigs.length === 0) {
+        await this.markSubmissionScoringSkipped(
+          submissionId,
+          challengeId,
+          'Marathon Match scoring skipped because no configured phase matches the open challenge phase.',
+          config,
+          {
+            configId: config.id,
+            openPhaseIds: openPhaseResolution.phaseIds,
+            openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
+          },
+        );
         this.logger.log({
           message:
             'No configured marathon match phase for open challenge phases',
@@ -179,6 +227,8 @@ export class MarathonMatchSubmissionHandler
             startSeed: matchingPhaseConfig.startSeed,
             numberOfTests: matchingPhaseConfig.numberOfTests,
           },
+          undefined,
+          { memberId },
         );
         this.logSubmissionRunnerMapping(
           challengeId,
@@ -386,6 +436,263 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
+   * Persists a terminal failed provisional summation when a configured
+   * submission cannot be dispatched and would otherwise remain queued forever.
+   * @param submissionId Submission ID from the Kafka event.
+   * @param challengeId Challenge ID from the Kafka event.
+   * @param reason Member-visible reason stored in summation metadata.
+   * @param config Marathon Match config used to resolve scorecard context.
+   * @param details Additional operator-facing metadata for the skip condition.
+   * @returns Resolves after the review summation is created or updated.
+   * @throws Error when token retrieval or review-api persistence fails.
+   */
+  private async markSubmissionScoringSkipped(
+    submissionId: string,
+    challengeId: string,
+    reason: string,
+    config: SkippedSubmissionScoringConfig,
+    details?: Record<string, unknown>,
+  ): Promise<void> {
+    const token = await this.m2mService.getM2MToken();
+    if (!token) {
+      throw new Error(
+        'Unable to get M2M token for skipped submission scoring marker.',
+      );
+    }
+
+    await this.upsertSkippedReviewSummation(token, {
+      submissionId,
+      challengeId,
+      reason,
+      details,
+      scorecardId: config.reviewScorecardId?.trim() || undefined,
+    });
+  }
+
+  /**
+   * Creates or updates the provisional review summation used to show a skipped
+   * scoring attempt as terminal instead of indefinitely queued.
+   * @param token M2M token for review-api.
+   * @param input Submission and skip context to persist.
+   * @returns Resolves after the review-api write succeeds.
+   * @throws Error when review-api rejects the read or write.
+   */
+  private async upsertSkippedReviewSummation(
+    token: string,
+    input: SkippedSubmissionScoringPayload,
+  ): Promise<void> {
+    const payload = this.buildSkippedReviewSummationPayload(input);
+    const existingReviewSummations =
+      await this.findExistingProvisionalReviewSummations(
+        token,
+        input.submissionId,
+      );
+
+    if (existingReviewSummations.length === 0) {
+      await this.createSkippedReviewSummation(token, payload);
+      return;
+    }
+
+    let updatedExistingReviewSummation = false;
+    for (const reviewSummation of existingReviewSummations) {
+      const reviewSummationId = this.asString(reviewSummation.id);
+      if (reviewSummationId) {
+        await this.updateSkippedReviewSummation(
+          token,
+          reviewSummationId,
+          payload,
+        );
+        updatedExistingReviewSummation = true;
+      }
+    }
+
+    if (!updatedExistingReviewSummation) {
+      await this.createSkippedReviewSummation(token, payload);
+    }
+  }
+
+  /**
+   * Builds a failed provisional review summation payload for skipped dispatch.
+   * @param input Submission and skip context to persist.
+   * @returns Review summation payload accepted by review-api-v6.
+   */
+  private buildSkippedReviewSummationPayload(
+    input: SkippedSubmissionScoringPayload,
+  ): SkippedReviewSummationPayload {
+    const now = new Date().toISOString();
+    const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    const testProgressDetails: Record<string, unknown> = {
+      message: input.reason,
+      progress: 1,
+      status: 'FAILED',
+      testProcess: 'provisional',
+      updatedAt: now,
+    };
+    const metadata: Record<string, unknown> = {
+      challengeId: input.challengeId,
+      marathonMatchScoringSkipped: true,
+      marathonMatchScoringSkipReason: input.reason,
+      testProcess: 'provisional',
+      testProgress: 1,
+      testProgressDetails,
+      testStatus: 'FAILED',
+      testType: 'provisional',
+    };
+
+    if (reviewTypeId) {
+      metadata.reviewTypeId = reviewTypeId;
+    }
+    if (input.details && Object.keys(input.details).length > 0) {
+      metadata.marathonMatchScoringSkipDetails = input.details;
+    }
+
+    return {
+      submissionId: input.submissionId,
+      aggregateScore: -1,
+      isPassing: false,
+      reviewedDate: now,
+      scorecardId: input.scorecardId,
+      isProvisional: true,
+      metadata,
+    };
+  }
+
+  /**
+   * Finds provisional summations for a submission so skipped markers are
+   * idempotent across Kafka retries.
+   * @param token M2M token for review-api.
+   * @param submissionId Submission ID to look up.
+   * @returns Existing provisional summation rows.
+   */
+  private async findExistingProvisionalReviewSummations(
+    token: string,
+    submissionId: string,
+  ): Promise<Record<string, unknown>[]> {
+    const response = await firstValueFrom(
+      this.httpService.get(this.buildReviewSummationUrl(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        params: {
+          metadata: 'true',
+          provisional: 'true',
+          submissionId,
+        },
+      }),
+    );
+
+    const reviewSummations = this.extractReviewSummationArray(response.data);
+    const matchingReviewSummations = reviewSummations.filter(
+      (reviewSummation) => this.matchesProvisionalReview(reviewSummation),
+    );
+
+    if (matchingReviewSummations.length > 0) {
+      return matchingReviewSummations;
+    }
+
+    return reviewSummations[0] ? [reviewSummations[0]] : [];
+  }
+
+  /**
+   * Sends a create request for a skipped-dispatch provisional summation.
+   * @param token M2M token for review-api.
+   * @param payload Review summation payload to persist.
+   */
+  private async createSkippedReviewSummation(
+    token: string,
+    payload: SkippedReviewSummationPayload,
+  ): Promise<void> {
+    await firstValueFrom(
+      this.httpService.post(this.buildReviewSummationUrl(), payload, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }),
+    );
+  }
+
+  /**
+   * Sends an update request for an existing skipped-dispatch summation.
+   * @param token M2M token for review-api.
+   * @param reviewSummationId Review summation ID to update.
+   * @param payload Review summation payload to persist.
+   */
+  private async updateSkippedReviewSummation(
+    token: string,
+    reviewSummationId: string,
+    payload: SkippedReviewSummationPayload,
+  ): Promise<void> {
+    await firstValueFrom(
+      this.httpService.put(
+        `${this.buildReviewSummationUrl()}/${encodeURIComponent(reviewSummationId)}`,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      ),
+    );
+  }
+
+  /**
+   * Builds the review-api review summation URL.
+   * @returns Review summation endpoint URL.
+   */
+  private buildReviewSummationUrl(): string {
+    const baseUrl = (
+      process.env.REVIEW_API_URL || 'https://api.topcoder-dev.com'
+    ).replace(/\/+$/, '');
+    const normalizedBase = baseUrl.replace(/\/reviewSummations$/, '');
+
+    if (normalizedBase.endsWith('/v6')) {
+      return `${normalizedBase}/reviewSummations`;
+    }
+
+    return `${normalizedBase}/v6/reviewSummations`;
+  }
+
+  /**
+   * Extracts review summation arrays from known review-api response shapes.
+   * @param responseBody Raw review-api response payload.
+   * @returns Review summation rows.
+   */
+  private extractReviewSummationArray(
+    responseBody: unknown,
+  ): Record<string, unknown>[] {
+    const responseRecord = this.asRecord(responseBody);
+    const data = responseRecord.data;
+    if (Array.isArray(data)) {
+      return data.filter((entry): entry is Record<string, unknown> =>
+        this.isRecord(entry),
+      );
+    }
+    if (Array.isArray(responseBody)) {
+      return responseBody.filter((entry): entry is Record<string, unknown> =>
+        this.isRecord(entry),
+      );
+    }
+
+    return [];
+  }
+
+  /**
+   * Checks whether a review summation belongs to provisional scoring.
+   * @param reviewSummation Review summation row from review-api.
+   * @returns True when the row is provisional.
+   */
+  private matchesProvisionalReview(
+    reviewSummation: Record<string, unknown>,
+  ): boolean {
+    const metadata = this.asRecord(reviewSummation.metadata);
+    return (
+      reviewSummation.isProvisional === true ||
+      this.asString(metadata.testType)?.toLowerCase() === 'provisional' ||
+      this.asString(metadata.testProcess)?.toLowerCase() === 'provisional'
+    );
+  }
+
+  /**
    * Finds all configured phase mappings for the ordered open challenge phases.
    * @param phaseConfigs Stored phase configuration rows for a challenge.
    * @param openPhaseIdentifiers Open challenge phase identifiers ordered by priority.
@@ -570,5 +877,34 @@ export class MarathonMatchSubmissionHandler
     return (
       typeof message === 'object' && message !== null && 'payload' in message
     );
+  }
+
+  /**
+   * Coerces an unknown value into a plain record.
+   * @param value Value to inspect.
+   * @returns The input record, or an empty record for non-object values.
+   */
+  private asRecord(value: unknown): Record<string, unknown> {
+    return this.isRecord(value) ? value : {};
+  }
+
+  /**
+   * Checks whether an unknown value is a non-array object record.
+   * @param value Value to inspect.
+   * @returns True when the value is a plain object-like record.
+   */
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  /**
+   * Trims an unknown value when it is a non-empty string.
+   * @param value Value to inspect.
+   * @returns Trimmed string, or undefined for non-string and blank values.
+   */
+  private asString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0
+      ? value.trim()
+      : undefined;
   }
 }

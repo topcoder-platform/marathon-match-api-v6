@@ -117,4 +117,13 @@ describe('copilot scorer setup access source metadata', () => {
 
     expect(roles).toContain('UserRole.ProjectManager');
   });
+
+  it('allows users on submission runner log route for owner checks', () => {
+    const roles = getRolesDecoratorArguments(
+      submissionRunnerLogControllerPath,
+      'getRunnerLogs',
+    );
+
+    expect(roles).toContain('UserRole.User');
+  });
 });

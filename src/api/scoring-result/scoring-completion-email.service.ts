@@ -533,11 +533,17 @@ export class ScoringCompletionEmailService {
   }
 
   /**
-   * Builds the public challenge URL included in the email template data.
-   * @param challengeId Challenge identifier.
-   * @returns Public Topcoder challenge URL.
+   * Builds the public challenge URL included in email template data.
+   * Numeric legacy Marathon Match round IDs are not valid challenge-api GUIDs,
+   * so they link to legacy longcontest standings instead of the v6 challenge UI.
+   * @param challengeId Challenge identifier or legacy Marathon Match round ID.
+   * @returns Public Topcoder challenge or legacy Marathon Match standings URL.
    */
   private buildChallengeUrl(challengeId: string): string {
+    if (/^\d+$/.test(challengeId.trim())) {
+      return `https://community.topcoder.com/longcontest/?module=ViewStandings&rd=${encodeURIComponent(challengeId.trim())}`;
+    }
+
     return `https://topcoder.com/challenges/${encodeURIComponent(challengeId)}`;
   }
 

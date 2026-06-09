@@ -8,10 +8,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
-  RunnerLogAccessRequest,
-  SubmissionRunnerLogAccessGuard,
-} from 'src/shared/guards/submission-runner-log-access.guard';
-import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
@@ -21,10 +17,16 @@ import {
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { User } from 'src/shared/decorators/user.decorator';
 import { Scopes } from 'src/shared/decorators/scopes.decorator';
 import { Scope } from 'src/shared/enums/scopes.enum';
 import { UserRole } from 'src/shared/enums/userRole.enum';
+import {
+  RunnerLogAccessRequest,
+  SubmissionRunnerLogAccessGuard,
+} from 'src/shared/guards/submission-runner-log-access.guard';
 import { Roles } from 'src/shared/guards/tokenRoles.guard';
+import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import {
   GetSubmissionRunnerLogsOptions,
   SubmissionRunnerLogService,
@@ -68,17 +70,23 @@ export class SubmissionRunnerLogController {
    * Retrieves ECS runner logs for a submission ID.
    * @param submissionId Submission ID.
    * @param query Optional task selection + CloudWatch pagination query.
-   * @param request Request carrying the challenge scope resolved by `SubmissionRunnerLogAccessGuard`.
+   * @param request Request carrying challenge scope resolved by `SubmissionRunnerLogAccessGuard`.
+   * @param user Authenticated caller used for submission ownership checks.
    * @returns Mapping metadata and CloudWatch log events.
    */
   @Get('/:submissionId/runner-logs')
-  @Roles(UserRole.Admin, UserRole.Copilot, UserRole.ProjectManager)
+  @Roles(
+    UserRole.Admin,
+    UserRole.Copilot,
+    UserRole.ProjectManager,
+    UserRole.User,
+  )
   @Scopes(Scope.ReadMarathonMatch)
   @UseGuards(SubmissionRunnerLogAccessGuard)
   @ApiOperation({
     summary: 'Get ECS runner logs for a submission',
     description:
-      'Roles: Admin, challenge-assigned Copilot/Manager | Scopes: read:marathon-match. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
+      'Roles: Admin, challenge-assigned Copilot/Manager, or submission owner. Uses persisted submission-to-task/log mapping rows and fetches CloudWatch events.',
   })
   @ApiParam({
     name: 'submissionId',
@@ -129,6 +137,7 @@ export class SubmissionRunnerLogController {
     @Param('submissionId') submissionId: string,
     @Query() query: SubmissionRunnerLogsQueryDto,
     @Req() request: RunnerLogAccessRequest,
+    @User() user: JwtUser,
   ): Promise<SubmissionRunnerLogsResponse> {
     const options: GetSubmissionRunnerLogsOptions = {
       taskArn: query.taskArn,
@@ -141,6 +150,7 @@ export class SubmissionRunnerLogController {
     return this.submissionRunnerLogService.getLogsForSubmission(
       submissionId,
       options,
+      user,
     );
   }
 

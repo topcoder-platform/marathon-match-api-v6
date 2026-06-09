@@ -32,10 +32,15 @@ describe('ScoringResultService', () => {
     reviewTypeId: 'review-type-1',
   };
 
-  const createService = (scoringCompletionEmailService?: {
-    sendSubmissionScoringCompleteEmail?: jest.Mock;
-    sendSystemScoringCompleteEmail?: jest.Mock;
-  }) => {
+  const createService = (
+    scoringCompletionEmailService?: {
+      sendSubmissionScoringCompleteEmail?: jest.Mock;
+      sendSystemScoringCompleteEmail?: jest.Mock;
+    },
+    systemTestTimeoutSchedulerService?: {
+      scheduleSystemTestTimeout?: jest.Mock;
+    },
+  ) => {
     const httpService = {
       get: jest.fn(),
       post: jest.fn(),
@@ -45,12 +50,26 @@ describe('ScoringResultService', () => {
     const m2mService = {
       getM2MToken: jest.fn(),
     };
-    const prisma = {
+    const prisma: {
+      $queryRaw: jest.Mock;
+      $transaction: jest.Mock;
+      marathonMatchConfig: {
+        findUnique: jest.Mock;
+      };
+    } = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn(),
       marathonMatchConfig: {
         findUnique: jest.fn(),
       },
     };
-    const ecsService = {};
+    prisma.$transaction.mockImplementation(
+      async (callback: (client: typeof prisma) => Promise<unknown>) =>
+        callback(prisma),
+    );
+    const ecsService = {
+      launchScorerTask: jest.fn(),
+    };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
 
@@ -60,6 +79,7 @@ describe('ScoringResultService', () => {
       prisma as never,
       ecsService as never,
       scoringCompletionEmailService as never,
+      systemTestTimeoutSchedulerService as never,
     );
 
     return {
@@ -67,6 +87,7 @@ describe('ScoringResultService', () => {
       httpService,
       m2mService,
       prisma,
+      ecsService,
     };
   };
 
@@ -77,6 +98,30 @@ describe('ScoringResultService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
+
+  const flushAsyncWork = () =>
+    new Promise<void>((resolve) => setImmediate(resolve));
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['above Long.MAX_VALUE', 1e29],
+  ])(
+    'rejects scorer callbacks with invalid %s scores before writing summations',
+    async (_label, score) => {
+      const { service, m2mService, prisma } = createService();
+
+      await expect(
+        service.processScoringResult({
+          ...basePayload,
+          score,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.marathonMatchConfig.findUnique).not.toHaveBeenCalled();
+      expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects scorer callbacks when the challengeId has no Marathon Match config', async () => {
     const { service, m2mService, prisma } = createService();
@@ -194,6 +239,231 @@ describe('ScoringResultService', () => {
         scorecardId: undefined,
         submissionId: payloadWithSeedMetadata.submissionId,
       },
+    );
+  });
+
+  it('persists finite relative scores when the maximize best testcase score is zero', async () => {
+    const { service, m2mService, prisma } = createService();
+    const zeroScorePayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: 0,
+      testPhase: 'provisional',
+      metadata: {
+        testScores: [
+          { testcase: '753388858', score: 0 },
+          { testcase: '753388859', score: 0 },
+        ],
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-2',
+        memberId: 'member-2',
+        submittedDate: '2026-05-01T00:00:00.000Z',
+        reviewSummation: [
+          {
+            id: 'summation-2',
+            isProvisional: true,
+            metadata: {
+              testType: 'provisional',
+              testScores: [
+                { testcase: '1', score: 0 },
+                { testcase: '2', score: 0 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: zeroScorePayload.submissionId,
+        memberId: 'member-1',
+        submittedDate: '2026-05-01T00:00:01.000Z',
+        reviewSummation: [],
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    await expect(service.processScoringResult(zeroScorePayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(2);
+    const payloads = upsertReviewSummationSpy.mock.calls.map(
+      (call) => call[2],
+    ) as Array<{
+      aggregateScore: number;
+      metadata: {
+        relativeScores: Array<{ testcase: string; score: number }>;
+      };
+    }>;
+    for (const payload of payloads) {
+      expect(Number.isFinite(payload.aggregateScore)).toBe(true);
+      expect(payload.aggregateScore).toBe(0);
+      expect(payload.metadata.relativeScores).toEqual([
+        { testcase: '1', score: 0 },
+        { testcase: '2', score: 0 },
+      ]);
+    }
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      undefined,
+      0,
+      'provisional',
+      {
+        challengeId: zeroScorePayload.challengeId,
+        scorecardId: undefined,
+        submissionId: zeroScorePayload.submissionId,
+      },
+    );
+  });
+
+  it('serializes concurrent relative scoring recomputations for the same challenge phase', async () => {
+    const { service, m2mService, prisma } = createService();
+    const firstPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      submissionId: 'submission-a',
+      score: 90,
+      currentReview: {
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 90 }],
+        },
+      },
+    };
+    const secondPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      submissionId: 'submission-b',
+      score: 85,
+      currentReview: {
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 85 }],
+        },
+      },
+    };
+    let transactionChain = Promise.resolve();
+    let resolveFirstWriteStarted!: () => void;
+    let releaseFirstWrite!: () => void;
+    const firstWriteStarted = new Promise<void>((resolve) => {
+      resolveFirstWriteStarted = resolve;
+    });
+    const firstWriteCanFinish = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.$transaction.mockImplementation(
+      (callback: (client: typeof prisma) => Promise<unknown>) => {
+        const run = transactionChain
+          .catch(() => undefined)
+          .then(() => callback(prisma));
+        transactionChain = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return run;
+      },
+    );
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const fetchChallengeSubmissionsSpy = jest
+      .spyOn(service as any, 'fetchChallengeSubmissions')
+      .mockResolvedValueOnce([
+        {
+          id: 'submission-a',
+          memberId: 'member-a',
+          submittedDate: '2026-05-01T00:00:00.000Z',
+          reviewSummation: [],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'submission-a',
+          memberId: 'member-a',
+          submittedDate: '2026-05-01T00:00:00.000Z',
+          reviewSummation: [
+            {
+              id: 'review-a',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '1', score: 90 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'submission-b',
+          memberId: 'member-b',
+          submittedDate: '2026-05-01T00:00:01.000Z',
+          reviewSummation: [],
+        },
+      ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockImplementationOnce(async () => {
+        resolveFirstWriteStarted();
+        await firstWriteCanFinish;
+      })
+      .mockResolvedValue(undefined);
+
+    const firstResult = service.processScoringResult(firstPayload);
+    await firstWriteStarted;
+
+    const secondResult = service.processScoringResult(secondPayload);
+    await flushAsyncWork();
+
+    expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(1);
+
+    releaseFirstWrite();
+    await expect(Promise.all([firstResult, secondResult])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.$queryRaw.mock.calls[0][1]).toBe(
+      prisma.$queryRaw.mock.calls[1][1],
+    );
+    expect(prisma.$queryRaw.mock.calls[0][2]).toBe(
+      prisma.$queryRaw.mock.calls[1][2],
+    );
+    expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(2);
+    expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(3);
+
+    const secondSubmissionPayload = upsertReviewSummationSpy.mock
+      .calls[2][2] as
+      | { aggregateScore: number; submissionId: string }
+      | undefined;
+
+    expect(secondSubmissionPayload).toEqual(
+      expect.objectContaining({
+        submissionId: 'submission-b',
+      }),
+    );
+    expect(secondSubmissionPayload?.aggregateScore).toBeCloseTo(
+      (85 / 90) * 100,
+      10,
     );
   });
 
@@ -822,6 +1092,215 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('does not persist system summation when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      reviewId: 'review-1',
+      score: 100,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const findExistingReviewSummationsSpy = jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(findExistingReviewSummationsSpy).not.toHaveBeenCalled();
+    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(updateReviewSummationSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not persist currentReview summation when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      currentReview: {
+        aggregateScore: 97,
+      },
+      reviewId: 'review-1',
+      score: 100,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const upsertFromLegacyReviewPayloadSpy = jest
+      .spyOn(service as any, 'upsertFromLegacyReviewPayload')
+      .mockResolvedValue(97);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 97,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(upsertFromLegacyReviewPayloadSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not persist relative summations when completing the review fails', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      metadata: {
+        testScores: [
+          {
+            testcase: '753388858',
+            score: 50,
+          },
+        ],
+      },
+      reviewId: 'review-1',
+      score: 50,
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: [
+            {
+              id: basePayload.submissionId,
+              memberId: 'member-1',
+              submittedDate: '2026-05-01T00:00:00.000Z',
+            },
+          ],
+          headers: {},
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            data: [],
+          },
+        }),
+      );
+    httpService.patch.mockReturnValue(
+      throwError(() => ({
+        response: {
+          status: 503,
+          data: {
+            message: 'Review API unavailable',
+          },
+        },
+      })),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).rejects.toThrow(
+      'Failed to mark review review-1 as COMPLETED: HTTP 503: Review API unavailable',
+    );
+
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-1',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(upsertReviewSummationSpy).not.toHaveBeenCalled();
+  });
+
   it('returns a bad request error when review-api rejects a nonexistent submissionId', async () => {
     const { service, httpService, m2mService, prisma } = createService();
 
@@ -860,7 +1339,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('persists scoring progress as review summation metadata', async () => {
+  it('persists in-progress scoring progress without a failed placeholder score', async () => {
     const { service, m2mService, prisma } = createService();
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
@@ -906,7 +1385,7 @@ describe('ScoringResultService', () => {
       'm2m-token',
       'summation-1',
       expect.objectContaining({
-        aggregateScore: -1,
+        aggregateScore: 0,
         isPassing: false,
         isProvisional: true,
         metadata: expect.objectContaining({
@@ -926,16 +1405,392 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('does not award relative scoring credit for zero-score ties', () => {
+  it('keeps the failed score sentinel for failed scoring progress', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-1',
+          metadata: {
+            testProcess: 'provisional',
+            testType: 'provisional',
+          },
+        },
+      ]);
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 4,
+        failedTests: 1,
+        progress: 0.2,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.Failed,
+        message: 'Seed 753388861 failed',
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        totalTests: 20,
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'summation-1',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        isProvisional: true,
+        metadata: expect.objectContaining({
+          testProgress: 0.2,
+          testStatus: ScoringTestStatus.Failed,
+        }),
+      }),
+    );
+  });
+
+  it('preserves reviewedDate for impacted relative review payloads', () => {
+    const { service } = createService();
+    const buildRelativeReviewPayload = (
+      service as any
+    ).buildRelativeReviewPayload.bind(service) as (
+      reviewRecord: {
+        submissionId: string;
+        reviewObject: Record<string, unknown>;
+        metadata: Record<string, unknown>;
+        rawTestScores: Array<{ testcase: string; score: number }>;
+      },
+      bestScores: Map<string, number>,
+      scoreDirection: ScoreDirection,
+      fallbackScorecardId: string | undefined,
+      testPhase: string,
+      preserveReviewedDate: boolean,
+    ) => { payload: { reviewedDate: string } };
+    const reviewedDate = '2026-05-28T15:21:12.605Z';
+
+    const result = buildRelativeReviewPayload(
+      {
+        submissionId: 'impacted-submission',
+        reviewObject: {
+          id: 'review-summation-1',
+          isProvisional: true,
+          reviewedDate,
+        },
+        metadata: {
+          testScores: [{ testcase: '753388858', score: 10 }],
+          testType: 'provisional',
+        },
+        rawTestScores: [{ testcase: '753388858', score: 10 }],
+      },
+      new Map([['753388858', 20]]),
+      ScoreDirection.MAXIMIZE,
+      undefined,
+      'provisional',
+      true,
+    );
+
+    expect(result.payload.reviewedDate).toBe(reviewedDate);
+  });
+
+  it('marks timed-out system tests as failed with timed_out metadata', async () => {
+    const { service } = createService();
+    const processScoringResultSpy = jest
+      .spyOn(service, 'processScoringResult')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.markSystemTestTimedOut({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        timeoutMs: 86400000,
+        launchedAt: '2026-06-09T00:00:00.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(processScoringResultSpy).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      submissionId: basePayload.submissionId,
+      score: -1,
+      testPhase: 'system',
+      reviewTypeId: basePayload.reviewTypeId,
+      reviewId: 'review-1',
+      scorecardId: 'scorecard-1',
+      metadata: expect.objectContaining({
+        timed_out: true,
+        timeoutMs: 86400000,
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      }),
+    });
+  });
+
+  it('schedules a timeout job after dispatching system scoring', async () => {
+    const originalReviewTypeId = process.env.REVIEW_TYPE_ID;
+    process.env.REVIEW_TYPE_ID = basePayload.reviewTypeId;
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, ecsService, prisma } = createService(
+      undefined,
+      systemTestTimeoutSchedulerService,
+    );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster',
+    });
+
+    try {
+      await expect(
+        service.triggerSystemScore(
+          'review-1',
+          basePayload.submissionId,
+          basePayload.challengeId,
+        ),
+      ).resolves.toBe(undefined);
+    } finally {
+      if (originalReviewTypeId === undefined) {
+        delete process.env.REVIEW_TYPE_ID;
+      } else {
+        process.env.REVIEW_TYPE_ID = originalReviewTypeId;
+      }
+    }
+
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
+        cluster: 'cluster',
+        testPhase: 'system',
+        timeoutMs: 3600000,
+      }),
+      3600000,
+    );
+  });
+
+  it('normalizes zero-best relative scores without NaN or Infinity', () => {
     const { service } = createService();
     const calculateRelativeScore = (service as any).calculateRelativeScore.bind(
       service,
-    ) as (rawScore: number, bestScore?: number) => number;
+    ) as (
+      rawScore: number,
+      bestScore: number | undefined,
+      scoreDirection: ScoreDirection,
+    ) => number;
 
-    expect(calculateRelativeScore(0, 0)).toBe(0);
-    expect(calculateRelativeScore(0, 50)).toBe(0);
-    expect(calculateRelativeScore(50, 0)).toBe(0);
-    expect(calculateRelativeScore(50, 50)).toBe(100);
+    expect(calculateRelativeScore(0, 0, ScoreDirection.MAXIMIZE)).toBe(0);
+    expect(calculateRelativeScore(50, 0, ScoreDirection.MAXIMIZE)).toBe(0);
+    expect(calculateRelativeScore(0, 0, ScoreDirection.MINIMIZE)).toBe(100);
+    expect(calculateRelativeScore(0, 50, ScoreDirection.MINIMIZE)).toBe(0);
+    expect(calculateRelativeScore(50, 50, ScoreDirection.MAXIMIZE)).toBe(100);
+  });
+
+  it('writes recomputed relative review summations in leaderboard order', async () => {
+    const { service } = createService();
+    const processRelativeScoring = (service as any).processRelativeScoring.bind(
+      service,
+    ) as (
+      token: string,
+      payload: ScoringResultCallbackPayload,
+      testPhase: string,
+      fallbackMetadata: Record<string, unknown>,
+      fallbackScorecardId: string | undefined,
+      settings: {
+        challengeId?: string;
+        submissionApiUrl?: string;
+        enabled: boolean;
+        scoreDirection: ScoreDirection;
+      },
+    ) => Promise<number | undefined>;
+
+    const reviewFor = (submissionId: string, rawScore: number) => ({
+      id: `summation-${submissionId}`,
+      aggregateScore: rawScore,
+      isProvisional: true,
+      metadata: {
+        testType: 'provisional',
+        testScores: [{ testcase: '753388858', score: rawScore }],
+      },
+    });
+
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-ghost',
+        memberId: 'member-ghost',
+        reviewSummation: [reviewFor('submission-ghost', 100)],
+      },
+      {
+        id: 'submission-vdave',
+        memberId: 'member-vdave',
+        reviewSummation: [reviewFor('submission-vdave', 88.33507138754184)],
+      },
+      {
+        id: 'submission-bitrelica',
+        memberId: 'member-bitrelica',
+        reviewSummation: [reviewFor('submission-bitrelica', 79.5106923255694)],
+      },
+      {
+        id: 'submission-kazaward',
+        memberId: 'member-kazaward',
+        reviewSummation: [
+          reviewFor('submission-kazaward', 0.004946668727778636),
+        ],
+      },
+      {
+        id: 'submission-eulerschez',
+        memberId: 'member-eulerschez',
+        reviewSummation: [
+          reviewFor('submission-eulerschez', 0.004946668727778636),
+        ],
+      },
+      {
+        id: 'submission-shxzhaosr',
+        memberId: 'member-shxzhaosr',
+        reviewSummation: [reviewFor('submission-shxzhaosr', 0)],
+      },
+      {
+        id: 'submission-failed',
+        memberId: 'member-failed',
+        reviewSummation: [reviewFor('submission-failed', -1)],
+      },
+      {
+        id: 'submission-tsegaye',
+        memberId: 'member-tsegaye',
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+
+    const currentScore = await processRelativeScoring(
+      'm2m-token',
+      {
+        ...basePayload,
+        score: 85.82148326711835,
+        submissionId: 'submission-tsegaye',
+      },
+      'provisional',
+      {
+        reviewTypeId: basePayload.reviewTypeId,
+        testType: 'provisional',
+        testScores: [{ testcase: '753388858', score: 85.82148326711835 }],
+      },
+      undefined,
+      {
+        challengeId: basePayload.challengeId,
+        submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+        enabled: true,
+        scoreDirection: ScoreDirection.MAXIMIZE,
+      },
+    );
+
+    expect(currentScore).toBeCloseTo(85.82148326711835);
+    const persistedSubmissionIds = upsertReviewSummationSpy.mock.calls.map(
+      ([, , reviewPayload]) =>
+        (reviewPayload as { submissionId: string }).submissionId,
+    );
+
+    expect(persistedSubmissionIds).toEqual([
+      'submission-ghost',
+      'submission-vdave',
+      'submission-tsegaye',
+      'submission-bitrelica',
+      'submission-kazaward',
+      'submission-eulerschez',
+      'submission-shxzhaosr',
+      'submission-failed',
+    ]);
+  });
+
+  it('excludes no-credit and errored scores from MINIMIZE best-score baselines', () => {
+    const { service } = createService();
+    const computeBestScores = (service as any).computeBestScores.bind(
+      service,
+    ) as (
+      reviewRecords: Array<{
+        rawTestScores: Array<{
+          testcase: string;
+          score: number;
+          error?: string;
+        }>;
+      }>,
+      scoreDirection: ScoreDirection,
+    ) => Map<string, number>;
+
+    const bestScores = computeBestScores(
+      [
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 0 },
+            { testcase: 'seed-2', score: 5, error: 'runtime error' },
+            { testcase: 'seed-3', score: -1 },
+          ],
+        },
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 40 },
+            { testcase: 'seed-2', score: 30 },
+            { testcase: 'seed-3', score: 60 },
+          ],
+        },
+        {
+          rawTestScores: [
+            { testcase: 'seed-1', score: 10 },
+            { testcase: 'seed-2', score: 20 },
+            { testcase: 'seed-3', score: 50 },
+          ],
+        },
+      ],
+      ScoreDirection.MINIMIZE,
+    );
+
+    expect(bestScores.get('seed-1')).toBe(10);
+    expect(bestScores.get('seed-2')).toBe(20);
+    expect(bestScores.get('seed-3')).toBe(50);
   });
 
   it('selects the latest relative review using current submission date fields when created is missing', () => {
@@ -1062,6 +1917,270 @@ describe('ScoringResultService', () => {
     expect(records[0]).toEqual(
       expect.objectContaining({
         submissionId: 'newer-valid-submission',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
+
+  it('groups relative reviews by extracted submission ID and member identity', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          submissionId: 'member-latest',
+          member: {
+            id: 'member-1',
+            handle: 'competitor',
+          },
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          reviewSummations: [
+            {
+              id: 'member-latest-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          submissionId: 'member-older',
+          member: {
+            id: 'member-1',
+            handle: 'competitor',
+          },
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummations: [
+            {
+              id: 'member-older-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'member-latest',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
+
+  it('excludes the current member from relative scoring by handle when memberId is missing', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'older-current-member-submission',
+          memberHandle: 'eulerscheZahl',
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'older-current-member-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'other-member-submission',
+          memberHandle: 'other',
+          submittedDate: '2026-05-28T15:22:12.605Z',
+          reviewSummation: [
+            {
+              id: 'other-member-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 50 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+      'eulerscheZahl',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'other-member-submission',
+        rawTestScores: [expect.objectContaining({ score: 50 })],
+      }),
+    );
+  });
+
+  it('prefers explicitly latest relative reviews before timestamp fallback', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'newer-by-date',
+          memberId: 'member-1',
+          isLatest: false,
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          reviewSummation: [
+            {
+              id: 'newer-by-date-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+        {
+          id: 'marked-latest',
+          memberId: 'member-1',
+          isLatest: true,
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'marked-latest-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'marked-latest',
+        rawTestScores: [expect.objectContaining({ score: 100 })],
+      }),
+    );
+  });
+
+  it('collapses relative scoring candidates by nested submitter identity', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberKey?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'older-gaha-submission',
+          submitter: {
+            id: 'gaha-member-id',
+            handle: 'gaha',
+          },
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'older-gaha-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 10 }],
+              },
+            },
+          ],
+        },
+        {
+          submissionId: 'latest-gaha-submission',
+          submitter: {
+            id: 'gaha-member-id',
+            handle: 'gaha',
+          },
+          createdAt: '2026-05-28T15:23:32.878Z',
+          isLatest: true,
+          reviewSummations: [
+            {
+              id: 'latest-gaha-review',
+              isProvisional: true,
+              metadata: {
+                testType: 'provisional',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+      ],
+      'provisional',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toEqual(
+      expect.objectContaining({
+        submissionId: 'latest-gaha-submission',
         rawTestScores: [expect.objectContaining({ score: 100 })],
       }),
     );

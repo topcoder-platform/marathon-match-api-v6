@@ -104,6 +104,26 @@ describe('SubmissionRunnerLogAccessGuard', () => {
     expect(httpService.get).not.toHaveBeenCalled();
   });
 
+  it('allows ordinary users to continue to submission ownership checks', async () => {
+    const request: TestRequest = {
+      headers: {},
+      params: {
+        submissionId: 'submission-1',
+      },
+      query: {},
+      user: {
+        isMachine: false,
+        roles: [UserRole.User],
+        userId: '123',
+      },
+    };
+
+    await expect(guard.canActivate(buildContext(request))).resolves.toBe(true);
+    expect(prisma.submissionRunnerLog.findFirst).not.toHaveBeenCalled();
+    expect(httpService.get).not.toHaveBeenCalled();
+    expect(request.runnerLogAccess).toBeUndefined();
+  });
+
   it('allows a manager resource assigned to the mapped challenge', async () => {
     prisma.submissionRunnerLog.findFirst.mockResolvedValue({
       challengeId: 'challenge-1',

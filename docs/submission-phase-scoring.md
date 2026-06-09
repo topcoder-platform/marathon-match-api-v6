@@ -47,6 +47,8 @@ sequenceDiagram
         H-->>C: Throw error
       else Tester ready
         loop Once per matching phase config
+          H->>ECS: Check active scorer tasks for dedupe/cap
+          ECS->>F: Stop older same-member task when superseded
           H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
           ECS->>F: RunTask with env overrides
           F->>MM: GET /challenge/:id
@@ -74,13 +76,21 @@ sequenceDiagram
 
 Kafka consumption retries with exponential backoff. When `KAFKA_DLQ_ENABLED=true`, messages that still fail after `KAFKA_DLQ_MAX_RETRIES` are published to the configured DLQ topic suffix and the original offset is committed.
 
+## Scorer task launch limits
+
+Before each `RunTask`, `EcsService.launchScorerTask(...)` lists pending/running scorer tasks for the configured ECS task family. It skips duplicate active launches for the same challenge, submission, and phase config type; stops older active tasks for the same challenge/member when a newer submission arrives; and enforces `ECS_SCORER_MAX_CONCURRENT_TASKS` before launching another task. The cap defaults to `20`.
+
+When the cap is reached, the handler throws before calling `RunTask`. Kafka retry/backoff then provides back-pressure instead of committing the offset and creating unbounded ECS work.
+
 ## Submission network isolation
 
 The ECS task keeps trusted network access only on the trusted parent runner process so it can fetch config, download the submission, upload artifacts, and post the callback. The tester runs inside a scrubbed child JVM, while generic submitted solution commands run as the separate non-root `scorer` user with:
 
 - a scrubbed environment that does not include `ACCESS_TOKEN`
 - socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
-- root-only tester JAR and scorer config files, preventing submitted code from reading those `/tmp` inputs
+- a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes without exposing `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables
+- runner-owned mode `0400` tester JAR files, preventing submitted code from reading or modifying those `/tmp` inputs
+- a runner-owned mode `0400` scorer config handoff file that is deleted before tester or submitted solution code executes
 - callback review payloads created by the trusted runner's generic Marathon flow, or by a custom tester `runTester(...)` result map when a tester opts into that advanced path
 
 ## Observability
@@ -89,7 +99,7 @@ Runner task logs are written to CloudWatch using the submission runner log strea
 
 `GET /v6/marathon-match/submissions/:submissionId/runner-logs`
 
-For `PROVISIONAL` scoring, the runner writes progress to the phase review summation metadata through `POST /v6/marathon-match/internal/scoring-progress`. Review API exposes this as `reviewSummation.metadata.testProcess` (`provisional` or `system`), `reviewSummation.metadata.testProgress` (`0` to `1`), and `reviewSummation.metadata.testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`) when metadata is included in the response.
+For `PROVISIONAL` and `SYSTEM` scoring, the runner writes progress to the phase review summation metadata through `POST /v6/marathon-match/internal/scoring-progress`. Review API exposes this as `reviewSummation.metadata.testProcess` (`provisional` or `system`), `reviewSummation.metadata.testProgress` (`0` to `1`), and `reviewSummation.metadata.testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`) when metadata is included in the response. In-progress summations keep a neutral placeholder score and must be rendered as unavailable based on `testStatus`; only `FAILED` progress uses the failed-score sentinel. SYSTEM timeout failures also include `reviewSummation.metadata.timed_out = true`.
 
 When more than one phase config matches the currently open challenge phases, the handler launches one scorer task per match. This is the supported way to run both `EXAMPLE` and `PROVISIONAL` scoring from the same Submission phase.
 
@@ -100,7 +110,7 @@ Relative scoring applies when:
 - `relativeScoringEnabled = true` on the Marathon Match config
 - `testScores` are present in the scorer metadata
 
-In that case, `ScoringResultService` recalculates the latest-submission review scores relative to the current best result before writing review summations, so the persisted aggregate score stays normalized against the live field.
+In that case, `ScoringResultService` recalculates the latest-submission review scores relative to the current best result before writing review summations, so the persisted aggregate score stays normalized against the live field. Recalculated impacted submissions keep their existing `reviewedDate` so relative-score updates do not move historical review timestamps.
 
 ## Tester-change rerun
 
