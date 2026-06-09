@@ -27,6 +27,7 @@ describe('MarathonMatchConfigService', () => {
   const createService = () => {
     const httpService = {
       get: jest.fn(),
+      post: jest.fn(),
     };
     const ecsService = {
       launchScorerTask: jest.fn(),
@@ -424,6 +425,150 @@ describe('MarathonMatchConfigService', () => {
         memberId: '40051399',
       },
     );
+  });
+
+  it('uploads a validation submission and queues scorer execution', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          id: 'validation-submission-1',
+        },
+      }),
+    );
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster-1',
+      containerName: 'runner',
+      taskDefinition: 'mm-runner:7',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
+
+    const result = await service.uploadTestSubmission(
+      '30000123',
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+      },
+      {
+        buffer: Buffer.from('zip'),
+        mimetype: 'application/zip',
+        originalname: 'solution.zip',
+        size: 3,
+      } as Express.Multer.File,
+      user,
+    );
+
+    const postedForm = httpService.post.mock.calls[0][1] as FormData;
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionId: 'validation-submission-1',
+      configType: PhaseConfigType.PROVISIONAL,
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://submissions.example.com/v6/submissions/validation-upload',
+      expect.any(FormData),
+      {
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      },
+    );
+    expect(postedForm.get('challengeId')).toBe('30000123');
+    expect(postedForm.get('memberId')).toBe('40051399');
+    expect(postedForm.get('type')).toBe('CONTEST_SUBMISSION');
+    expect(postedForm.get('submissionPhaseId')).toBe('provisional-phase');
+    expect(ecsService.launchScorerTask).toHaveBeenCalledWith(
+      '30000123',
+      'validation-submission-1',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+        startSeed: BigInt(100),
+        numberOfTests: 50,
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+  });
+
+  it('rejects validation submissions when the tester is not compiled', async () => {
+    const { service, ecsService, httpService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      testerId: 'tester-1',
+      tester: {
+        compilationStatus: CompilationStatus.FAILED,
+        compilationError: 'javac failed',
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+
+    await expect(
+      service.uploadTestSubmission(
+        '30000123',
+        {},
+        {
+          buffer: Buffer.from('zip'),
+          mimetype: 'application/zip',
+          originalname: 'solution.zip',
+          size: 3,
+        } as Express.Multer.File,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(httpService.post).not.toHaveBeenCalled();
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
   });
 
   it('rate limits rerun scorer task launches in batches', async () => {

@@ -25,6 +25,8 @@ import {
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
+  TestSubmissionResponseDto,
+  TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import {
@@ -1217,6 +1219,245 @@ export class MarathonMatchConfigService {
         details: errorResponse.details,
       });
     }
+  }
+
+  /**
+   * Creates a clean Review API validation submission and queues one scorer ECS task.
+   * @param challengeId Challenge ID from POST /challenge/:challengeId/test-submission.
+   * @param body Multipart fields selecting the phase config and optional member/file overrides.
+   * @param file Uploaded submission archive captured by Nest memory storage.
+   * @param user Authenticated caller used as the fallback member id and audit context.
+   * @returns Validation submission id and ECS task launch details.
+   * @throws NotFoundException When the Marathon Match config does not exist.
+   * @throws BadRequestException When file contents are missing, the tester is not compiled, or the phase config is missing.
+   * @throws InternalServerErrorException When Review API upload or ECS launch fails unexpectedly.
+   * Used by challenge managers and copilots to validate scorer behavior before launch.
+   */
+  async uploadTestSubmission(
+    challengeId: string,
+    body: TestSubmissionUploadDto,
+    file: Express.Multer.File,
+    user: JwtUser,
+  ): Promise<TestSubmissionResponseDto> {
+    try {
+      const hasUploadedFile =
+        !!file &&
+        ((typeof file.size === 'number' && file.size > 0) ||
+          (file.buffer && file.buffer.length > 0));
+
+      if (!hasUploadedFile) {
+        throw new BadRequestException(
+          'File contents are required for validation submission upload.',
+        );
+      }
+
+      const config = await this.prisma.marathonMatchConfig.findUnique({
+        where: { challengeId },
+        include: {
+          phaseConfigs: true,
+          tester: true,
+        },
+      });
+
+      if (!config) {
+        throw new NotFoundException(
+          `Marathon match config with challenge ID ${challengeId} not found.`,
+        );
+      }
+
+      if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
+        const compilationError = config.tester.compilationError?.trim();
+        throw new BadRequestException(
+          `Tester ${config.testerId} for challenge ${challengeId} is not ready for validation scoring. Current compilation status: ${config.tester.compilationStatus}.${compilationError ? ` compilationError: ${compilationError}` : ''}`,
+        );
+      }
+
+      const configType = body.configType ?? PhaseConfigType.PROVISIONAL;
+      const phaseConfigData = config.phaseConfigs.find(
+        (phaseConfigEntry) => phaseConfigEntry.configType === configType,
+      );
+      if (!phaseConfigData) {
+        throw new BadRequestException(
+          `Marathon match config ${challengeId} requires a ${configType} phase config for validation submission scoring.`,
+        );
+      }
+
+      const memberId =
+        body.memberId?.trim() || this.asString(user.userId)?.trim();
+      if (!memberId) {
+        throw new BadRequestException(
+          'Member ID is required for validation submission upload.',
+        );
+      }
+
+      const submissionApiBaseUrl =
+        process.env.SUBMISSION_API_URL?.trim() ||
+        config.submissionApiUrl?.trim();
+      if (!submissionApiBaseUrl) {
+        throw new Error(
+          `Submission API URL is not configured for challenge ${challengeId}.`,
+        );
+      }
+
+      const token = await this.m2mService.getM2MToken();
+      if (!token) {
+        throw new Error(
+          'Unable to get M2M token for validation submission upload.',
+        );
+      }
+
+      const submissionId = await this.createValidationSubmission(
+        token,
+        submissionApiBaseUrl,
+        challengeId,
+        memberId,
+        phaseConfigData.phaseId,
+        body.fileName,
+        file,
+      );
+      const launchResult = await this.ecsService.launchScorerTask(
+        challengeId,
+        submissionId,
+        {
+          taskDefinitionName: config.taskDefinitionName,
+          taskDefinitionVersion: config.taskDefinitionVersion,
+        },
+        {
+          configType: phaseConfigData.configType,
+          startSeed: phaseConfigData.startSeed,
+          numberOfTests: phaseConfigData.numberOfTests,
+        },
+        undefined,
+        {
+          memberId,
+        },
+      );
+
+      this.logger.log({
+        message: 'Marathon Match validation submission queued for scoring.',
+        challengeId,
+        submissionId,
+        memberId,
+        configType: phaseConfigData.configType,
+        taskId: launchResult.taskId,
+        actor: this.getActor(user),
+      });
+
+      return {
+        challengeId,
+        submissionId,
+        configType: phaseConfigData.configType,
+        taskArn: launchResult.taskArn,
+        taskId: launchResult.taskId,
+        cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      const errorResponse = this.prismaErrorService.handleError(
+        error,
+        `uploading marathon match validation submission with challenge ID: ${challengeId} for actor: ${this.getActor(user)}`,
+      );
+      this.logger.error(errorResponse.message);
+      throw new InternalServerErrorException({
+        message: errorResponse.message,
+        code: errorResponse.code,
+        details: errorResponse.details,
+      });
+    }
+  }
+
+  /**
+   * Uploads a validation submission to Review API and extracts the created submission id.
+   * @param token M2M bearer token for Review API.
+   * @param submissionApiBaseUrl Review API base URL from configuration.
+   * @param challengeId Challenge that owns the validation submission.
+   * @param memberId Member id used as the submission owner for runner metadata.
+   * @param phaseId Configured challenge phase id to persist on the validation submission when present.
+   * @param fileName Optional file name override from the multipart request.
+   * @param file Uploaded submission archive.
+   * @returns Created Review API submission id.
+   * @throws BadRequestException When file bytes are unavailable or Review API omits an id.
+   * Used by `uploadTestSubmission` before scorer ECS dispatch.
+   */
+  private async createValidationSubmission(
+    token: string,
+    submissionApiBaseUrl: string,
+    challengeId: string,
+    memberId: string,
+    phaseId: string | undefined,
+    fileName: string | undefined,
+    file: Express.Multer.File,
+  ): Promise<string> {
+    if (!file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException(
+        'File buffer is required for validation submission upload.',
+      );
+    }
+
+    const resolvedFileName =
+      fileName?.trim() ||
+      file.originalname ||
+      file.filename ||
+      'submission.zip';
+    const form = new FormData();
+
+    form.set('challengeId', challengeId);
+    form.set('memberId', memberId);
+    form.set('type', 'CONTEST_SUBMISSION');
+    form.set('fileName', resolvedFileName);
+    if (phaseId?.trim()) {
+      form.set('submissionPhaseId', phaseId.trim());
+    }
+    const fileArrayBuffer = new ArrayBuffer(file.buffer.byteLength);
+    new Uint8Array(fileArrayBuffer).set(file.buffer);
+    form.set(
+      'file',
+      new Blob([fileArrayBuffer], {
+        type: file.mimetype || 'application/octet-stream',
+      }),
+      resolvedFileName,
+    );
+
+    const response = await firstValueFrom(
+      this.httpService.post(
+        `${submissionApiBaseUrl.replace(/\/+$/, '')}/submissions/validation-upload`,
+        form,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      ),
+    );
+    const submissionId = this.extractCreatedSubmissionId(response.data);
+    if (!submissionId) {
+      throw new BadRequestException(
+        'Validation submission upload did not return a submission id.',
+      );
+    }
+
+    return submissionId;
+  }
+
+  /**
+   * Extracts a created submission id from common Review API response wrappers.
+   * @param data Raw Review API response body.
+   * @returns Created submission id, or undefined when no supported field exists.
+   * Used after validation upload because environments return direct or wrapped DTOs.
+   */
+  private extractCreatedSubmissionId(data: unknown): string | undefined {
+    const wrapper = this.asRecord(data);
+    const resultRecord = this.asRecord(wrapper.result);
+    const dataRecord = this.asRecord(wrapper.data);
+
+    return (
+      this.asString(wrapper.id)?.trim() ||
+      this.asString(resultRecord.id)?.trim() ||
+      this.asString(dataRecord.id)?.trim()
+    );
   }
 
   /**

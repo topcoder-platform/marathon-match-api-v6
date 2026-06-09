@@ -137,7 +137,38 @@ describe('ChallengeCopilotResourceGuard', () => {
     );
   });
 
-  it('rejects a global copilot who is not the challenge copilot resource', async () => {
+  it('allows a member assigned as the challenge manager resource', async () => {
+    (httpService.get as jest.Mock).mockReturnValue(
+      of({
+        data: [
+          {
+            memberId: '123',
+            roleName: 'Manager',
+          },
+        ],
+      }),
+    );
+
+    const canActivate = await guard.canActivate(
+      buildContext({
+        headers: {
+          authorization: 'Bearer user-token',
+        },
+        params: {
+          challengeId: 'challenge-1',
+        },
+        user: {
+          isMachine: false,
+          roles: [UserRole.ProjectManager],
+          userId: '123',
+        },
+      }),
+    );
+
+    expect(canActivate).toBe(true);
+  });
+
+  it('rejects a global copilot who is not an allowed challenge resource', async () => {
     (httpService.get as jest.Mock).mockReturnValue(
       of({
         data: [

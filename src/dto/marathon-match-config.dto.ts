@@ -770,6 +770,89 @@ export class SystemRerunResponseDto {
 }
 
 /**
+ * Multipart form fields for uploading a Marathon Match scorer validation submission.
+ * Used by POST /challenge/:challengeId/test-submission alongside the uploaded ZIP file.
+ */
+export class TestSubmissionUploadDto {
+  @ApiProperty({
+    description:
+      'Saved phase configuration to use when scoring the validation submission. Defaults to PROVISIONAL.',
+    required: false,
+    enum: PhaseConfigType,
+    default: PhaseConfigType.PROVISIONAL,
+    example: PhaseConfigType.PROVISIONAL,
+  })
+  @IsOptional()
+  @IsEnum(PhaseConfigType)
+  configType?: PhaseConfigType;
+
+  @ApiProperty({
+    description:
+      'Optional member ID to attach to the validation submission. Defaults to the authenticated user id.',
+    required: false,
+    example: '40166514',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  memberId?: string;
+
+  @ApiProperty({
+    description:
+      'Optional filename override forwarded to the submission validation upload endpoint.',
+    required: false,
+    example: 'sample-solution.zip',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  fileName?: string;
+}
+
+/**
+ * Response payload returned after a validation submission has been created and
+ * queued for ECS scorer execution.
+ */
+export class TestSubmissionResponseDto {
+  @ApiProperty({
+    description: 'Challenge ID for the validation scoring request',
+    example: '30000123',
+  })
+  challengeId: string;
+
+  @ApiProperty({
+    description: 'Submission ID created for scorer validation',
+    example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
+  })
+  submissionId: string;
+
+  @ApiProperty({
+    description: 'Phase configuration used for validation scoring',
+    enum: PhaseConfigType,
+    example: PhaseConfigType.PROVISIONAL,
+  })
+  configType: PhaseConfigType;
+
+  @ApiProperty({
+    description: 'AWS ECS task ARN when scorer launch succeeded',
+    example: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/0123456789abcdef',
+  })
+  taskArn: string;
+
+  @ApiProperty({
+    description: 'Short AWS ECS task ID when scorer launch succeeded',
+    example: '0123456789abcdef',
+  })
+  taskId: string;
+
+  @ApiProperty({
+    description: 'CloudWatch logs console URL when available',
+    required: false,
+  })
+  cloudWatchLogsConsoleUrl?: string;
+}
+
+/**
  * Pagination metadata for marathon match config list endpoints.
  */
 export class PaginationMetaDto {

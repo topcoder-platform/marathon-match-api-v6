@@ -126,4 +126,20 @@ describe('copilot scorer setup access source metadata', () => {
 
     expect(roles).toContain('UserRole.User');
   });
+
+  it('allows copilots and managers on validation submission upload route', () => {
+    const roles = getRolesDecoratorArguments(
+      marathonMatchConfigControllerPath,
+      'uploadTestSubmission',
+    );
+
+    expect(roles).toEqual(
+      expect.arrayContaining([
+        'UserRole.Admin',
+        'UserRole.Copilot',
+        'UserRole.ProjectManager',
+        'UserRole.User',
+      ]),
+    );
+  });
 });
