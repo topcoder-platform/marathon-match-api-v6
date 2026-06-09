@@ -27,12 +27,24 @@ interface ChallengeResource {
 }
 
 /**
- * Allows marathon match score reruns for admins, scoped machine tokens, or the
- * authenticated copilot resource assigned to the target challenge.
+ * Allows marathon match score operations for admins, scoped machine tokens, or
+ * the authenticated Copilot/Manager resource assigned to the target challenge.
  * Used on marathon match rerun endpoints after the global token guard has validated the JWT.
  */
 @Injectable()
 export class ChallengeCopilotResourceGuard implements CanActivate {
+  private static readonly ALLOWED_RESOURCE_ROLE_NAMES = new Set([
+    'copilot',
+    'manager',
+    'project manager',
+  ]);
+
+  private static readonly RESOURCE_ROLE_ID_ENV_NAMES = [
+    'COPILOT_RESOURCE_ROLE_ID',
+    'PROJECT_MANAGER_RESOURCE_ROLE_ID',
+    'MANAGER_RESOURCE_ROLE_ID',
+  ];
+
   private readonly logger = LoggerService.forRoot(
     ChallengeCopilotResourceGuard.name,
   );
@@ -44,9 +56,9 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
   /**
    * Authorizes the current request against the route challenge id.
    * @param context Nest execution context containing the HTTP request.
-   * @returns `true` when the user is an admin, scoped M2M caller, or challenge copilot resource.
-   * @throws ForbiddenException When a non-admin user is not assigned as the challenge copilot.
-   * Used by Marathon Match provisional and SYSTEM rerun routes.
+   * @returns `true` when the user is an admin, scoped M2M caller, or challenge Copilot/Manager resource.
+   * @throws ForbiddenException When a non-admin user is not assigned to the challenge with an allowed role.
+   * Used by Marathon Match rerun and validation upload routes.
    */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
@@ -70,15 +82,15 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
       throw new ForbiddenException('Authorization header is required');
     }
 
-    const hasChallengeCopilotResource = await this.hasChallengeCopilotResource(
+    const hasChallengeResource = await this.hasAllowedChallengeResource(
       challengeId,
       user,
       authorization,
     );
 
-    if (!hasChallengeCopilotResource) {
+    if (!hasChallengeResource) {
       throw new ForbiddenException(
-        'Only admins, M2M tokens, or the challenge copilot resource can rerun marathon match scores.',
+        'Only admins, M2M tokens, or challenge-assigned Copilot/Manager resources can run marathon match score operations.',
       );
     }
 
@@ -99,15 +111,15 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
   }
 
   /**
-   * Fetches the current caller's resources for a challenge and checks for a copilot resource role.
+   * Fetches the current caller's resources for a challenge and checks for an allowed resource role.
    * @param challengeId Challenge identifier from the rerun route.
    * @param user Authenticated JWT payload used to constrain the resource lookup.
    * @param authorization Original request authorization header for resource-api.
-   * @returns `true` when resource-api returns a matching copilot resource for the caller.
+   * @returns `true` when resource-api returns a matching Copilot/Manager resource for the caller.
    * @throws ForbiddenException When the caller has no member identity or resource-api cannot be checked.
-   * Used by `canActivate` for challenge-specific copilot authorization.
+   * Used by `canActivate` for challenge-specific resource authorization.
    */
-  private async hasChallengeCopilotResource(
+  private async hasAllowedChallengeResource(
     challengeId: string,
     user: JwtUser,
     authorization: string,
@@ -133,11 +145,11 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
       const resources = Array.isArray(response.data) ? response.data : [];
 
       return resources.some((resource) =>
-        this.isCallerCopilotResource(resource, memberIdentity),
+        this.isCallerAllowedResource(resource, memberIdentity),
       );
     } catch (error) {
       this.logger.warn({
-        message: 'Failed to verify challenge copilot resource',
+        message: 'Failed to verify challenge resource',
         challengeId,
         userId: user.userId,
         handle: user.handle,
@@ -145,7 +157,7 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
       });
 
       throw new ForbiddenException(
-        'Unable to verify challenge copilot resource access.',
+        'Unable to verify challenge resource access.',
       );
     }
   }
@@ -155,7 +167,7 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
    * @param challengeId Challenge identifier to query.
    * @param user Authenticated JWT payload containing member id or handle.
    * @returns Absolute resource-api URL with challenge and caller filters.
-   * Used by `hasChallengeCopilotResource`.
+   * Used by `hasAllowedChallengeResource`.
    */
   private buildResourcesUrl(challengeId: string, user: JwtUser): string {
     const query = new URLSearchParams({
@@ -174,13 +186,13 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
   }
 
   /**
-   * Checks whether a resource row belongs to the caller and uses the Copilot role.
+   * Checks whether a resource row belongs to the caller and uses an allowed role.
    * @param resource Raw resource-api row.
    * @param memberIdentity Normalized caller member id or handle.
-   * @returns `true` when the resource row identifies the caller as a copilot resource.
-   * Used by `hasChallengeCopilotResource` after resource-api lookup.
+   * @returns `true` when the row identifies the caller as a Copilot/Manager resource.
+   * Used by `hasAllowedChallengeResource` after resource-api lookup.
    */
-  private isCallerCopilotResource(
+  private isCallerAllowedResource(
     resource: unknown,
     memberIdentity: string,
   ): boolean {
@@ -195,27 +207,33 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
       resourceMemberId === memberIdentity ||
       resourceMemberHandle === memberIdentity;
 
-    return resourceUserMatches && this.isCopilotResource(typedResource);
+    return resourceUserMatches && this.isAllowedResourceRole(typedResource);
   }
 
   /**
-   * Checks whether a resource row is a Copilot role assignment.
+   * Checks whether a resource row is an allowed scorer-operation role assignment.
    * @param resource Raw resource-api row with role fields.
-   * @returns `true` when the role name or configured role id identifies Copilot.
-   * Used by `isCallerCopilotResource`.
+   * @returns `true` when role name or configured role id identifies Copilot/Manager.
+   * Used by `isCallerAllowedResource`.
    */
-  private isCopilotResource(resource: ChallengeResource): boolean {
+  private isAllowedResourceRole(resource: ChallengeResource): boolean {
     const roleName = this.normalizeText(
       resource.roleName ?? resource.role ?? resource.resourceRole?.name,
     );
-    const configuredCopilotRoleId = this.normalizeText(
-      process.env.COPILOT_RESOURCE_ROLE_ID,
-    );
 
-    return (
-      roleName === 'copilot' ||
-      (!!configuredCopilotRoleId &&
-        this.normalizeText(resource.roleId) === configuredCopilotRoleId)
+    if (
+      ChallengeCopilotResourceGuard.ALLOWED_RESOURCE_ROLE_NAMES.has(roleName)
+    ) {
+      return true;
+    }
+
+    const roleId = this.normalizeText(resource.roleId);
+    if (!roleId) {
+      return false;
+    }
+
+    return ChallengeCopilotResourceGuard.RESOURCE_ROLE_ID_ENV_NAMES.some(
+      (envName) => this.normalizeText(process.env[envName]) === roleId,
     );
   }
 
@@ -223,7 +241,7 @@ export class ChallengeCopilotResourceGuard implements CanActivate {
    * Resolves the caller's member identity for resource matching.
    * @param user Authenticated JWT payload.
    * @returns Normalized user id when present, otherwise normalized handle; `undefined` when absent.
-   * Used by `hasChallengeCopilotResource`.
+   * Used by `hasAllowedChallengeResource`.
    */
   private getMemberIdentity(user: JwtUser): string | undefined {
     return this.normalizeText(user.userId) || this.normalizeText(user.handle);

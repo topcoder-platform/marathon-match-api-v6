@@ -10,13 +10,18 @@ import {
   Put,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { PhaseConfigType } from '@prisma/client';
 import { Response } from 'express';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -31,6 +36,8 @@ import {
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
+  TestSubmissionResponseDto,
+  TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
@@ -189,6 +196,93 @@ export class MarathonMatchConfigController {
   ): Promise<SystemRerunResponseDto> {
     return await this.marathonMatchConfigService.rerunSystemTests(
       challengeId,
+      user,
+    );
+  }
+
+  /**
+   * Uploads a validation submission and queues scorer execution through ECS.
+   * @param challengeId Challenge ID.
+   * @param body Multipart form fields for validation scoring.
+   * @param file Uploaded submission ZIP.
+   * @param user Authenticated user for authorization and member fallback.
+   * @returns Created submission and ECS task launch details.
+   */
+  @Post('/:challengeId/test-submission')
+  @Roles(
+    UserRole.Admin,
+    UserRole.Copilot,
+    UserRole.ProjectManager,
+    UserRole.User,
+  )
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Upload and score a Marathon Match validation submission',
+    description:
+      'Roles: Admin or challenge Copilot/Manager resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description:
+      'The challenge ID for the marathon match validation submission request',
+    example: '30000123',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+    }),
+  )
+  @ApiBody({
+    required: true,
+    type: 'multipart/form-data',
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+        configType: {
+          type: 'string',
+          enum: Object.values(PhaseConfigType),
+          default: PhaseConfigType.PROVISIONAL,
+        },
+        memberId: {
+          type: 'string',
+        },
+        fileName: {
+          type: 'string',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({
+    status: 202,
+    description:
+      'Validation submission created and queued for asynchronous scoring.',
+    type: TestSubmissionResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Missing file, tester is not compiled successfully, or requested phase config is missing.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
+  async uploadTestSubmission(
+    @Param('challengeId') challengeId: string,
+    @Body() body: TestSubmissionUploadDto,
+    @UploadedFile() file: Express.Multer.File,
+    @User() user: JwtUser,
+  ): Promise<TestSubmissionResponseDto> {
+    return await this.marathonMatchConfigService.uploadTestSubmission(
+      challengeId,
+      body,
+      file,
       user,
     );
   }
