@@ -23,17 +23,12 @@ import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -95,15 +90,12 @@ public class EcsRunnerMain {
         "/usr/local/bin/mm-runner-isolate";
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
+    private static final String SCORER_STATE_CLEANUP_ARGUMENT =
+        "--cleanup-scorer-state";
+    private static final int SCORER_STATE_CLEANUP_TIMEOUT_MS = 10_000;
     private static final String RUNNER_EXECUTION_USER = "runner";
     private static final String RUNNER_EXECUTION_GROUP = "runner";
     private static final String SCORER_EXECUTION_USER = "scorer";
-    private static final List<String> SCORER_WRITABLE_STATE_DIRS = Arrays.asList(
-        "/tmp",
-        "/var/tmp",
-        "/dev/shm",
-        "/home/scorer"
-    );
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
@@ -1398,127 +1390,98 @@ public class EcsRunnerMain {
      * entry is deleted with symlink-safe traversal so a malicious submission cannot redirect
      * cleanup outside the selected writable directory.
      *
-     * @return Number of top-level scorer-owned entries deleted.
+     * <p>The isolated Java child runs as {@code runner}, so it cannot reliably list
+     * {@code /home/scorer} or delete scorer-owned entries under sticky directories such as
+     * {@code /tmp}. Cleanup is therefore delegated to the narrow setuid scorer helper, which only
+     * scans its compiled-in writable directories and only deletes entries owned by the scorer UID.
+     *
+     * @return Number of top-level scorer-owned entries reported as deleted by the helper.
      */
     private static int deleteScorerOwnedWritableStateEntries() {
-        int deletedEntries = 0;
-        for (String directory : SCORER_WRITABLE_STATE_DIRS) {
-            deletedEntries += deleteScorerOwnedDirectoryEntries(Paths.get(directory));
+        List<String> command = Arrays.asList(
+            SCORER_ISOLATION_WRAPPER_PATH,
+            SCORER_STATE_CLEANUP_ARGUMENT
+        );
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+
+        try {
+            Process process = processBuilder.start();
+            boolean finished = process.waitFor(
+                SCORER_STATE_CLEANUP_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            );
+            if (!finished) {
+                process.destroyForcibly();
+                logWarn(
+                    "tester.tmp-isolation",
+                    "Scorer writable-state cleanup helper timed out after "
+                        + SCORER_STATE_CLEANUP_TIMEOUT_MS
+                        + "ms."
+                );
+                return 0;
+            }
+
+            String output;
+            try (InputStream inputStream = process.getInputStream()) {
+                output = new String(readAllBytes(inputStream), StandardCharsets.UTF_8)
+                    .trim();
+            }
+
+            int deletedEntries = parseScorerCleanupDeletedEntries(output);
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                logWarn(
+                    "tester.tmp-isolation",
+                    "Scorer writable-state cleanup helper exited with code "
+                        + exitCode
+                        + (output.isEmpty() ? "" : ", output=" + output)
+                );
+            }
+            return deletedEntries;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            logWarn(
+                "tester.tmp-isolation",
+                "Interrupted while running scorer writable-state cleanup helper."
+            );
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Failed to run scorer writable-state cleanup helper: "
+                    + error.getMessage()
+            );
         }
-        return deletedEntries;
+        return 0;
     }
 
     /**
-     * Deletes top-level entries owned by scorer under one writable directory.
+     * Parses the cleanup helper output for the deleted-entry count.
      *
-     * @param directory Writable directory to reset.
-     * @return Number of top-level scorer-owned entries deleted.
+     * <p>The helper writes diagnostics plus a numeric deleted-entry line. The runner reads the
+     * last numeric line so deletion counts are still preserved when warnings are emitted before
+     * the final count.
+     *
+     * @param output Merged stdout/stderr emitted by the cleanup helper.
+     * @return Parsed deleted-entry count, or {@code 0} when the helper did not report one.
      */
-    private static int deleteScorerOwnedDirectoryEntries(Path directory) {
-        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+    private static int parseScorerCleanupDeletedEntries(String output) {
+        if (output == null || output.trim().isEmpty()) {
             return 0;
         }
 
-        int deletedEntries = 0;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
-            for (Path entry : stream) {
-                if (!isScorerOwnedPath(entry)) {
-                    continue;
-                }
-
+        String[] lines = output.split("\\R");
+        for (int index = lines.length - 1; index >= 0; index--) {
+            String line = lines[index].trim();
+            if (line.matches("\\d+")) {
                 try {
-                    deleteUntrustedPathRecursively(entry);
-                    deletedEntries += 1;
-                } catch (NoSuchFileException ignored) {
-                    // Entry disappeared between listing and deletion.
-                } catch (IOException cleanupError) {
-                    logWarn(
-                        "tester.tmp-isolation",
-                        "Failed to delete scorer-owned entry "
-                            + entry
-                            + ": "
-                            + cleanupError.getMessage()
-                    );
+                    return Integer.parseInt(line);
+                } catch (NumberFormatException ignored) {
+                    return 0;
                 }
             }
-        } catch (IOException error) {
-            logWarn(
-                "tester.tmp-isolation",
-                "Failed to list scorer-owned entries under "
-                    + directory
-                    + ": "
-                    + error.getMessage()
-            );
         }
-
-        return deletedEntries;
-    }
-
-    /**
-     * Checks ownership without following symlinks.
-     *
-     * @param path Candidate writable-state entry.
-     * @return {@code true} when the entry is owned by the scorer user.
-     */
-    private static boolean isScorerOwnedPath(Path path) {
-        try {
-            return SCORER_EXECUTION_USER.equals(
-                Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName()
-            );
-        } catch (IOException error) {
-            logWarn(
-                "tester.tmp-isolation",
-                "Unable to read owner for writable entry "
-                    + path
-                    + ": "
-                    + error.getMessage()
-            );
-            return false;
-        }
-    }
-
-    /**
-     * Deletes an untrusted path tree without following symbolic links.
-     *
-     * @param path Top-level scorer-owned writable-state entry to remove.
-     * @throws IOException When deletion fails.
-     */
-    private static void deleteUntrustedPathRecursively(Path path) throws IOException {
-        Files.walkFileTree(
-            path,
-            new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(
-                    Path file,
-                    BasicFileAttributes attributes
-                ) throws IOException {
-                    Files.deleteIfExists(file);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(
-                    Path directory,
-                    IOException error
-                ) throws IOException {
-                    if (error != null) {
-                        throw error;
-                    }
-
-                    Files.deleteIfExists(directory);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(
-                    Path file,
-                    IOException error
-                ) throws IOException {
-                    Files.deleteIfExists(file);
-                    return FileVisitResult.CONTINUE;
-                }
-            }
-        );
+        return 0;
     }
 
     /**

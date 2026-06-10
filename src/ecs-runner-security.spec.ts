@@ -34,6 +34,28 @@ describe('ECS runner isolation image wiring', () => {
       'signal_child_process_group(child_pid, SIGKILL)',
     );
   });
+
+  it('resets scorer-owned writable state through the setuid scorer helper', () => {
+    const runnerSource = readRepoFile(
+      'ecs-runner/src/main/java/com/topcoder/runner/EcsRunnerMain.java',
+    );
+    const helperSource = readRepoFile('ecs-runner/scripts/mm-net-isolate.c');
+
+    expect(runnerSource).toContain(
+      'private static final String SCORER_STATE_CLEANUP_ARGUMENT',
+    );
+    expect(runnerSource).toContain(
+      'SCORER_ISOLATION_WRAPPER_PATH,\n            SCORER_STATE_CLEANUP_ARGUMENT',
+    );
+    expect(helperSource).toContain(
+      'argc == 2 && strcmp(argv[1], "--cleanup-scorer-state") == 0',
+    );
+    expect(helperSource).toContain('cleanup_scorer_writable_state');
+    expect(helperSource).toContain(
+      'stat_buffer.st_uid != (uid_t) MM_ISOLATED_UID',
+    );
+    expect(helperSource).toContain('remove_tree_no_follow');
+  });
 });
 
 describe('ECS runner tester JAR isolation', () => {

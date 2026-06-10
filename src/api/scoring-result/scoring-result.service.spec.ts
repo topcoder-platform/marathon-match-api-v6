@@ -51,12 +51,14 @@ describe('ScoringResultService', () => {
       getM2MToken: jest.fn(),
     };
     const prisma: {
+      $executeRaw: jest.Mock;
       $queryRaw: jest.Mock;
       $transaction: jest.Mock;
       marathonMatchConfig: {
         findUnique: jest.Mock;
       };
     } = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(),
       marathonMatchConfig: {
@@ -441,12 +443,12 @@ describe('ScoringResultService', () => {
     ]);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(prisma.$queryRaw.mock.calls[0][1]).toBe(
-      prisma.$queryRaw.mock.calls[1][1],
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.$executeRaw.mock.calls[0][1]).toBe(
+      prisma.$executeRaw.mock.calls[1][1],
     );
-    expect(prisma.$queryRaw.mock.calls[0][2]).toBe(
-      prisma.$queryRaw.mock.calls[1][2],
+    expect(prisma.$executeRaw.mock.calls[0][2]).toBe(
+      prisma.$executeRaw.mock.calls[1][2],
     );
     expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(2);
     expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(3);

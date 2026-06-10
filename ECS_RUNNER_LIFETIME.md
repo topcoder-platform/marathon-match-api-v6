@@ -98,7 +98,7 @@ Inside the task, the trusted Java parent runner:
 1. Fetches the challenge config, tester JAR, and tester metadata from `marathon-match-api-v6`.
 2. Downloads the submission from the configured Submission API URL.
 3. Posts an initial progress callback for `PROVISIONAL` and `SYSTEM` runs.
-4. Starts the tester in an isolated child JVM. Submitted solution commands run as the separate `scorer` user with scrubbed environment, restricted filesystem access, and no outbound INET/INET6 socket creation.
+4. Starts the tester in an isolated child JVM. Submitted solution commands run as the separate `scorer` user with scrubbed environment, restricted filesystem access, and no outbound INET/INET6 socket creation. For standard generic-runner seeds, the child invokes `mm-scorer-isolate --cleanup-scorer-state` before and after each test case so scorer-owned files in fixed writable roots are reset between seeds.
 5. Uploads public/private artifacts back through Submission API.
 6. Posts the final scoring callback to `POST /v6/marathon-match/internal/scoring-results`.
 7. Exits with code `0` only after the final callback succeeds.
