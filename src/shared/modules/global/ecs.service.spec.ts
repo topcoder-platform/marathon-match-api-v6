@@ -310,6 +310,85 @@ describe('EcsService', () => {
     ).toBe(false);
   });
 
+  it('launches scorer tasks when active task listing is not permitted', async () => {
+    const { service, m2mService, prisma, send } = createService();
+    m2mService.getM2MToken.mockResolvedValue('launch-token');
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.reject(
+          Object.assign(
+            new Error('User is not authorized to perform: ecs:ListTasks'),
+            {
+              name: 'AccessDeniedException',
+            },
+          ),
+        );
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-123',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({
+          taskDefinition: {
+            containerDefinitions: [
+              {
+                name: 'tc-mm-runner',
+                logConfiguration: {
+                  options: {
+                    'awslogs-group': '/ecs/mm-runner',
+                    'awslogs-stream-prefix': 'mm',
+                  },
+                },
+              },
+            ],
+          },
+        });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    const result = await service.launchScorerTask(
+      'challenge-1',
+      'submission-1',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+
+    expect(result.taskId).toBe('task-123');
+    expect(result.logStreamName).toBe('mm/tc-mm-runner/task-123');
+    expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
+    expect(
+      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
+    ).toBe(true);
+    expect(
+      send.mock.calls.some(([command]) => command instanceof StopTaskCommand),
+    ).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Unable to inspect active ECS scorer tasks; launching without duplicate or concurrency checks.',
+        taskDefinitionName: 'mm-ecs-runner',
+      }),
+    );
+    expect(prisma.submissionRunnerLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-123',
+        },
+      }),
+    );
+  });
+
   it('passes Auth0 refresh settings to the ECS runner for long system scoring callbacks', async () => {
     const { service, m2mService, send } = createService();
     m2mService.getM2MToken.mockResolvedValue('launch-token');

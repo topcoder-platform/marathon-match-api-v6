@@ -468,7 +468,7 @@
         "fileName": "submission-issue-45-ignore-sigterm.zip",
         "language": "cpp",
         "issue": 45,
-        "validation": "Regression submission ignores SIGTERM and spins so per-test timeout must use destroyForcibly/SIGKILL."
+        "validation": "Regression submission ignores SIGTERM and spins so per-test timeout must still terminate the scorer process group."
       }
     },
     {

@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <linux/audit.h>
+#include <linux/capability.h>
 #include <linux/filter.h>
 #include <linux/landlock.h>
 #include <linux/seccomp.h>
@@ -104,6 +105,10 @@
 #define __NR_landlock_restrict_self 446
 #endif
 
+#ifndef CAP_KILL
+#define CAP_KILL 5
+#endif
+
 #if MM_SUPERVISE_CHILD
 static volatile sig_atomic_t supervised_child_pid = -1;
 #endif
@@ -170,6 +175,221 @@ static void close_extra_fds(void) {
     for (rlim_t fd = 3; fd < max_fd; fd++) {
         close((int) fd);
     }
+}
+
+/**
+ * Checks whether a directory entry is "." or "..".
+ *
+ * name is the entry name returned by readdir. Returns 1 for the current or
+ * parent directory pseudo-entry and 0 for all other names.
+ */
+static int is_current_or_parent_directory(const char *name) {
+    return strcmp(name, ".") == 0 || strcmp(name, "..") == 0;
+}
+
+/**
+ * Builds a child path under a parent directory.
+ *
+ * buffer receives the joined path, buffer_size is its capacity, parent is the
+ * directory being scanned, and name is a direct child entry. Returns 0 when the
+ * joined path fits and 1 when it would be truncated.
+ */
+static int join_child_path(
+    char *buffer,
+    size_t buffer_size,
+    const char *parent,
+    const char *name
+) {
+    int written = snprintf(buffer, buffer_size, "%s/%s", parent, name);
+    if (written < 0 || (size_t) written >= buffer_size) {
+        fprintf(stderr, "cleanup path too long under %s\n", parent);
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Removes one untrusted path tree without following symlinks.
+ *
+ * The cleanup entry point is used by the Java runner between test cases. It
+ * runs with the scorer helper's setuid-root privilege, but it only removes
+ * entries that were already selected as owned by the scorer UID. path is the
+ * selected top-level entry. Returns 0 when the tree was removed or already
+ * disappeared and 1 when any entry could not be removed.
+ */
+static int remove_tree_no_follow(const char *path) {
+    struct stat stat_buffer;
+    if (lstat(path, &stat_buffer) != 0) {
+        if (errno == ENOENT || errno == ENOTDIR) {
+            return 0;
+        }
+        fprintf(stderr, "lstat(%s): %s\n", path, strerror(errno));
+        return 1;
+    }
+
+    if (S_ISDIR(stat_buffer.st_mode)) {
+        DIR *dir = opendir(path);
+        struct dirent *entry;
+        int failed = 0;
+
+        if (dir == NULL) {
+            if (errno == ENOENT || errno == ENOTDIR) {
+                return 0;
+            }
+            fprintf(stderr, "opendir(%s): %s\n", path, strerror(errno));
+            return 1;
+        }
+
+        while ((entry = readdir(dir)) != NULL) {
+            char child_path[PATH_MAX];
+            if (is_current_or_parent_directory(entry->d_name)) {
+                continue;
+            }
+            if (
+                join_child_path(
+                    child_path,
+                    sizeof(child_path),
+                    path,
+                    entry->d_name
+                ) != 0
+            ) {
+                failed = 1;
+                continue;
+            }
+            if (remove_tree_no_follow(child_path) != 0) {
+                failed = 1;
+            }
+        }
+
+        if (closedir(dir) != 0) {
+            fprintf(stderr, "closedir(%s): %s\n", path, strerror(errno));
+            failed = 1;
+        }
+        if (rmdir(path) != 0 && errno != ENOENT && errno != ENOTDIR) {
+            fprintf(stderr, "rmdir(%s): %s\n", path, strerror(errno));
+            failed = 1;
+        }
+        return failed;
+    }
+
+    if (unlink(path) != 0 && errno != ENOENT && errno != ENOTDIR) {
+        fprintf(stderr, "unlink(%s): %s\n", path, strerror(errno));
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Deletes scorer-owned top-level entries under one writable directory.
+ *
+ * directory is a fixed cleanup root compiled into the helper. deleted_entries
+ * receives the number of selected top-level entries successfully removed.
+ * Returns 0 when the directory was scanned cleanly and 1 when any selected
+ * entry could not be inspected or removed. Missing directories are ignored.
+ */
+static int cleanup_scorer_owned_entries_under(
+    const char *directory,
+    int *deleted_entries
+) {
+    DIR *dir = opendir(directory);
+    struct dirent *entry;
+    int failed = 0;
+
+    if (dir == NULL) {
+        if (errno == ENOENT || errno == ENOTDIR) {
+            return 0;
+        }
+        fprintf(stderr, "opendir(%s): %s\n", directory, strerror(errno));
+        return 1;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        char entry_path[PATH_MAX];
+        struct stat stat_buffer;
+
+        if (is_current_or_parent_directory(entry->d_name)) {
+            continue;
+        }
+        if (
+            join_child_path(
+                entry_path,
+                sizeof(entry_path),
+                directory,
+                entry->d_name
+            ) != 0
+        ) {
+            failed = 1;
+            continue;
+        }
+
+        if (lstat(entry_path, &stat_buffer) != 0) {
+            if (errno == ENOENT || errno == ENOTDIR) {
+                continue;
+            }
+            fprintf(stderr, "lstat(%s): %s\n", entry_path, strerror(errno));
+            failed = 1;
+            continue;
+        }
+
+        if (stat_buffer.st_uid != (uid_t) MM_ISOLATED_UID) {
+            continue;
+        }
+
+        if (remove_tree_no_follow(entry_path) == 0) {
+            *deleted_entries += 1;
+        } else {
+            failed = 1;
+        }
+    }
+
+    if (closedir(dir) != 0) {
+        fprintf(stderr, "closedir(%s): %s\n", directory, strerror(errno));
+        failed = 1;
+    }
+    return failed;
+}
+
+/**
+ * Deletes scorer-owned writable state from fixed, compiled-in directories.
+ *
+ * This mode intentionally accepts no path arguments. It is called by the Java
+ * runner before and after each seed to prevent scorer-owned filesystem state
+ * from carrying across tests. Returns 0 when cleanup completed and 1 when any
+ * cleanup root or selected scorer-owned entry could not be processed.
+ */
+static int cleanup_scorer_writable_state(void) {
+    static const char *const cleanup_directories[] = {
+        "/tmp",
+        "/var/tmp",
+        "/dev/shm",
+        MM_ISOLATED_HOME
+    };
+    size_t index;
+    int deleted_entries = 0;
+    int failed = 0;
+
+    if (geteuid() != 0) {
+        fprintf(stderr, "cleanup requires setuid-root scorer helper\n");
+        return 1;
+    }
+
+    for (
+        index = 0;
+        index < sizeof(cleanup_directories) / sizeof(cleanup_directories[0]);
+        index++
+    ) {
+        if (
+            cleanup_scorer_owned_entries_under(
+                cleanup_directories[index],
+                &deleted_entries
+            ) != 0
+        ) {
+            failed = 1;
+        }
+    }
+
+    printf("%d\n", deleted_entries);
+    return failed;
 }
 
 #if MM_INSTALL_SOCKET_FILTER
@@ -659,13 +879,30 @@ static int enter_isolated_execution(void) {
  * because its real UID is still the runner UID.
  */
 #if MM_SUPERVISE_CHILD
+static int signal_child_process_group(pid_t child_pid, int signo) {
+    if (kill(-child_pid, signo) == 0 || errno == ESRCH) {
+        return 0;
+    }
+
+    if (kill(child_pid, signo) == 0 || errno == ESRCH) {
+        return 0;
+    }
+
+    return errno;
+}
+
 static void forward_signal_to_child(int signo) {
     pid_t child_pid = (pid_t) supervised_child_pid;
     if (child_pid > 0) {
-        if (kill(-child_pid, signo) != 0) {
-            if (kill(child_pid, signo) != 0 && errno == EPERM) {
-                _exit(128 + signo);
+        int signal_error = signal_child_process_group(child_pid, signo);
+        if (signo == SIGTERM) {
+            int kill_error = signal_child_process_group(child_pid, SIGKILL);
+            if (signal_error == 0) {
+                signal_error = kill_error;
             }
+        }
+        if (signal_error == EPERM) {
+            _exit(128 + signo);
         }
     }
 }
@@ -702,16 +939,24 @@ static int wait_status_to_exit_code(int status) {
 
 /**
  * Drops the supervising wrapper back to the real user that invoked the setuid
- * scorer helper. The already-forked child keeps the temporary root privilege it
- * needs to switch to the configured isolated UID before exec.
+ * scorer helper while retaining only CAP_KILL. The already-forked child keeps
+ * the temporary root privilege it needs to switch to the configured isolated
+ * UID before exec.
  */
 static int drop_supervisor_to_invoker(void) {
 #if MM_DROP_SUPERVISOR_PRIVS
     uid_t uid = getuid();
     gid_t gid = getgid();
+    struct __user_cap_header_struct cap_header;
+    struct __user_cap_data_struct cap_data[_LINUX_CAPABILITY_U32S_3];
 
     if (uid == 0 && gid == 0) {
         return 0;
+    }
+
+    if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
+        perror("supervisor prctl(PR_SET_KEEPCAPS)");
+        return 1;
     }
 
     if (setgroups(0, NULL) != 0) {
@@ -726,6 +971,22 @@ static int drop_supervisor_to_invoker(void) {
 
     if (setuid(uid) != 0) {
         perror("supervisor setuid");
+        return 1;
+    }
+
+    memset(&cap_header, 0, sizeof(cap_header));
+    memset(&cap_data, 0, sizeof(cap_data));
+    cap_header.version = _LINUX_CAPABILITY_VERSION_3;
+    cap_header.pid = 0;
+    cap_data[CAP_KILL / 32].effective = 1U << (CAP_KILL % 32);
+    cap_data[CAP_KILL / 32].permitted = 1U << (CAP_KILL % 32);
+    if (syscall(SYS_capset, &cap_header, &cap_data) != 0) {
+        perror("supervisor capset(CAP_KILL)");
+        return 1;
+    }
+
+    if (prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0) {
+        perror("supervisor prctl(PR_SET_KEEPCAPS clear)");
         return 1;
     }
 #endif
@@ -803,6 +1064,10 @@ int main(int argc, char **argv) {
     }
 
     close_extra_fds();
+    if (argc == 2 && strcmp(argv[1], "--cleanup-scorer-state") == 0) {
+        return cleanup_scorer_writable_state();
+    }
+
     sanitize_environment();
 
 #if MM_SUPERVISE_CHILD

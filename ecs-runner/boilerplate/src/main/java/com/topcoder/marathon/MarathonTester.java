@@ -35,6 +35,7 @@ public abstract class MarathonTester {
     private final List<BufferedWriter> solInputWriters = new ArrayList<BufferedWriter>();
     private static final int maxSolutionOutputLength = 10_000_000;
     private static final long processDrainTimeoutMillis = 250;
+    private static final long processTimeoutDestroyMillis = 250;
     private static final long errorReaderDrainTimeoutMillis = 250;
     private BufferedWriter solOutputWriter;
     private BufferedWriter solErrorWriter;
@@ -110,17 +111,20 @@ public abstract class MarathonTester {
                 lastTimeoutThread = new Thread() {
                     public void run() {
                         try {
-                            boolean finished = process.waitFor(timeLimit - elapsedTime, TimeUnit.NANOSECONDS);
+                            long remainingTime = Math.max(1L, timeLimit - elapsedTime);
+                            boolean finished = process.waitFor(remainingTime, TimeUnit.NANOSECONDS);
                             if (!finished) {
+                                boolean notifyTimeout = false;
                                 synchronized (timeLock) {
                                     if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
                                     lastStart = 0;
-                                    if (process != null) process.destroyForcibly();
                                     if (!timeout) {
                                         timeout = true;
-                                        timeout();
+                                        notifyTimeout = true;
                                     }
                                 }
+                                terminateTimedOutProcess();
+                                if (notifyTimeout) timeout();
                             }
                         } catch (Exception e) {
                         }
@@ -184,6 +188,73 @@ public abstract class MarathonTester {
             score = getErrorScore();
         }
         return score;
+    }
+
+    /**
+     * Terminates the submitted solution process after its measured execution
+     * time expires and closes runner-side streams so blocked tester reads unwind.
+     *
+     * <p>The ECS scorer command is wrapped by a small native supervisor. A
+     * graceful destroy gives that wrapper a catchable signal it can relay to the
+     * low-privilege scorer process group before this method escalates to a hard
+     * process kill.
+     */
+    private void terminateTimedOutProcess() {
+        Process processToStop = process;
+        if (processToStop != null) {
+            processToStop.destroy();
+            try {
+                if (!processToStop.waitFor(processTimeoutDestroyMillis, TimeUnit.MILLISECONDS)) {
+                    processToStop.destroyForcibly();
+                    processToStop.waitFor(processDrainTimeoutMillis, TimeUnit.MILLISECONDS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                processToStop.destroyForcibly();
+            } catch (Exception e) {
+                processToStop.destroyForcibly();
+            }
+        }
+
+        closeSolutionStreamsAfterTimeout();
+    }
+
+    /**
+     * Closes solution pipes after timeout termination.
+     *
+     * <p>Some failed process-tree terminations can leave descendant processes
+     * holding the stdout pipe open. Closing the Java-side reader prevents
+     * {@link #readLine()} from blocking forever after the timeout has already
+     * been recorded.
+     */
+    private void closeSolutionStreamsAfterTimeout() {
+        for (BufferedWriter out : solInputWriters) {
+            try {
+                out.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solOutputReader != null) {
+            try {
+                solOutputReader.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solOutputWriter != null) {
+            try {
+                solOutputWriter.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solErrorReader != null) {
+            solErrorReader.closeAndWait(errorReaderDrainTimeoutMillis);
+            solutionError = solErrorReader.getOutput();
+        } else if (solErrorWriter != null) {
+            try {
+                solErrorWriter.close();
+            } catch (Exception e) {
+            }
+        }
     }
 
     protected final void writeLine(int v) throws Exception {

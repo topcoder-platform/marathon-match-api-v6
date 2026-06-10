@@ -3,10 +3,12 @@ import {
   BadRequestException,
   ConflictException,
   HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { isAxiosError } from 'axios';
 import {
   CompilationStatus,
   PhaseConfigType,
@@ -1230,7 +1232,8 @@ export class MarathonMatchConfigService {
    * @returns Validation submission id and ECS task launch details.
    * @throws NotFoundException When the Marathon Match config does not exist.
    * @throws BadRequestException When file contents are missing, the tester is not compiled, or the phase config is missing.
-   * @throws InternalServerErrorException When Review API upload or ECS launch fails unexpectedly.
+   * @throws HttpException When Review API rejects the validation upload.
+   * @throws InternalServerErrorException When ECS launch fails unexpectedly.
    * Used by challenge managers and copilots to validate scorer behavior before launch.
    */
   async uploadTestSubmission(
@@ -1380,6 +1383,7 @@ export class MarathonMatchConfigService {
    * @param file Uploaded submission archive.
    * @returns Created Review API submission id.
    * @throws BadRequestException When file bytes are unavailable or Review API omits an id.
+   * @throws HttpException When Review API rejects the validation upload request.
    * Used by `uploadTestSubmission` before scorer ECS dispatch.
    */
   private async createValidationSubmission(
@@ -1421,18 +1425,35 @@ export class MarathonMatchConfigService {
       resolvedFileName,
     );
 
-    const response = await firstValueFrom(
-      this.httpService.post(
-        `${submissionApiBaseUrl.replace(/\/+$/, '')}/submissions/validation-upload`,
-        form,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
+    let responseData: unknown;
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${submissionApiBaseUrl.replace(/\/+$/, '')}/submissions/validation-upload`,
+          form,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           },
-        },
-      ),
-    );
-    const submissionId = this.extractCreatedSubmissionId(response.data);
+        ),
+      );
+      responseData = response.data;
+    } catch (error) {
+      const uploadException = this.createValidationUploadException(
+        error,
+        challengeId,
+        memberId,
+      );
+      if (uploadException) {
+        this.logger.error(uploadException.getResponse());
+        throw uploadException;
+      }
+
+      throw error;
+    }
+
+    const submissionId = this.extractCreatedSubmissionId(responseData);
     if (!submissionId) {
       throw new BadRequestException(
         'Validation submission upload did not return a submission id.',
@@ -1440,6 +1461,111 @@ export class MarathonMatchConfigService {
     }
 
     return submissionId;
+  }
+
+  /**
+   * Converts Review API validation-upload HTTP failures into API exceptions
+   * that preserve the upstream status and enough context to fix auth/config issues.
+   * @param error Candidate error thrown by the outbound Review API request.
+   * @param challengeId Challenge ID submitted to Review API.
+   * @param memberId Member ID submitted to Review API.
+   * @returns HttpException for upstream Axios HTTP responses, otherwise undefined.
+   * @throws Nothing directly; callers throw the returned exception.
+   * Used by `createValidationSubmission` so Review API rejections do not get
+   * reported as Prisma errors or generic unknown failures.
+   */
+  private createValidationUploadException(
+    error: unknown,
+    challengeId: string,
+    memberId: string,
+  ): HttpException | undefined {
+    if (!isAxiosError(error) || !error.response) {
+      return undefined;
+    }
+
+    const upstreamStatusCode =
+      typeof error.response.status === 'number' && error.response.status > 0
+        ? error.response.status
+        : HttpStatus.BAD_GATEWAY;
+    const upstreamBody = this.asRecord(error.response.data);
+    const upstreamError = this.asRecord(upstreamBody.error);
+    const upstreamResult = this.asRecord(upstreamBody.result);
+    const upstreamCode =
+      this.asString(upstreamBody.code)?.trim() ||
+      this.asString(upstreamError.code)?.trim() ||
+      this.asString(upstreamResult.code)?.trim();
+    const upstreamMessage = this.extractUpstreamErrorMessage(
+      error.response.data,
+      error.message,
+    );
+    const forbiddenStatusCode = 403;
+    const statusLabel =
+      upstreamStatusCode === forbiddenStatusCode
+        ? '403 Forbidden'
+        : `status ${upstreamStatusCode}`;
+    const permissionHint =
+      upstreamStatusCode === forbiddenStatusCode
+        ? ' Confirm the Marathon Match M2M credentials are authorized for create:submission in Review API.'
+        : '';
+    const message = [
+      `Review API rejected the validation submission upload with ${statusLabel}.${permissionHint}`,
+      upstreamMessage ? `Upstream message: ${upstreamMessage}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return new HttpException(
+      {
+        message,
+        code: 'VALIDATION_SUBMISSION_UPLOAD_REJECTED',
+        details: {
+          challengeId,
+          memberId,
+          upstreamCode,
+          upstreamMessage,
+          upstreamStatusCode,
+        },
+      },
+      upstreamStatusCode,
+    );
+  }
+
+  /**
+   * Extracts a concise message from common downstream API error wrappers.
+   * @param data Raw upstream response body.
+   * @param fallback Fallback message from the transport error.
+   * @returns First non-empty message found in the response body or fallback.
+   * Used when converting Review API upload failures into user-facing exceptions.
+   */
+  private extractUpstreamErrorMessage(
+    data: unknown,
+    fallback?: string,
+  ): string | undefined {
+    const wrapper = this.asRecord(data);
+    const errorRecord = this.asRecord(wrapper.error);
+    const resultRecord = this.asRecord(wrapper.result);
+    const candidates = [
+      wrapper.message,
+      errorRecord.message,
+      resultRecord.message,
+      data,
+      fallback,
+    ];
+
+    for (const candidate of candidates) {
+      const message = Array.isArray(candidate)
+        ? candidate
+            .map((entry) => this.asString(entry)?.trim())
+            .filter(Boolean)
+            .join('; ')
+        : this.asString(candidate)?.trim();
+
+      if (message) {
+        return message;
+      }
+    }
+
+    return undefined;
   }
 
   /**

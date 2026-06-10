@@ -810,7 +810,7 @@ export class ScoringResultService {
     );
 
     return this.prisma.$transaction(async (prisma) => {
-      await prisma.$queryRaw`
+      await prisma.$executeRaw`
         SELECT pg_advisory_xact_lock(${classId}::integer, ${objectId}::integer)
       `;
       return work();
