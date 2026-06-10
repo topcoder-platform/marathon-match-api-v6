@@ -95,9 +95,9 @@ export class EcsService {
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and Auth0 M2M settings
    * used by the runner to refresh tokens during long scoring tasks. Optional
    * ECS_SCORER_MAX_CONCURRENT_TASKS controls the global pending/running scorer
-   * task cap and defaults to 20.
-   * @throws Error when required ENV vars are missing, token fetch fails, the scorer task cap is reached,
-   * or ECS launch/cancellation fails.
+   * task cap when the role can list active ECS tasks and defaults to 20.
+   * @throws Error when required ENV vars are missing, token fetch fails, the scorer task cap is reached
+   * after active task lookup succeeds, or ECS launch/cancellation fails.
    */
   async launchScorerTask(
     challengeId: string,
@@ -130,53 +130,58 @@ export class EcsService {
 
     try {
       return await this.runWithScorerLaunchLock(async () => {
-        const activeTasks = await this.listActiveScorerTasks(
+        const activeTasks = await this.listActiveScorerTasksIfPermitted(
           cluster,
           taskDefinitionName,
           containerName,
         );
-        const launchableActiveTasks =
-          await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
-            challengeId,
-            submissionId,
-            memberId,
-          });
-        const duplicateTask = this.findDuplicateActiveScorerTask(
-          launchableActiveTasks,
-          challengeId,
-          submissionId,
-          scoringPhase.configType,
-        );
+        const launchableActiveTasks = activeTasks
+          ? await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
+              challengeId,
+              submissionId,
+              memberId,
+            })
+          : null;
+        let maxConcurrentScorerTasks: number | null = null;
 
-        if (duplicateTask) {
-          const launchResult = await this.buildLaunchResultFromActiveTask(
-            duplicateTask,
-            taskDefinition,
-            containerName,
+        if (launchableActiveTasks) {
+          const duplicateTask = this.findDuplicateActiveScorerTask(
+            launchableActiveTasks,
+            challengeId,
+            submissionId,
+            scoringPhase.configType,
           );
-          await this.persistSubmissionRunnerLogMapping({
-            challengeId,
-            submissionId,
-            scoringPhase,
-            launchResult,
-          });
-          this.logger.log({
-            message: 'Skipped duplicate ECS scorer task launch',
-            challengeId,
-            submissionId,
-            memberId: memberId ?? null,
-            phaseConfigType: scoringPhase.configType,
-            taskArn: launchResult.taskArn,
-            taskId: launchResult.taskId,
-          });
-          return launchResult;
-        }
 
-        const maxConcurrentScorerTasks = this.getMaxConcurrentScorerTasks();
-        if (launchableActiveTasks.length >= maxConcurrentScorerTasks) {
-          throw new Error(
-            `ECS scorer task concurrency limit reached (${launchableActiveTasks.length}/${maxConcurrentScorerTasks}). Deferring submission ${submissionId} to Kafka retry/back-pressure instead of launching another task.`,
-          );
+          if (duplicateTask) {
+            const launchResult = await this.buildLaunchResultFromActiveTask(
+              duplicateTask,
+              taskDefinition,
+              containerName,
+            );
+            await this.persistSubmissionRunnerLogMapping({
+              challengeId,
+              submissionId,
+              scoringPhase,
+              launchResult,
+            });
+            this.logger.log({
+              message: 'Skipped duplicate ECS scorer task launch',
+              challengeId,
+              submissionId,
+              memberId: memberId ?? null,
+              phaseConfigType: scoringPhase.configType,
+              taskArn: launchResult.taskArn,
+              taskId: launchResult.taskId,
+            });
+            return launchResult;
+          }
+
+          maxConcurrentScorerTasks = this.getMaxConcurrentScorerTasks();
+          if (launchableActiveTasks.length >= maxConcurrentScorerTasks) {
+            throw new Error(
+              `ECS scorer task concurrency limit reached (${launchableActiveTasks.length}/${maxConcurrentScorerTasks}). Deferring submission ${submissionId} to Kafka retry/back-pressure instead of launching another task.`,
+            );
+          }
         }
 
         const token = await this.getM2MTokenForScorerLaunch();
@@ -300,7 +305,8 @@ export class EcsService {
           logStreamPrefix: logStreamPrefix ?? null,
           logStreamName: logStreamName ?? null,
           cloudWatchLogsConsoleUrl: cloudWatchLogsConsoleUrl ?? null,
-          activeScorerTaskCountBeforeLaunch: launchableActiveTasks.length,
+          activeScorerTaskCountBeforeLaunch:
+            launchableActiveTasks?.length ?? null,
           maxConcurrentScorerTasks,
         });
 
@@ -523,6 +529,43 @@ export class EcsService {
   }
 
   /**
+   * Lists active scorer tasks when ECS permissions allow it; otherwise logs and
+   * returns null so scorer dispatch can continue through RunTask.
+   * @param cluster ECS cluster name or ARN.
+   * @param taskDefinitionName Task definition family configured for scoring.
+   * @param containerName Runner container name whose overrides identify scorer tasks.
+   * @returns Active scorer tasks, or null when listing/describing active tasks is not authorized.
+   * @throws Error for non-permission ECS lookup failures.
+   */
+  private async listActiveScorerTasksIfPermitted(
+    cluster: string,
+    taskDefinitionName: string,
+    containerName: string,
+  ): Promise<ActiveScorerTask[] | null> {
+    try {
+      return await this.listActiveScorerTasks(
+        cluster,
+        taskDefinitionName,
+        containerName,
+      );
+    } catch (error) {
+      if (!this.isEcsPermissionError(error)) {
+        throw error;
+      }
+
+      this.logger.warn({
+        message:
+          'Unable to inspect active ECS scorer tasks; launching without duplicate or concurrency checks.',
+        cluster,
+        taskDefinitionName,
+        containerName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
    * Lists active scorer tasks for the configured task family and container.
    * @param cluster ECS cluster name or ARN.
    * @param taskDefinitionName Task definition family configured for scoring.
@@ -584,6 +627,40 @@ export class EcsService {
     }
 
     return activeTasks;
+  }
+
+  /**
+   * Detects AWS authorization failures for optional ECS inspection calls.
+   * @param error Error thrown by the AWS SDK.
+   * @returns True when the error represents a denied ECS action.
+   * Used by scorer launches to fall back to direct RunTask dispatch when active
+   * task inspection is not permitted in an environment.
+   */
+  private isEcsPermissionError(error: unknown): boolean {
+    const typedError = error as {
+      name?: unknown;
+      Code?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+    const values = [
+      typedError.name,
+      typedError.Code,
+      typedError.code,
+      typedError.message,
+    ]
+      .map((value) =>
+        typeof value === 'string' ? value.trim().toLowerCase() : '',
+      )
+      .filter(Boolean);
+
+    return values.some(
+      (value) =>
+        value.includes('accessdenied') ||
+        value.includes('access denied') ||
+        value.includes('not authorized') ||
+        value.includes('unauthorized'),
+    );
   }
 
   /**
