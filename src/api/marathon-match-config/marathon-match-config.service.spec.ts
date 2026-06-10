@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -526,6 +527,93 @@ describe('MarathonMatchConfigService', () => {
         memberId: '40051399',
       },
     );
+  });
+
+  it('preserves Review API validation upload authorization failures', async () => {
+    const {
+      service,
+      ecsService,
+      httpService,
+      m2mService,
+      prisma,
+      prismaErrorService,
+    } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.post.mockReturnValue(
+      throwError(() => ({
+        isAxiosError: true,
+        message: 'Request failed with status code 403',
+        response: {
+          status: 403,
+          data: {
+            message: 'Insufficient permissions',
+            code: 'FORBIDDEN',
+          },
+        },
+      })),
+    );
+
+    let thrown: unknown;
+    try {
+      await service.uploadTestSubmission(
+        '30000123',
+        {
+          configType: PhaseConfigType.PROVISIONAL,
+        },
+        {
+          buffer: Buffer.from('zip'),
+          mimetype: 'application/zip',
+          originalname: 'solution.zip',
+          size: 3,
+        } as Express.Multer.File,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(HttpException);
+    const exception = thrown as HttpException;
+    expect(exception.getStatus()).toBe(403);
+    expect(exception.getResponse()).toEqual({
+      message:
+        'Review API rejected the validation submission upload with 403 Forbidden. Confirm the Marathon Match M2M credentials are authorized for create:submission in Review API. Upstream message: Insufficient permissions',
+      code: 'VALIDATION_SUBMISSION_UPLOAD_REJECTED',
+      details: {
+        challengeId: '30000123',
+        memberId: '40051399',
+        upstreamCode: 'FORBIDDEN',
+        upstreamMessage: 'Insufficient permissions',
+        upstreamStatusCode: 403,
+      },
+    });
+    expect(prismaErrorService.handleError).not.toHaveBeenCalled();
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
   });
 
   it('rejects validation submissions when the tester is not compiled', async () => {

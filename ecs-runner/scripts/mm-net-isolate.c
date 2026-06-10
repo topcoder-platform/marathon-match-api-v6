@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <linux/audit.h>
+#include <linux/capability.h>
 #include <linux/filter.h>
 #include <linux/landlock.h>
 #include <linux/seccomp.h>
@@ -102,6 +103,10 @@
 
 #ifndef __NR_landlock_restrict_self
 #define __NR_landlock_restrict_self 446
+#endif
+
+#ifndef CAP_KILL
+#define CAP_KILL 5
 #endif
 
 #if MM_SUPERVISE_CHILD
@@ -659,13 +664,30 @@ static int enter_isolated_execution(void) {
  * because its real UID is still the runner UID.
  */
 #if MM_SUPERVISE_CHILD
+static int signal_child_process_group(pid_t child_pid, int signo) {
+    if (kill(-child_pid, signo) == 0 || errno == ESRCH) {
+        return 0;
+    }
+
+    if (kill(child_pid, signo) == 0 || errno == ESRCH) {
+        return 0;
+    }
+
+    return errno;
+}
+
 static void forward_signal_to_child(int signo) {
     pid_t child_pid = (pid_t) supervised_child_pid;
     if (child_pid > 0) {
-        if (kill(-child_pid, signo) != 0) {
-            if (kill(child_pid, signo) != 0 && errno == EPERM) {
-                _exit(128 + signo);
+        int signal_error = signal_child_process_group(child_pid, signo);
+        if (signo == SIGTERM) {
+            int kill_error = signal_child_process_group(child_pid, SIGKILL);
+            if (signal_error == 0) {
+                signal_error = kill_error;
             }
+        }
+        if (signal_error == EPERM) {
+            _exit(128 + signo);
         }
     }
 }
@@ -702,16 +724,24 @@ static int wait_status_to_exit_code(int status) {
 
 /**
  * Drops the supervising wrapper back to the real user that invoked the setuid
- * scorer helper. The already-forked child keeps the temporary root privilege it
- * needs to switch to the configured isolated UID before exec.
+ * scorer helper while retaining only CAP_KILL. The already-forked child keeps
+ * the temporary root privilege it needs to switch to the configured isolated
+ * UID before exec.
  */
 static int drop_supervisor_to_invoker(void) {
 #if MM_DROP_SUPERVISOR_PRIVS
     uid_t uid = getuid();
     gid_t gid = getgid();
+    struct __user_cap_header_struct cap_header;
+    struct __user_cap_data_struct cap_data[_LINUX_CAPABILITY_U32S_3];
 
     if (uid == 0 && gid == 0) {
         return 0;
+    }
+
+    if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
+        perror("supervisor prctl(PR_SET_KEEPCAPS)");
+        return 1;
     }
 
     if (setgroups(0, NULL) != 0) {
@@ -726,6 +756,22 @@ static int drop_supervisor_to_invoker(void) {
 
     if (setuid(uid) != 0) {
         perror("supervisor setuid");
+        return 1;
+    }
+
+    memset(&cap_header, 0, sizeof(cap_header));
+    memset(&cap_data, 0, sizeof(cap_data));
+    cap_header.version = _LINUX_CAPABILITY_VERSION_3;
+    cap_header.pid = 0;
+    cap_data[CAP_KILL / 32].effective = 1U << (CAP_KILL % 32);
+    cap_data[CAP_KILL / 32].permitted = 1U << (CAP_KILL % 32);
+    if (syscall(SYS_capset, &cap_header, &cap_data) != 0) {
+        perror("supervisor capset(CAP_KILL)");
+        return 1;
+    }
+
+    if (prctl(PR_SET_KEEPCAPS, 0, 0, 0, 0) != 0) {
+        perror("supervisor prctl(PR_SET_KEEPCAPS clear)");
         return 1;
     }
 #endif

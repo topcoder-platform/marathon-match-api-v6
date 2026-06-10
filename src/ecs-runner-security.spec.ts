@@ -17,7 +17,7 @@ describe('ECS runner isolation image wiring', () => {
     );
   });
 
-  it('keeps scorer process launch as a narrow setuid bridge', () => {
+  it('keeps scorer process launch as a narrow setuid bridge with timeout kill forwarding', () => {
     const dockerfile = readRepoFile('ecs-runner/Dockerfile');
     const helperSource = readRepoFile('ecs-runner/scripts/mm-net-isolate.c');
 
@@ -28,6 +28,11 @@ describe('ECS runner isolation image wiring', () => {
     expect(helperSource).toContain('#define MM_DROP_SUPERVISOR_PRIVS 0');
     expect(helperSource).toContain('#define MM_ENABLE_FS_SANDBOX 0');
     expect(helperSource).toContain('drop_supervisor_to_invoker');
+    expect(helperSource).toContain('PR_SET_KEEPCAPS');
+    expect(helperSource).toContain('supervisor capset(CAP_KILL)');
+    expect(helperSource).toContain(
+      'signal_child_process_group(child_pid, SIGKILL)',
+    );
   });
 });
 
@@ -49,5 +54,20 @@ describe('ECS runner tester JAR isolation', () => {
     expect(runnerSource).toContain('secureRunnerOnlyFile(jarPath);');
     expect(runnerSource).toContain('setRunnerOnlyPermissions(path);');
     expect(runnerSource).not.toContain('secureRunnerReadOnlyFile');
+  });
+});
+
+describe('ECS runner submitted-solution timeout handling', () => {
+  it('lets the scorer wrapper forward timeout termination and unblocks tester reads', () => {
+    const harnessSource = readRepoFile(
+      'ecs-runner/boilerplate/src/main/java/com/topcoder/marathon/MarathonTester.java',
+    );
+
+    expect(harnessSource).toContain('private void terminateTimedOutProcess()');
+    expect(harnessSource).toMatch(
+      /processToStop\.destroy\(\);[\s\S]*processToStop\.destroyForcibly\(\);/,
+    );
+    expect(harnessSource).toContain('closeSolutionStreamsAfterTimeout();');
+    expect(harnessSource).toContain('solOutputReader.close();');
   });
 });
