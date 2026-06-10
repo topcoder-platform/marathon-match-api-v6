@@ -37,11 +37,13 @@ All start paths converge on `EcsService.launchScorerTask(...)`.
 3. The handler skips the submission if the config is inactive, the challenge has no open phase, or no stored phase config matches the open challenge phase.
 4. For every matching phase config, the handler calls `EcsService.launchScorerTask(...)`.
 
-This is the normal path for `EXAMPLE` and `PROVISIONAL` scoring during the Submission phase. If both phase configs map to the same open challenge phase, the API intentionally launches one runner per matching config.
+This is the normal path for `EXAMPLE` and `PROVISIONAL` scoring during the Submission phase. If both phase configs map to the same open challenge phase, the API intentionally launches one runner per matching config.  This is to handle the case where we want example _and_ provisional tests to run during the submission phase in most cases.
 
 ### Validation submission scoring
 
 `POST /v6/marathon-match/challenge/:challengeId/test-submission` uploads a validation submission through the configured Submission API and then launches one ECS runner for the requested `configType` (default `PROVISIONAL`). The response includes `submissionId`, `taskArn`, `taskId`, and usually `cloudWatchLogsConsoleUrl`.
+
+We do this to support admins / copilots having the ability to test the scorer before the challenge launches.
 
 ### Manual latest-submission rerun
 
@@ -58,6 +60,10 @@ SYSTEM scoring starts from review orchestration:
 `POST /v6/marathon-match/challenge/:challengeId/rerun/system` restarts existing non-cancelled SYSTEM review records through the same SYSTEM launch path.
 
 ## What launch does
+
+ECS Service:
+
+https://github.com/topcoder-platform/marathon-match-api-v6/blob/955671e28e0d96fc871e2af060cf7d694a8a9475/src/shared/modules/global/ecs.service.ts#L85-L86
 
 `EcsService.launchScorerTask(...)` performs these steps before and during `RunTask`:
 
