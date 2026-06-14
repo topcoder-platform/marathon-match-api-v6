@@ -40,7 +40,11 @@ import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { ScoringResultService } from '../scoring-result/scoring-result.service';
+import {
+  ScoringResultService,
+  SkippedSystemScoreDispatchResult,
+  SystemScoreDispatchResult,
+} from '../scoring-result/scoring-result.service';
 
 type MarathonMatchConfigWithPhaseConfigs =
   Prisma.marathonMatchConfigGetPayload<{
@@ -66,6 +70,12 @@ type NormalizedPhaseConfigInput = {
 type SystemReviewRerunCandidate = {
   reviewId: string;
   submissionId: string;
+};
+
+type RerunSubmissionDispatchCandidate = {
+  submissionId: string;
+  memberId?: string;
+  virusScan?: boolean;
 };
 
 interface ChallengePhaseResponse {
@@ -816,6 +826,7 @@ export class MarathonMatchConfigService {
         receivedOrSubmittedDate: string;
         sortTimestamp: number;
         isLatest?: boolean;
+        virusScan?: boolean;
         sequence: number;
       };
       const normalizeSubmission = (
@@ -850,6 +861,7 @@ export class MarathonMatchConfigService {
           isLatest: Object.prototype.hasOwnProperty.call(submission, 'isLatest')
             ? asBoolean(submission.isLatest)
             : undefined,
+          virusScan: asBoolean(submission.virusScan),
           sequence,
         };
       };
@@ -984,6 +996,7 @@ export class MarathonMatchConfigService {
           submissionId: submission.submissionId,
           memberId: submission.memberId,
           submittedDate: submission.submittedDate,
+          virusScan: submission.virusScan,
         }));
 
       if (submissions.length === 0) {
@@ -1011,6 +1024,7 @@ export class MarathonMatchConfigService {
           configType: openPhaseConfig.configType,
           startSeed: openPhaseConfig.startSeed,
           numberOfTests: openPhaseConfig.numberOfTests,
+          scorecardId: config.reviewScorecardId,
         },
       );
 
@@ -1171,6 +1185,14 @@ export class MarathonMatchConfigService {
         ({ reviewId, submissionId }, index) => {
           const launchResult = launchResults[index];
           if (launchResult.status === 'fulfilled') {
+            if (this.isSkippedSystemScoreDispatchResult(launchResult.value)) {
+              return {
+                reviewId,
+                submissionId,
+                error: launchResult.value.reason,
+              };
+            }
+
             return {
               reviewId,
               submissionId,
@@ -1717,9 +1739,8 @@ export class MarathonMatchConfigService {
   private async triggerSystemReviewsWithRateLimit(
     challengeId: string,
     reviews: SystemReviewRerunCandidate[],
-  ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
-    const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
-      [];
+  ): Promise<PromiseSettledResult<SystemScoreDispatchResult>[]> {
+    const launchResults: PromiseSettledResult<SystemScoreDispatchResult>[] = [];
 
     for (
       let index = 0;
@@ -1754,17 +1775,28 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Checks whether a SYSTEM dispatch result was skipped before ECS launch.
+   * @param result SYSTEM dispatch result returned by ScoringResultService.
+   * @returns True when the result represents a skipped scoring marker.
+   */
+  private isSkippedSystemScoreDispatchResult(
+    result: SystemScoreDispatchResult,
+  ): result is SkippedSystemScoreDispatchResult {
+    return 'skipped' in result && result.skipped === true;
+  }
+
+  /**
    * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
    * @param challengeId Challenge ID passed to each scorer task.
    * @param submissions Latest submissions to rerun, in response order.
    * @param mmConfig Task definition name and version from the marathon match config.
-   * @param scoringPhase PROVISIONAL phase settings passed to scorer tasks.
+   * @param scoringPhase Phase settings passed to scorer tasks plus scorecard context for skipped markers.
    * @returns Settled launch results in the same order as `submissions`.
    * @throws Does not throw for individual scorer launch failures; those are returned as rejected settled results.
    */
   private async launchScorerTasksWithRateLimit(
     challengeId: string,
-    submissions: { submissionId: string; memberId?: string }[],
+    submissions: RerunSubmissionDispatchCandidate[],
     mmConfig: {
       taskDefinitionName: string;
       taskDefinitionVersion: string;
@@ -1773,6 +1805,7 @@ export class MarathonMatchConfigService {
       configType: PhaseConfigType;
       startSeed: bigint;
       numberOfTests: number;
+      scorecardId?: string | null;
     },
   ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
     const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
@@ -1788,16 +1821,31 @@ export class MarathonMatchConfigService {
         index + MarathonMatchConfigService.scorerLaunchBatchSize,
       );
       const batchResults = await Promise.allSettled(
-        batch.map(({ submissionId, memberId }) =>
-          this.ecsService.launchScorerTask(
+        batch.map(async ({ submissionId, memberId, virusScan }) => {
+          if (virusScan !== true) {
+            const reason = `Marathon Match ${scoringPhase.configType} scoring skipped because the submission has not passed virus scanning.`;
+            await this.scoringResultService.markSubmissionScoringSkipped({
+              challengeId,
+              details: {
+                virusScan: virusScan ?? null,
+              },
+              reason,
+              scorecardId: scoringPhase.scorecardId ?? undefined,
+              submissionId,
+              testPhase: scoringPhase.configType,
+            });
+            throw new Error(reason);
+          }
+
+          return this.ecsService.launchScorerTask(
             challengeId,
             submissionId,
             mmConfig,
             scoringPhase,
             undefined,
             { memberId },
-          ),
-        ),
+          );
+        }),
       );
 
       launchResults.push(...batchResults);

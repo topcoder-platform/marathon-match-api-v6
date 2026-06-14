@@ -647,9 +647,11 @@ static int add_landlock_paths(
 
 /**
  * Restricts submitted solution filesystem access to runtime/toolchain files and
- * scorer-owned writable locations. Infrastructure-revealing files such as
- * /etc/hostname, /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, and
- * proc network tables are intentionally omitted from the allowlist.
+ * scorer-owned writable locations. /proc/self/maps is narrowly readable
+ * because glibc pthread_getattr_np opens it while Mono discovers the main
+ * thread stack bounds. Infrastructure-revealing files such as /etc/hostname,
+ * /etc/resolv.conf, /proc/self/cgroup, /proc/self/mounts, and proc network
+ * tables are intentionally omitted from the allowlist.
  */
 static int install_filesystem_filter(void) {
     static const char *const read_execute_paths[] = {
@@ -670,7 +672,8 @@ static int install_filesystem_filter(void) {
         "/etc/passwd",
         "/etc/protocols",
         "/etc/services",
-        "/etc/ssl/certs"
+        "/etc/ssl/certs",
+        "/proc/self/maps"
     };
     static const char *const read_write_paths[] = {
         "/dev/null",

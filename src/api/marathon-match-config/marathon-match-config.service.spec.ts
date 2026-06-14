@@ -55,6 +55,7 @@ describe('MarathonMatchConfigService', () => {
       handleError: jest.fn(),
     };
     const scoringResultService = {
+      markSubmissionScoringSkipped: jest.fn(),
       triggerSystemScore: jest.fn(),
     };
 
@@ -389,6 +390,7 @@ describe('MarathonMatchConfigService', () => {
                   memberId: '40051399',
                   submittedDate: '2026-06-02T00:00:00.000Z',
                   isLatest: true,
+                  virusScan: true,
                 },
               ],
             },
@@ -426,6 +428,113 @@ describe('MarathonMatchConfigService', () => {
         memberId: '40051399',
       },
     );
+  });
+
+  it('marks latest submissions failed without launching when virus scan has not passed', async () => {
+    const {
+      service,
+      ecsService,
+      httpService,
+      m2mService,
+      prisma,
+      scoringResultService,
+    } = createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    scoringResultService.markSubmissionScoringSkipped.mockResolvedValue(
+      undefined,
+    );
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+            phases: [
+              {
+                phaseId: 'provisional-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'submission-1',
+                  memberId: '40051399',
+                  submittedDate: '2026-06-02T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: false,
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+
+    const result = await service.rerunLatestSubmissions('30000123', user);
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(
+      scoringResultService.markSubmissionScoringSkipped,
+    ).toHaveBeenCalledWith({
+      challengeId: '30000123',
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match PROVISIONAL scoring skipped because the submission has not passed virus scanning.',
+      scorecardId: 'scorecard-1',
+      submissionId: 'submission-1',
+      testPhase: PhaseConfigType.PROVISIONAL,
+    });
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionsQueued: 1,
+      results: [
+        {
+          submissionId: 'submission-1',
+          error:
+            'Marathon Match PROVISIONAL scoring skipped because the submission has not passed virus scanning.',
+        },
+      ],
+    });
   });
 
   it('uploads a validation submission and queues scorer execution', async () => {
@@ -671,6 +780,7 @@ describe('MarathonMatchConfigService', () => {
         memberId: `member-${index + 1}`,
         submittedDate: `2026-06-01T00:00:${String(index).padStart(2, '0')}.000Z`,
         isLatest: true,
+        virusScan: true,
       }));
       const submissionIds = submissionRows.map((submission) => submission.id);
       const launchResolvers: Array<() => void> = [];
