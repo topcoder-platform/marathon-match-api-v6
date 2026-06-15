@@ -68,6 +68,27 @@ export interface ScoringProgressCallbackPayload {
   metadata?: Record<string, unknown>;
 }
 
+export interface SkippedSubmissionScoringInput {
+  challengeId: string;
+  submissionId: string;
+  testPhase: string;
+  reason: string;
+  reviewId?: string;
+  scorecardId?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface SkippedSystemScoreDispatchResult {
+  skipped: true;
+  reason: string;
+  reviewId: string;
+  submissionId: string;
+}
+
+export type SystemScoreDispatchResult =
+  | MarathonMatchScorerTaskLaunchResult
+  | SkippedSystemScoreDispatchResult;
+
 interface ReviewSummationPayload {
   submissionId: string;
   aggregateScore: number;
@@ -376,6 +397,76 @@ export class ScoringResultService {
   }
 
   /**
+   * Persists a terminal failed review summation for a submission that should not
+   * be dispatched to the runner. Used when preflight checks, such as virus scan
+   * status, determine that example, provisional, or SYSTEM scoring must be skipped.
+   * @param input Challenge, submission, phase, and skip context to write.
+   * @returns Promise that resolves after the failed summation has been created or updated.
+   * @throws NotFoundException When the Marathon Match config cannot be found.
+   * @throws Error When auth or review-api persistence fails.
+   */
+  async markSubmissionScoringSkipped(
+    input: SkippedSubmissionScoringInput,
+  ): Promise<void> {
+    const normalizedPhase = this.normalizeTestPhase(input.testPhase);
+    await this.requireScoringResultConfig(input.challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error('Unable to get M2M token for skipped scoring marker.');
+    }
+
+    const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    const fallbackScorecardId = await this.resolveScorecardId(
+      token,
+      input.scorecardId,
+    );
+    const metadata = this.withTestProgressMetadata(
+      this.normalizeMetadata(
+        {
+          challengeId: input.challengeId,
+          marathonMatchScoringSkipped: true,
+          marathonMatchScoringSkipReason: input.reason,
+          ...(input.details && Object.keys(input.details).length > 0
+            ? { marathonMatchScoringSkipDetails: input.details }
+            : {}),
+        },
+        normalizedPhase,
+        reviewTypeId,
+      ),
+      {
+        completedTests: 0,
+        failedTests: 1,
+        message: input.reason,
+        progress: 1,
+        reviewId: input.reviewId,
+        status: ScoringTestStatus.Failed,
+        totalTests: 0,
+      },
+    );
+    const reviewPayload = this.buildSummationPayload({
+      submissionId: input.submissionId,
+      score: -1,
+      scorecardId: fallbackScorecardId,
+      metadata,
+      testPhase: normalizedPhase,
+    });
+
+    await this.completeSystemReviewIfNeeded(
+      token,
+      input.reviewId,
+      reviewPayload.aggregateScore,
+      normalizedPhase,
+      {
+        challengeId: input.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: input.submissionId,
+      },
+    );
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+  }
+
+  /**
    * Checks whether a phase review summation has reached a terminal state.
    * Used by the SYSTEM timeout worker before stopping a runner task so a delayed
    * timeout job cannot overwrite an already completed success or failure.
@@ -440,12 +531,13 @@ export class ScoringResultService {
    * @param reviewId Review identifier created in review-api.
    * @param submissionId Submission identifier to score.
    * @param challengeId Challenge identifier used to resolve Marathon Match config.
+   * @returns ECS launch metadata, or a skipped result after writing a failed summation.
    */
   async triggerSystemScore(
     reviewId: string,
     submissionId: string,
     challengeId: string,
-  ): Promise<MarathonMatchScorerTaskLaunchResult> {
+  ): Promise<SystemScoreDispatchResult> {
     const config = await this.prisma.marathonMatchConfig.findUnique({
       where: { challengeId },
       include: {
@@ -486,6 +578,57 @@ export class ScoringResultService {
       throw new BadRequestException(
         `Marathon match config ${challengeId} requires a SYSTEM phase config for system scoring dispatch.`,
       );
+    }
+
+    const submissionApiBaseUrl =
+      process.env.SUBMISSION_API_URL?.trim() || config.submissionApiUrl?.trim();
+    if (!submissionApiBaseUrl) {
+      throw new Error(
+        `Submission API URL is not configured for challenge ${challengeId}.`,
+      );
+    }
+
+    const token = await this.m2mService.getM2MToken();
+    if (!token) {
+      throw new Error(
+        'Unable to get M2M token for SYSTEM scoring submission preflight.',
+      );
+    }
+
+    const submission = await this.fetchSubmissionById(
+      token,
+      submissionApiBaseUrl,
+      submissionId,
+    );
+    if (!this.isSubmissionCleanForScoring(submission)) {
+      const reason =
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.';
+      await this.markSubmissionScoringSkipped({
+        challengeId,
+        details: {
+          virusScan: submission?.virusScan ?? null,
+        },
+        reason,
+        reviewId,
+        scorecardId: config.reviewScorecardId,
+        submissionId,
+        testPhase: 'system',
+      });
+      this.logger.log({
+        message:
+          'Skipped Marathon Match SYSTEM score dispatch because submission is not virus-scanned.',
+        challengeId,
+        submissionId,
+        reviewId,
+        virusScan: submission?.virusScan ?? null,
+      });
+
+      return {
+        skipped: true,
+        reason,
+        reviewId,
+        submissionId,
+      };
     }
 
     const launchResult = await this.ecsService.launchScorerTask(
@@ -1541,6 +1684,17 @@ export class ScoringResultService {
     );
 
     return this.extractSubmissionRecord(response.data);
+  }
+
+  /**
+   * Checks whether a submission-api record is eligible for scorer execution.
+   * @param submission Submission record returned by submission-api-v6.
+   * @returns True only when `virusScan` is explicitly true.
+   */
+  private isSubmissionCleanForScoring(
+    submission: Record<string, unknown> | undefined,
+  ): boolean {
+    return this.parseBooleanFlag(submission?.virusScan) === true;
   }
 
   /**
@@ -3030,7 +3184,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Parses boolean values from booleans and string booleans.
+   * Parses boolean values from booleans, string booleans, and numeric flags.
    */
   private parseBooleanFlag(value: unknown): boolean | null {
     if (typeof value === 'boolean') {
@@ -3043,6 +3197,15 @@ export class ScoringResultService {
         return true;
       }
       if (normalized === 'false') {
+        return false;
+      }
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
         return false;
       }
     }

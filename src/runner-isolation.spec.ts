@@ -47,16 +47,44 @@ describeIfToolsAvailable('mm-net-isolate seccomp socket filter', () => {
     expect(output).toContain('IPV4_BLOCKED_EPERM');
     expect(result.status).toBe(0);
   });
+
+  it('allows glibc thread stack introspection without exposing proc infrastructure', () => {
+    const helperPath = compileIsolationHelper(workspace, [
+      '-DMM_ENABLE_FS_SANDBOX=1',
+    ]);
+    const probePath = compileThreadAttributeProbe(workspace);
+
+    const result = spawnSync(helperPath, [probePath], {
+      encoding: 'utf8',
+      env: process.env,
+    });
+
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    if (output.includes('Landlock filesystem sandbox is unavailable')) {
+      expect(result.status).toBe(1);
+      return;
+    }
+
+    expect(result.error).toBeUndefined();
+    expect(output).toContain('PTHREAD_GETATTR_OK');
+    expect(output).toContain('CGROUP_BLOCKED_EACCES');
+    expect(result.status).toBe(0);
+  });
 });
 
 /**
  * Builds the native isolation helper in runner-child mode for local tests.
  *
  * @param workspace Temporary directory that receives the compiled helper.
+ * @param extraDefines Additional compiler defines used to enable optional
+ * helper features in focused regression tests.
  * @returns Absolute path to the compiled helper executable.
  * @throws Error when gcc cannot compile the helper.
  */
-function compileIsolationHelper(workspace: string): string {
+function compileIsolationHelper(
+  workspace: string,
+  extraDefines: string[] = [],
+): string {
   const helperPath = join(workspace, 'mm-net-isolate');
   const sourcePath = resolve(
     __dirname,
@@ -74,6 +102,7 @@ function compileIsolationHelper(workspace: string): string {
       '-DMM_SKIP_USER_DROP=1',
       '-DMM_ISOLATED_HOME="/tmp"',
       '-DMM_ISOLATED_NAME="jest-runner"',
+      ...extraDefines,
       '-o',
       helperPath,
       sourcePath,
@@ -94,6 +123,79 @@ function compileIsolationHelper(workspace: string): string {
   }
 
   return helperPath;
+}
+
+/**
+ * Builds a native probe that exercises pthread_getattr_np under Landlock.
+ *
+ * @param workspace Temporary directory that receives the probe source and binary.
+ * @returns Absolute path to the compiled probe executable.
+ * @throws Error when gcc cannot compile the probe.
+ */
+function compileThreadAttributeProbe(workspace: string): string {
+  const sourcePath = join(workspace, 'pthread-getattr-probe.c');
+  const probePath = join(workspace, 'pthread-getattr-probe');
+
+  writeFileSync(
+    sourcePath,
+    String.raw`
+#define _GNU_SOURCE
+
+#include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
+
+int main(void) {
+    pthread_attr_t attr;
+    int err = pthread_getattr_np(pthread_self(), &attr);
+    if (err != 0) {
+        printf("PTHREAD_GETATTR_ERR_%d\n", err);
+        return 2;
+    }
+
+    pthread_attr_destroy(&attr);
+    puts("PTHREAD_GETATTR_OK");
+
+    int fd = open("/proc/self/cgroup", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        close(fd);
+        puts("CGROUP_READABLE");
+        return 3;
+    }
+
+    if (errno == EACCES) {
+        puts("CGROUP_BLOCKED_EACCES");
+        return 0;
+    }
+
+    printf("CGROUP_BLOCKED_ERRNO_%d\n", errno);
+    return 4;
+}
+`,
+    'utf8',
+  );
+
+  const result = spawnSync(
+    'gcc',
+    ['-O2', '-Wall', '-Wextra', '-pthread', '-o', probePath, sourcePath],
+    { encoding: 'utf8' },
+  );
+
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error(
+      [
+        'Failed to compile pthread_getattr_np probe.',
+        result.stdout,
+        result.stderr,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+  }
+
+  return probePath;
 }
 
 /**

@@ -1550,14 +1550,13 @@ describe('ScoringResultService', () => {
     const systemTestTimeoutSchedulerService = {
       scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
     };
-    const { service, ecsService, prisma } = createService(
-      undefined,
-      systemTestTimeoutSchedulerService,
-    );
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService(undefined, systemTestTimeoutSchedulerService);
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
       active: true,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       taskDefinitionName: 'mm-runner',
       taskDefinitionVersion: '7',
       reviewScorecardId: 'scorecard-1',
@@ -1574,6 +1573,15 @@ describe('ScoringResultService', () => {
         },
       ],
     });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: basePayload.submissionId,
+          virusScan: true,
+        },
+      }),
+    );
     ecsService.launchScorerTask.mockResolvedValue({
       taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
       taskId: 'task-1',
@@ -1616,6 +1624,132 @@ describe('ScoringResultService', () => {
         timeoutMs: 3600000,
       }),
       3600000,
+    );
+  });
+
+  it('marks system scoring failed without launching when submission has not passed virus scan', async () => {
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService(undefined, systemTestTimeoutSchedulerService);
+    const skipSpy = jest
+      .spyOn(service, 'markSubmissionScoringSkipped')
+      .mockResolvedValue(undefined);
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: basePayload.submissionId,
+          virusScan: false,
+        },
+      }),
+    );
+
+    await expect(
+      service.triggerSystemScore(
+        'review-1',
+        basePayload.submissionId,
+        basePayload.challengeId,
+      ),
+    ).resolves.toEqual({
+      skipped: true,
+      reason:
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.',
+      reviewId: 'review-1',
+      submissionId: basePayload.submissionId,
+    });
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).not.toHaveBeenCalled();
+    expect(skipSpy).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.',
+      reviewId: 'review-1',
+      scorecardId: 'scorecard-1',
+      submissionId: basePayload.submissionId,
+      testPhase: 'system',
+    });
+  });
+
+  it('writes terminal failed summations for skipped submission scoring', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Bridge Runners',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+
+    await service.markSubmissionScoringSkipped({
+      challengeId: basePayload.challengeId,
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match EXAMPLE scoring skipped because the submission has not passed virus scanning.',
+      submissionId: basePayload.submissionId,
+      testPhase: 'example',
+    });
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isExample: true,
+        isPassing: false,
+        submissionId: basePayload.submissionId,
+        metadata: expect.objectContaining({
+          challengeId: basePayload.challengeId,
+          marathonMatchScoringSkipped: true,
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Failed,
+          testType: 'example',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
     );
   });
 

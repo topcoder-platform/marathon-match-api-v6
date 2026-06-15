@@ -64,12 +64,14 @@ describe('MarathonMatchSubmissionHandler', () => {
   });
 
   it('launches example and provisional scorer tasks when both map to the same open phase', async () => {
-    const { handler, prisma, ecsService } = createHandler();
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       id: 'config-1',
       challengeId: 'challenge-1',
       active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
       testerId: 'tester-1',
       taskDefinitionName: 'mm-ecs-runner',
       taskDefinitionVersion: '7',
@@ -106,6 +108,15 @@ describe('MarathonMatchSubmissionHandler', () => {
       phaseIdentifiers: ['submission-phase'],
     });
 
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: 'submission-1',
+          virusScan: true,
+        },
+      }),
+    );
     ecsService.launchScorerTask
       .mockResolvedValueOnce({
         taskArn: 'arn:aws:ecs:task/example',
@@ -231,6 +242,124 @@ describe('MarathonMatchSubmissionHandler', () => {
       }),
     );
     expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isPassing: false,
+        isProvisional: true,
+        scorecardId: 'scorecard-1',
+        submissionId: 'submission-1',
+        metadata: expect.objectContaining({
+          challengeId: 'challenge-1',
+          marathonMatchScoringSkipped: true,
+          testProcess: 'provisional',
+          testProgress: 1,
+          testStatus: 'FAILED',
+          testType: 'provisional',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+  });
+
+  it('marks each matching phase failed without launching when submission has not passed virus scan', async () => {
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: 'challenge-1',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      reviewScorecardId: 'scorecard-1',
+      taskDefinitionName: 'mm-ecs-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-example',
+          configType: 'EXAMPLE',
+          phaseId: 'submission-phase',
+          startSeed: BigInt(1),
+          numberOfTests: 10,
+        },
+        {
+          id: 'phase-provisional',
+          configType: 'PROVISIONAL',
+          phaseId: 'submission-phase',
+          startSeed: BigInt(500),
+          numberOfTests: 20,
+        },
+      ],
+    });
+
+    (handler as any).getOpenPhaseResolution = jest.fn().mockResolvedValue({
+      phaseIds: ['submission-phase'],
+      phaseIdentifiers: ['submission-phase'],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: 'submission-1',
+            virusScan: false,
+          },
+        }),
+      )
+      .mockReturnValue(
+        of({
+          data: {
+            data: [],
+          },
+        }),
+      );
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+
+    await handler.handle({
+      submissionId: 'submission-1',
+      challengeId: 'challenge-1',
+      submissionUrl: 'https://example.com/submission.zip',
+      memberHandle: 'tester',
+      memberId: 'member-1',
+      submittedDate: '2026-03-26T01:27:22.829Z',
+    });
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(m2mService.getM2MToken).toHaveBeenCalledTimes(1);
+    expect(httpService.post).toHaveBeenCalledTimes(2);
+    expect(httpService.post).toHaveBeenNthCalledWith(
+      1,
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isExample: true,
+        isPassing: false,
+        scorecardId: 'scorecard-1',
+        submissionId: 'submission-1',
+        metadata: expect.objectContaining({
+          challengeId: 'challenge-1',
+          marathonMatchScoringSkipped: true,
+          testProgress: 1,
+          testStatus: 'FAILED',
+          testType: 'example',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(httpService.post).toHaveBeenNthCalledWith(
+      2,
       'https://api.topcoder-dev.com/v6/reviewSummations',
       expect.objectContaining({
         aggregateScore: -1,
