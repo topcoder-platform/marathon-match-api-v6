@@ -1094,7 +1094,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('does not persist system summation when completing the review fails', async () => {
+  it('persists system summation before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1156,12 +1156,26 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(findExistingReviewSummationsSpy).not.toHaveBeenCalled();
-    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(findExistingReviewSummationsSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      systemPayload.submissionId,
+      'system',
+    );
+    expect(createReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        submissionId: systemPayload.submissionId,
+      }),
+    );
     expect(updateReviewSummationSpy).not.toHaveBeenCalled();
+    expect(createReviewSummationSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      httpService.patch.mock.invocationCallOrder[0],
+    );
   });
 
-  it('does not persist currentReview summation when completing the review fails', async () => {
+  it('persists currentReview summation before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1220,10 +1234,21 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(upsertFromLegacyReviewPayloadSpy).not.toHaveBeenCalled();
+    expect(upsertFromLegacyReviewPayloadSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        fallbackScore: 100,
+        fallbackSubmissionId: systemPayload.submissionId,
+        legacyReview: systemPayload.currentReview,
+        testPhase: 'system',
+      }),
+    );
+    expect(
+      upsertFromLegacyReviewPayloadSpy.mock.invocationCallOrder[0],
+    ).toBeLessThan(httpService.patch.mock.invocationCallOrder[0]);
   });
 
-  it('does not persist relative summations when completing the review fails', async () => {
+  it('persists relative summations before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1300,7 +1325,19 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(upsertReviewSummationSpy).not.toHaveBeenCalled();
+    expect(upsertReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        submissionId: systemPayload.submissionId,
+      }),
+      undefined,
+    );
+    expect(upsertReviewSummationSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      httpService.patch.mock.invocationCallOrder[0],
+    );
   });
 
   it('returns a bad request error when review-api rejects a nonexistent submissionId', async () => {
