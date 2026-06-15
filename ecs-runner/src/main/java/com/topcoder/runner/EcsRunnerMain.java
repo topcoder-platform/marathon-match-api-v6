@@ -3023,6 +3023,8 @@ public class EcsRunnerMain {
 
     /**
      * Builds the JSON payload stored in the internal {@code reviews.json} artifact.
+     * The payload includes sanitized top-level {@code testScores} so private
+     * consumers can inspect per-test scores even though public artifacts hide them.
      *
      * @param submissionId Submission whose review payload is archived.
      * @param testPhase Scoring phase represented by the payload.
@@ -3066,10 +3068,40 @@ public class EcsRunnerMain {
         payload.put("scorecardId", scorecardId);
         payload.put("score", testerExecution.getScore());
         payload.put("metadata", callbackMetadata);
+        payload.put(
+            "testScores",
+            buildInternalArtifactScoreEntries(testerExecution.getMetadata())
+        );
         payload.put("currentReview", currentReview);
         payload.put("impactedReviews", impactedReviews);
         payload.put("reviews", reviews);
         return payload;
+    }
+
+    /**
+     * Extracts per-test score entries for the private review artifact.
+     *
+     * <p>The member-visible public artifact intentionally omits per-test scores,
+     * but internal tooling still needs those values for diagnostics and score
+     * verification. Seed-bearing fields are removed so the private artifact keeps
+     * the same stable testcase identifiers used by callback metadata.
+     *
+     * @param metadata Structured tester metadata produced by generic or custom runner code.
+     * @return Sanitized per-test score entries, or an empty list when none were produced.
+     */
+    private static List<Object> buildInternalArtifactScoreEntries(
+        Map<String, Object> metadata
+    ) {
+        if (metadata == null) {
+            return new ArrayList<Object>();
+        }
+
+        Object testScores = metadata.get("testScores");
+        if (!(testScores instanceof List)) {
+            return new ArrayList<Object>();
+        }
+
+        return sanitizeMemberVisibleScoreEntries((List<?>) testScores);
     }
 
     /**
@@ -4148,38 +4180,14 @@ public class EcsRunnerMain {
                 seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
-                StringBuilder testOutputText = new StringBuilder();
-                testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
-                testOutputText.append("Score = ").append(seedScore).append('\n');
-                testOutputText.append("Run Time = ")
-                    .append(testResult.getRunTime())
-                    .append("ms\n");
-                if (
-                    testResult.getError() != null
-                        && !testResult.getError().trim().isEmpty()
-                ) {
-                    testOutputText.append(testResult.getError().trim()).append('\n');
-                }
-                if (
-                    testResult.getStdout() != null
-                        && !testResult.getStdout().trim().isEmpty()
-                ) {
-                    testOutputText.append("stdout:\n")
-                        .append(testResult.getStdout().trim())
-                        .append('\n');
-                }
-                if (
-                    testResult.getStderr() != null
-                        && !testResult.getStderr().trim().isEmpty()
-                ) {
-                    testOutputText.append("stderr:\n")
-                        .append(testResult.getStderr().trim())
-                        .append('\n');
-                }
-                testOutputText.append('\n');
                 outputBytes = appendLimitedOutput(
                     outputText,
-                    testOutputText.toString(),
+                    buildMemberVisibleTestOutput(
+                        testCaseNumber,
+                        testResult.getRunTime(),
+                        seedError,
+                        testResult.getStderr()
+                    ),
                     outputBytes,
                     "artifacts/public/output.txt"
                 );
@@ -4239,6 +4247,40 @@ public class EcsRunnerMain {
                 deletePathRecursively(compileWorkDir);
             }
         }
+    }
+
+    /**
+     * Builds the public {@code output.txt} section for one generic Marathon test case.
+     *
+     * <p>The public provisional artifact shows runtime, tester errors, and stderr
+     * diagnostics, but it intentionally hides submitted-solution stdout and raw
+     * per-test scores. Per-test scores remain available in metadata and the
+     * private {@code reviews.json} artifact.
+     *
+     * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param runTimeMs Runtime reported by the Marathon tester for the testcase.
+     * @param error Tester or runner error text for the testcase.
+     * @param stderr Submitted solution stderr captured for the testcase.
+     * @return Member-visible text block ending with a blank line.
+     */
+    private static String buildMemberVisibleTestOutput(
+        int testCaseNumber,
+        long runTimeMs,
+        String error,
+        String stderr
+    ) {
+        StringBuilder testOutputText = new StringBuilder();
+        testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
+        testOutputText.append("Run Time = ").append(runTimeMs).append("ms\n");
+
+        if (error != null && !error.trim().isEmpty()) {
+            testOutputText.append(error.trim()).append('\n');
+        }
+        if (stderr != null && !stderr.trim().isEmpty()) {
+            testOutputText.append("stderr:\n").append(stderr.trim()).append('\n');
+        }
+        testOutputText.append('\n');
+        return testOutputText.toString();
     }
 
     /**

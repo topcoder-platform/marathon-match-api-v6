@@ -141,6 +141,8 @@ Once this is saved and the config is active, new scoring launches use the new EC
 
 The runner rejects output once generated public `output.txt` content or a public/private artifact archive would exceed `MM_RUNNER_MAX_OUTPUT_BYTES`. The default is `10000000` bytes. The trusted parent runner passes the resolved limit into the isolated tester child, so generated generic-runner output and uploaded artifact zips use the same cap.
 
+Generic runner public `output.txt` entries show testcase ordinal, runtime, runner/tester errors, and submitted-solution stderr. They intentionally omit submitted-solution stdout and raw per-test scores. The private internal artifact (`reviews.json` in the `*-internal` zip) carries the per-test `testScores` used for diagnostics and score verification.
+
 ## Local smoke test
 
 ```bash
