@@ -26,19 +26,19 @@ Supported source extensions are:
 
 | Extension   | Language / runtime                                                           |
 | ----------- | ---------------------------------------------------------------------------- |
-| `.cpp`      | C++                                                                          |
-| `.java`     | Java                                                                         |
+| `.cpp`      | C++23 / GNU++23 using G++ 14.2.0                                             |
+| `.java`     | Java 11 using Temurin OpenJDK 11.0.31+11 and `javac --release 11`            |
 | `.py`       | Python 3.12                                                                  |
 | `.cs`       | C# using Mono                                                                |
 | `.cs_net10` | C# using .NET 10 / C# 14                                                     |
 | `.cs_net7`  | C# using .NET 7 / C# 11                                                      |
-| `.rs`       | Rust latest stable                                                           |
+| `.rs`       | Rust 2024 edition using `rustc 1.96.0` stable as last verified               |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
 ### C++
 
-C++ submissions are compiled with `g++` using GNU++23 and a fixed
+C++ submissions are compiled with G++ 14.2.0 using GNU++23 and a fixed
 `x86-64` architecture target with generic tuning. The runner does not use
 `-march=native`, so binaries do not depend on the specific Fargate host that
 compiled the submission.
@@ -50,7 +50,8 @@ g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic Solution.cpp -o Solution
 
 ### Java
 
-Java submissions are compiled and executed with:
+Java submissions are compiled with Temurin OpenJDK `javac 11.0.31` and
+executed on the Java 11 runtime:
 
 ```bash
 javac --release 11 Solution.java
@@ -74,7 +75,8 @@ python3 Solution.py
 
 ### Rust
 
-Rust submissions use the `.rs` extension and are compiled as a single source file with the latest stable Rust compiler:
+Rust submissions use the `.rs` extension and are compiled as a single source
+file with `rustc 1.96.0` stable as last verified:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution

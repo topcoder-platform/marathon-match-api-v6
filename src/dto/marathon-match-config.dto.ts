@@ -668,6 +668,13 @@ export class RerunResponseDto {
           description: 'Submission identifier that was selected for rerun',
           example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
         },
+        configType: {
+          type: 'string',
+          enum: Object.values(PhaseConfigType),
+          description:
+            'Phase config used for this scorer launch. Multiple rows can exist for one submission when Example and Provisional share the open Submission phase.',
+          example: PhaseConfigType.PROVISIONAL,
+        },
         taskArn: {
           type: 'string',
           description: 'AWS ECS task ARN when the scorer task launch succeeded',
@@ -694,6 +701,7 @@ export class RerunResponseDto {
   })
   results: Array<{
     submissionId: string;
+    configType: PhaseConfigType;
     taskArn?: string;
     taskId?: string;
     error?: string;

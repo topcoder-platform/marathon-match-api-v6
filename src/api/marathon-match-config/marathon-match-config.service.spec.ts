@@ -254,6 +254,7 @@ describe('MarathonMatchConfigService', () => {
         results: [
           {
             submissionId: 'submission-1',
+            configType: PhaseConfigType.PROVISIONAL,
             taskId: 'task-1',
           },
         ],
@@ -430,6 +431,182 @@ describe('MarathonMatchConfigService', () => {
     );
   });
 
+  it('reruns all phase configs mapped to the currently open submission phase', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'submission-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+        {
+          id: 'phase-example',
+          configType: PhaseConfigType.EXAMPLE,
+          phaseId: 'submission-phase',
+          startSeed: BigInt(1),
+          numberOfTests: 10,
+        },
+        {
+          id: 'phase-system',
+          configType: PhaseConfigType.SYSTEM,
+          phaseId: 'system-phase',
+          startSeed: BigInt(1000),
+          numberOfTests: 5000,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+            phases: [
+              {
+                phaseId: 'registration-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+              {
+                phaseId: 'submission-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'submission-1',
+                  memberId: '40051399',
+                  submittedDate: '2026-06-02T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: true,
+                },
+                {
+                  id: 'submission-2',
+                  memberId: '40051400',
+                  submittedDate: '2026-06-03T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: true,
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+    ecsService.launchScorerTask.mockImplementation((...args: unknown[]) => {
+      const submissionId = String(args[1]);
+      const scoringPhase = args[3] as { configType: PhaseConfigType };
+      return Promise.resolve({
+        taskArn: `arn:aws:ecs:task/${scoringPhase.configType}-${submissionId}`,
+        taskId: `${scoringPhase.configType}-${submissionId}`,
+      });
+    });
+
+    const result = await service.rerunLatestSubmissions('30000123', user);
+
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionsQueued: 2,
+      results: [
+        {
+          submissionId: 'submission-1',
+          configType: PhaseConfigType.EXAMPLE,
+          taskArn: 'arn:aws:ecs:task/EXAMPLE-submission-1',
+          taskId: 'EXAMPLE-submission-1',
+        },
+        {
+          submissionId: 'submission-2',
+          configType: PhaseConfigType.EXAMPLE,
+          taskArn: 'arn:aws:ecs:task/EXAMPLE-submission-2',
+          taskId: 'EXAMPLE-submission-2',
+        },
+        {
+          submissionId: 'submission-1',
+          configType: PhaseConfigType.PROVISIONAL,
+          taskArn: 'arn:aws:ecs:task/PROVISIONAL-submission-1',
+          taskId: 'PROVISIONAL-submission-1',
+        },
+        {
+          submissionId: 'submission-2',
+          configType: PhaseConfigType.PROVISIONAL,
+          taskArn: 'arn:aws:ecs:task/PROVISIONAL-submission-2',
+          taskId: 'PROVISIONAL-submission-2',
+        },
+      ],
+    });
+    expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(4);
+    expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
+      1,
+      '30000123',
+      'submission-1',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.EXAMPLE,
+        startSeed: BigInt(1),
+        numberOfTests: 10,
+        scorecardId: 'scorecard-1',
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+    expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
+      3,
+      '30000123',
+      'submission-1',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+        startSeed: BigInt(100),
+        numberOfTests: 50,
+        scorecardId: 'scorecard-1',
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+  });
+
   it('marks latest submissions failed without launching when virus scan has not passed', async () => {
     const {
       service,
@@ -530,6 +707,7 @@ describe('MarathonMatchConfigService', () => {
       results: [
         {
           submissionId: 'submission-1',
+          configType: PhaseConfigType.PROVISIONAL,
           error:
             'Marathon Match PROVISIONAL scoring skipped because the submission has not passed virus scanning.',
         },
@@ -878,6 +1056,7 @@ describe('MarathonMatchConfigService', () => {
         submissionsQueued: 10,
         results: submissionIds.map((submissionId) => ({
           submissionId,
+          configType: PhaseConfigType.PROVISIONAL,
           taskArn: `arn:aws:ecs:us-east-1:123456789012:task/${submissionId}`,
           taskId: `task-${submissionId}`,
         })),

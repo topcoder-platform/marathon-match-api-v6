@@ -142,7 +142,7 @@ export class MarathonMatchConfigController {
   @ApiResponse({
     status: 400,
     description:
-      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or PROVISIONAL phase config is missing.',
+      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or no phase config matches the open phase.',
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Marathon match config not found.' })

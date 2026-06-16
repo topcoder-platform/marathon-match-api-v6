@@ -78,6 +78,15 @@ type RerunSubmissionDispatchCandidate = {
   virusScan?: boolean;
 };
 
+type RerunScorerTaskDispatchCandidate = RerunSubmissionDispatchCandidate & {
+  scoringPhase: {
+    configType: PhaseConfigType;
+    startSeed: bigint;
+    numberOfTests: number;
+    scorecardId?: string | null;
+  };
+};
+
 interface ChallengePhaseResponse {
   id?: string;
   phaseId?: string;
@@ -527,7 +536,8 @@ export class MarathonMatchConfigService {
    * Uses the challenge's currently open phase config, validates active/open
    * challenge runtime state through challenge-api, reduces submission API
    * results to one latest submission per member, and launches ECS scorer tasks
-   * in bounded batches to avoid RunTask API throttling.
+   * for every phase config that matches the currently open phase in bounded
+   * batches to avoid RunTask API throttling.
    * @param challengeId Challenge ID from path params in POST /challenge/:challengeId/rerun.
    * @param user Authenticated user or machine token payload for audit-aware logging.
    * @returns Rerun dispatch summary mapped to `RerunResponseDto`.
@@ -807,18 +817,6 @@ export class MarathonMatchConfigService {
         const currentPhaseId = extractPhaseId(currentPhase);
         return currentPhaseId ? [currentPhaseId] : [];
       };
-      const findPhaseConfigForOpenPhase = (openPhaseIds: string[]) => {
-        for (const openPhaseId of openPhaseIds) {
-          const openPhaseConfig = config.phaseConfigs.find(
-            (phaseConfigData) => phaseConfigData.phaseId.trim() === openPhaseId,
-          );
-          if (openPhaseConfig) {
-            return openPhaseConfig;
-          }
-        }
-
-        return null;
-      };
       type RerunSubmissionCandidate = {
         submissionId: string;
         memberId: string;
@@ -911,8 +909,11 @@ export class MarathonMatchConfigService {
         );
       }
 
-      const openPhaseConfig = findPhaseConfigForOpenPhase(openPhaseIds);
-      if (!openPhaseConfig) {
+      const openPhaseConfigs = this.findPhaseConfigsForOpenPhases(
+        config.phaseConfigs,
+        openPhaseIds,
+      );
+      if (openPhaseConfigs.length === 0) {
         throw new BadRequestException(
           `Marathon match config ${challengeId} has no phase config for currently open challenge phase ${openPhaseIds.join(', ')}.`,
         );
@@ -1013,27 +1014,34 @@ export class MarathonMatchConfigService {
         };
       }
 
+      const dispatchCandidates: RerunScorerTaskDispatchCandidate[] =
+        openPhaseConfigs.flatMap((openPhaseConfig) =>
+          submissions.map((submission) => ({
+            ...submission,
+            scoringPhase: {
+              configType: openPhaseConfig.configType,
+              startSeed: openPhaseConfig.startSeed,
+              numberOfTests: openPhaseConfig.numberOfTests,
+              scorecardId: config.reviewScorecardId,
+            },
+          })),
+        );
       const launchResults = await this.launchScorerTasksWithRateLimit(
         challengeId,
-        submissions,
+        dispatchCandidates,
         {
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
         },
-        {
-          configType: openPhaseConfig.configType,
-          startSeed: openPhaseConfig.startSeed,
-          numberOfTests: openPhaseConfig.numberOfTests,
-          scorecardId: config.reviewScorecardId,
-        },
       );
 
-      const results: RerunResponseDto['results'] = submissions.map(
-        ({ submissionId }, index) => {
+      const results: RerunResponseDto['results'] = dispatchCandidates.map(
+        ({ submissionId, scoringPhase }, index) => {
           const launchResult = launchResults[index];
           if (launchResult.status === 'fulfilled') {
             return {
               submissionId,
+              configType: scoringPhase.configType,
               taskArn: launchResult.value.taskArn,
               taskId: launchResult.value.taskId,
             };
@@ -1042,6 +1050,7 @@ export class MarathonMatchConfigService {
           const reason = launchResult.reason;
           return {
             submissionId,
+            configType: scoringPhase.configType,
             error: reason instanceof Error ? reason.message : String(reason),
           };
         },
@@ -1052,6 +1061,10 @@ export class MarathonMatchConfigService {
         challengeId,
         actor: this.getActor(user),
         submissionsQueued: submissions.length,
+        phaseConfigsQueued: openPhaseConfigs.map(
+          (phaseConfigData) => phaseConfigData.configType,
+        ),
+        tasksQueued: dispatchCandidates.length,
         launchedCount: results.filter((result) => !!result.taskId).length,
         failedCount: results.filter((result) => !!result.error).length,
       });
@@ -1786,26 +1799,109 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Finds all marathon phase configs that should run for the ordered open
+   * challenge phases.
+   * @param phaseConfigs Stored phase configuration rows for the challenge.
+   * @param openPhaseIds Canonical open challenge phase IDs ordered by priority.
+   * @returns Matching phase configs in deterministic scorer launch order.
+   */
+  private findPhaseConfigsForOpenPhases(
+    phaseConfigs: phaseConfig[],
+    openPhaseIds: string[],
+  ): phaseConfig[] {
+    const matchingPhaseConfigs: phaseConfig[] = [];
+    const seenPhaseConfigIds = new Set<string>();
+
+    for (const openPhaseId of openPhaseIds) {
+      const normalizedOpenPhaseId = openPhaseId.trim();
+      if (!normalizedOpenPhaseId) {
+        continue;
+      }
+
+      const phaseConfigsForOpenPhase = phaseConfigs
+        .filter(
+          (phaseConfigData) =>
+            phaseConfigData.phaseId.trim() === normalizedOpenPhaseId,
+        )
+        .sort((left, right) =>
+          this.comparePhaseConfigLaunchPriority(
+            left.configType,
+            right.configType,
+          ),
+        );
+
+      for (const phaseConfigData of phaseConfigsForOpenPhase) {
+        if (seenPhaseConfigIds.has(phaseConfigData.id)) {
+          continue;
+        }
+
+        seenPhaseConfigIds.add(phaseConfigData.id);
+        matchingPhaseConfigs.push(phaseConfigData);
+      }
+    }
+
+    return matchingPhaseConfigs;
+  }
+
+  /**
+   * Orders scorer phase configs when multiple configs share one open phase.
+   * @param leftConfigType Left phase config type.
+   * @param rightConfigType Right phase config type.
+   * @returns Sort value that launches Example before Provisional before System.
+   */
+  private comparePhaseConfigLaunchPriority(
+    leftConfigType: string,
+    rightConfigType: string,
+  ): number {
+    const leftValue = leftConfigType;
+    const rightValue = rightConfigType;
+    const leftPriority = this.resolvePhaseConfigLaunchPriority(leftValue);
+    const rightPriority = this.resolvePhaseConfigLaunchPriority(rightValue);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return leftValue.trim().localeCompare(rightValue.trim(), 'en', {
+      sensitivity: 'base',
+    });
+  }
+
+  /**
+   * Maps a phase config type to a stable scorer launch priority.
+   * @param configType Phase config type from the stored config.
+   * @returns Numeric priority where lower values launch first.
+   */
+  private resolvePhaseConfigLaunchPriority(configType: string): number {
+    const normalizedConfigType = configType.trim().toUpperCase();
+    if (normalizedConfigType === PhaseConfigType.EXAMPLE) {
+      return 0;
+    }
+
+    if (normalizedConfigType === PhaseConfigType.PROVISIONAL) {
+      return 1;
+    }
+
+    if (normalizedConfigType === PhaseConfigType.SYSTEM) {
+      return 2;
+    }
+
+    return 99;
+  }
+
+  /**
    * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
    * @param challengeId Challenge ID passed to each scorer task.
-   * @param submissions Latest submissions to rerun, in response order.
+   * @param dispatchCandidates Submission and phase-config scorer launches in response order.
    * @param mmConfig Task definition name and version from the marathon match config.
-   * @param scoringPhase Phase settings passed to scorer tasks plus scorecard context for skipped markers.
-   * @returns Settled launch results in the same order as `submissions`.
+   * @returns Settled launch results in the same order as `dispatchCandidates`.
    * @throws Does not throw for individual scorer launch failures; those are returned as rejected settled results.
    */
   private async launchScorerTasksWithRateLimit(
     challengeId: string,
-    submissions: RerunSubmissionDispatchCandidate[],
+    dispatchCandidates: RerunScorerTaskDispatchCandidate[],
     mmConfig: {
       taskDefinitionName: string;
       taskDefinitionVersion: string;
-    },
-    scoringPhase: {
-      configType: PhaseConfigType;
-      startSeed: bigint;
-      numberOfTests: number;
-      scorecardId?: string | null;
     },
   ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
     const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
@@ -1813,46 +1909,48 @@ export class MarathonMatchConfigService {
 
     for (
       let index = 0;
-      index < submissions.length;
+      index < dispatchCandidates.length;
       index += MarathonMatchConfigService.scorerLaunchBatchSize
     ) {
-      const batch = submissions.slice(
+      const batch = dispatchCandidates.slice(
         index,
         index + MarathonMatchConfigService.scorerLaunchBatchSize,
       );
       const batchResults = await Promise.allSettled(
-        batch.map(async ({ submissionId, memberId, virusScan }) => {
-          if (virusScan !== true) {
-            const reason = `Marathon Match ${scoringPhase.configType} scoring skipped because the submission has not passed virus scanning.`;
-            await this.scoringResultService.markSubmissionScoringSkipped({
-              challengeId,
-              details: {
-                virusScan: virusScan ?? null,
-              },
-              reason,
-              scorecardId: scoringPhase.scorecardId ?? undefined,
-              submissionId,
-              testPhase: scoringPhase.configType,
-            });
-            throw new Error(reason);
-          }
+        batch.map(
+          async ({ submissionId, memberId, virusScan, scoringPhase }) => {
+            if (virusScan !== true) {
+              const reason = `Marathon Match ${scoringPhase.configType} scoring skipped because the submission has not passed virus scanning.`;
+              await this.scoringResultService.markSubmissionScoringSkipped({
+                challengeId,
+                details: {
+                  virusScan: virusScan ?? null,
+                },
+                reason,
+                scorecardId: scoringPhase.scorecardId ?? undefined,
+                submissionId,
+                testPhase: scoringPhase.configType,
+              });
+              throw new Error(reason);
+            }
 
-          return this.ecsService.launchScorerTask(
-            challengeId,
-            submissionId,
-            mmConfig,
-            scoringPhase,
-            undefined,
-            { memberId },
-          );
-        }),
+            return this.ecsService.launchScorerTask(
+              challengeId,
+              submissionId,
+              mmConfig,
+              scoringPhase,
+              undefined,
+              { memberId },
+            );
+          },
+        ),
       );
 
       launchResults.push(...batchResults);
 
       if (
         index + MarathonMatchConfigService.scorerLaunchBatchSize <
-        submissions.length
+        dispatchCandidates.length
       ) {
         await this.delay(MarathonMatchConfigService.scorerLaunchBatchDelayMs);
       }
