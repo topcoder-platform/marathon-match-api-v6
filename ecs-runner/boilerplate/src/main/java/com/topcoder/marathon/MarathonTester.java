@@ -101,41 +101,37 @@ public abstract class MarathonTester {
         return timeout;
     }
 
+    /**
+     * Starts measuring submitted-solution execution time.
+     *
+     * <p>Process startup, tester setup, and initial input writes that happen
+     * before this call are intentionally outside the configured timeout. The
+     * timeout watcher uses the same monotonic start instant as the elapsed-time
+     * counter so it cannot consume part of the submitted solution's configured
+     * runtime before measurement begins.
+     */
     protected final void startTime() {
         synchronized (timeLock) {
             if (lastStart != 0) {
                 System.out.println("ERROR startTime() was called again, before endTime() closed the first one.");
                 System.exit(-1);
             }
+            lastStart = System.nanoTime();
             if (timeLimit > 0) {
+                final long timeoutDeadline = lastStart + Math.max(1L, timeLimit - elapsedTime);
                 lastTimeoutThread = new Thread() {
                     public void run() {
-                        try {
-                            long remainingTime = Math.max(1L, timeLimit - elapsedTime);
-                            boolean finished = process.waitFor(remainingTime, TimeUnit.NANOSECONDS);
-                            if (!finished) {
-                                boolean notifyTimeout = false;
-                                synchronized (timeLock) {
-                                    if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
-                                    lastStart = 0;
-                                    if (!timeout) {
-                                        timeout = true;
-                                        notifyTimeout = true;
-                                    }
-                                }
-                                terminateTimedOutProcess();
-                                if (notifyTimeout) timeout();
-                            }
-                        } catch (Exception e) {
-                        }
+                        waitForTimeoutDeadline(timeoutDeadline);
                     }
                 };
                 lastTimeoutThread.start();
             }
-            lastStart = System.nanoTime();
         }
     }
 
+    /**
+     * Stops measuring submitted-solution execution time.
+     */
     protected final void stopTime() {
         synchronized (timeLock) {
             if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
@@ -158,12 +154,7 @@ public abstract class MarathonTester {
             score = getErrorScore();
             score = run();
             if (timeLimit > 0 && elapsedTime > timeLimit) {
-                synchronized (timeLock) {
-                    if (!timeout) {
-                        timeout = true;
-                        timeout();
-                    }
-                }
+                if (recordTimeout(false)) timeout();
             }
             end();
         } catch (Exception e) {
@@ -188,6 +179,51 @@ public abstract class MarathonTester {
             score = getErrorScore();
         }
         return score;
+    }
+
+    /**
+     * Waits for the submitted process to exit or for the measured timeout
+     * deadline to pass.
+     *
+     * @param timeoutDeadline Monotonic {@link System#nanoTime()} deadline for
+     *                        the current measured execution interval.
+     */
+    private void waitForTimeoutDeadline(long timeoutDeadline) {
+        Process watchedProcess = process;
+        if (watchedProcess == null) return;
+
+        try {
+            while (true) {
+                long remainingTime = timeoutDeadline - System.nanoTime();
+                if (remainingTime <= 0) break;
+                if (watchedProcess.waitFor(remainingTime, TimeUnit.NANOSECONDS)) return;
+            }
+
+            if (recordTimeout(true)) {
+                terminateTimedOutProcess();
+                timeout();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+        }
+    }
+
+    /**
+     * Records that the configured measured execution timeout was reached.
+     *
+     * @param requireActiveInterval True when timeout should only be recorded if
+     *                              {@link #startTime()} is still active.
+     * @return True when this call transitioned the tester into timeout state.
+     */
+    private boolean recordTimeout(boolean requireActiveInterval) {
+        synchronized (timeLock) {
+            if (timeout || (requireActiveInterval && lastStart == 0)) return false;
+            if (timeLimit > 0) elapsedTime = timeLimit;
+            lastStart = 0;
+            timeout = true;
+            return true;
+        }
     }
 
     /**

@@ -111,7 +111,7 @@ Compile and test timeouts are configured per Marathon Match challenge.
 - `compileTimeout` controls submission compilation timeout.
 - For Java submissions, `compileTimeout` also covers class startup and static
   initializer checks performed after `javac`.
-- `testTimeout` controls per-seed tester execution timeout.
+- `testTimeout` controls the per-seed measured submitted-solution execution timeout. Runner setup, initial tester input writes, and artifact IO before the tester starts its timed section are outside this limit; a timed-out seed reports the configured limit as its runtime.
 - `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 - `POST /v6/marathon-match/challenge/:challengeId/rerun/system` restarts existing non-cancelled SYSTEM reviews with the current `testTimeout`, `systemTestTimeout`, SYSTEM seed, and SYSTEM test count settings.
 
@@ -246,7 +246,7 @@ rustc --edition=2024 -O Solution.rs -o Solution
 java -jar Tester.jar -exec "env RUST_BACKTRACE=1 ./Solution" -seed 1
 ```
 
-Members may print debug information to standard error. The tester captures solution output and error text. Internal artifacts include per-seed `stdout/{seed}.txt` and `stderr/{seed}.txt` files for operator diagnostics, while member-visible EXAMPLE artifacts expose only the approved output summary for the scoring phase, including each seed and the score received for that seed.
+Members may print debug information to standard error. The tester captures solution output and error text. Internal artifacts include `compile_log.txt`, `execution-{submissionId}.log`, optional `error-{submissionId}.log`, and per-seed `stdout/{seed}.txt` and `stderr/{seed}.txt` files for operator diagnostics, while member-visible EXAMPLE artifacts expose only the approved output summary for the scoring phase, including each seed and the score received for that seed.
 
 ## Download and Access Submissions
 

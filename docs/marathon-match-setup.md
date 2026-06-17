@@ -112,7 +112,7 @@ The POST request validates the challenge ID against challenge-api and validates 
 | `relativeScoringEnabled` | boolean | Enables relative-score normalization |
 | `scoreDirection` | string | `MAXIMIZE` or `MINIMIZE` |
 | `reviewScorecardId` | string | Review API scorecard used for summations. Must resolve via review-api using either the canonical scorecard id or a legacy scorecard id. |
-| `testTimeout` | number | Per-seed tester execution timeout in milliseconds |
+| `testTimeout` | number | Per-seed measured submitted-solution execution timeout in milliseconds. Tester setup, initial input writes, artifact IO, and other runner work before the tester starts its timed section are not charged to this limit. |
 | `compileTimeout` | number | Submission compile timeout in milliseconds |
 | `systemTestTimeout` | number | Total SYSTEM scoring timeout in milliseconds. Defaults to 24 hours (`86400000`) when omitted; if the timeout fires while the ECS task is still active and the SYSTEM summation is incomplete, the API stops the task and writes a failed summation with `metadata.timed_out = true`. |
 | `taskDefinitionName` | string | ECS task definition family |

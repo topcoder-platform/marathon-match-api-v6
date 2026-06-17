@@ -43,6 +43,7 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -3161,6 +3162,9 @@ public class EcsRunnerMain {
         TesterExecutionResult testerExecution,
         Map<String, Object> callbackMetadata
     ) {
+        Map<String, Object> internalMetadata = buildInternalArtifactMetadata(
+            testerExecution.getMetadata()
+        );
         Map<String, Object> currentReview = withDefaultReviewFields(
             testerExecution.getCurrentReview(),
             submissionId,
@@ -3186,7 +3190,7 @@ public class EcsRunnerMain {
         payload.put("reviewTypeId", reviewTypeId);
         payload.put("scorecardId", scorecardId);
         payload.put("score", testerExecution.getScore());
-        payload.put("metadata", callbackMetadata);
+        payload.put("metadata", internalMetadata);
         payload.put(
             "testScores",
             buildInternalArtifactScoreEntries(testerExecution.getMetadata())
@@ -3198,15 +3202,47 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Builds private review artifact metadata from raw tester execution metadata.
+     *
+     * <p>The scoring callback receives seed-sanitized metadata, but the internal
+     * {@code reviews.json} artifact needs actual seed values for operator diagnostics.
+     * The copy preserves raw metadata fields and rewrites {@code testScores} with
+     * stable testcase ordinals plus any actual seed value recorded by runner code.
+     *
+     * @param metadata Structured tester metadata produced by generic or custom runner code.
+     * @return Metadata copy for the internal artifact.
+     */
+    private static Map<String, Object> buildInternalArtifactMetadata(
+        Map<String, Object> metadata
+    ) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if (metadata == null) {
+            return result;
+        }
+
+        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if ("testScores".equals(key) && value instanceof List) {
+                result.put(key, buildInternalArtifactScoreEntries((List<?>) value));
+            } else {
+                result.put(key, value);
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Extracts per-test score entries for the private review artifact.
      *
      * <p>Internal tooling needs these values for diagnostics and score
-     * verification across every scoring phase. Seed-bearing fields are removed
-     * so the private artifact keeps the same stable testcase identifiers used
-     * by callback metadata.
+     * verification across every scoring phase. The private artifact keeps the
+     * actual seed beside the same stable testcase identifiers used by callback
+     * metadata.
      *
      * @param metadata Structured tester metadata produced by generic or custom runner code.
-     * @return Sanitized per-test score entries, or an empty list when none were produced.
+     * @return Per-test score entries, or an empty list when none were produced.
      */
     private static List<Object> buildInternalArtifactScoreEntries(
         Map<String, Object> metadata
@@ -3220,7 +3256,44 @@ public class EcsRunnerMain {
             return new ArrayList<Object>();
         }
 
-        return sanitizeMemberVisibleScoreEntries((List<?>) testScores);
+        return buildInternalArtifactScoreEntries((List<?>) testScores);
+    }
+
+    /**
+     * Builds private review artifact score entries with testcase ordinals and seed values.
+     *
+     * @param scoreEntries Raw `testScores` entries produced by runner code.
+     * @return Score entries for the internal artifact.
+     */
+    private static List<Object> buildInternalArtifactScoreEntries(
+        List<?> scoreEntries
+    ) {
+        List<Object> result = new ArrayList<Object>();
+        for (int index = 0; index < scoreEntries.size(); index++) {
+            Object rawEntry = scoreEntries.get(index);
+            Map<String, Object> internalEntry = new LinkedHashMap<String, Object>();
+            if (rawEntry instanceof Map) {
+                Map<?, ?> rawMap = (Map<?, ?>) rawEntry;
+                for (Map.Entry<?, ?> rawMapEntry : rawMap.entrySet()) {
+                    Object rawKey = rawMapEntry.getKey();
+                    if (!(rawKey instanceof String)) {
+                        continue;
+                    }
+
+                    String key = (String) rawKey;
+                    if ("testcase".equals(key)) {
+                        continue;
+                    }
+
+                    internalEntry.put(key, rawMapEntry.getValue());
+                }
+            }
+
+            internalEntry.put("testcase", Integer.toString(index + 1));
+            result.add(internalEntry);
+        }
+
+        return result;
     }
 
     /**
@@ -3347,8 +3420,9 @@ public class EcsRunnerMain {
                 );
             }
 
-            privateZip = createDirectoryZip(
-                artifactsDir.resolve("private"),
+            privateZip = createInternalArtifactZip(
+                artifactsDir,
+                submissionId,
                 internalArtifactName
             );
             if (privateZip != null) {
@@ -3465,6 +3539,84 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Creates an internal artifact archive with private diagnostics and runner logs.
+     *
+     * <p>Internal artifacts are private to operators for every scoring phase. They
+     * include the private diagnostics directory plus the trusted compile and runner
+     * execution logs that are also present in member-visible EXAMPLE artifacts.
+     *
+     * @param artifactsDir Root artifacts directory containing public files, private
+     *                     diagnostics, and runner logs.
+     * @param submissionId Submission ID used to locate execution/error logs.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when no internal files exist.
+     * @throws Exception when walking or archiving internal artifacts fails.
+     */
+    private static Path createInternalArtifactZip(
+        Path artifactsDir,
+        String submissionId,
+        String artifactName
+    ) throws Exception {
+        Path privateDir = artifactsDir.resolve("private");
+        Path executionLog = artifactsDir.resolve("execution-" + submissionId + ".log");
+        Path errorLog = artifactsDir.resolve("error-" + submissionId + ".log");
+        Path compileLog = artifactsDir.resolve("public").resolve("compile_log.txt");
+
+        boolean hasInternalArtifacts =
+            isNonSymlinkRegularFile(executionLog)
+                || isNonSymlinkRegularFile(errorLog)
+                || isNonSymlinkRegularFile(compileLog)
+                || directoryHasRegularFiles(privateDir);
+
+        if (!hasInternalArtifacts) {
+            logInfo(
+                "artifacts.zip.private",
+                "No internal artifacts found under " + artifactsDir
+            );
+            return null;
+        }
+
+        enforceInternalArtifactOutputLimit(
+            artifactsDir,
+            privateDir,
+            executionLog,
+            errorLog,
+            compileLog
+        );
+        Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(
+            Files.newOutputStream(zipPath)
+        )) {
+            Set<String> entryNames = new LinkedHashSet<String>();
+            addFileToZip(
+                zipOutputStream,
+                executionLog,
+                executionLog.getFileName().toString(),
+                entryNames
+            );
+            addFileToZip(
+                zipOutputStream,
+                errorLog,
+                errorLog.getFileName().toString(),
+                entryNames
+            );
+            addFileToZip(
+                zipOutputStream,
+                compileLog,
+                compileLog.getFileName().toString(),
+                entryNames
+            );
+            addDirectoryToZip(zipOutputStream, privateDir, "", entryNames);
+        }
+        logInfo(
+            "artifacts.zip.private",
+            "Created internal zip " + zipPath + " from " + artifactsDir
+        );
+
+        return zipPath;
+    }
+
+    /**
      * Creates a zip archive from a directory with at least one regular file.
      *
      * @param directoryPath Directory to archive.
@@ -3559,6 +3711,57 @@ public class EcsRunnerMain {
         logInfo(
             "artifacts.output-limit",
             "Public artifacts total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Enforces the output byte cap across private diagnostics and selected runner logs.
+     *
+     * @param artifactsDir Root artifacts directory used to render paths in errors.
+     * @param privateDir Private diagnostics directory.
+     * @param executionLog Runner execution log file.
+     * @param errorLog Runner error log file.
+     * @param compileLog Submission compile log file.
+     * @throws IOException When file size inspection fails.
+     */
+    private static void enforceInternalArtifactOutputLimit(
+        Path artifactsDir,
+        Path privateDir,
+        Path executionLog,
+        Path errorLog,
+        Path compileLog
+    ) throws IOException {
+        long totalBytes = 0L;
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            executionLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            errorLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            compileLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = enforceArtifactDirectoryOutputLimit(
+            privateDir,
+            artifactsDir,
+            "internal artifacts",
+            totalBytes
+        );
+        logInfo(
+            "artifacts.output-limit",
+            "Internal artifacts total sizeBytes="
                 + totalBytes
                 + ", maxOutputBytes="
                 + MAX_OUTPUT_BYTES
@@ -3693,17 +3896,44 @@ public class EcsRunnerMain {
         Path filePath,
         String entryName
     ) throws Exception {
+        addFileToZip(zipOutputStream, filePath, entryName, null);
+    }
+
+    /**
+     * Adds a file to zip when it exists, is not a symbolic link, and its entry is unused.
+     *
+     * @param zipOutputStream Destination zip stream receiving the entry.
+     * @param filePath Candidate file path to archive.
+     * @param entryName Zip entry name to use for the file.
+     * @param entryNames Mutable set of existing entry names, or {@code null} to skip duplicate checks.
+     * @throws Exception when a non-symlink regular file cannot be read or archived.
+     */
+    private static void addFileToZip(
+        ZipOutputStream zipOutputStream,
+        Path filePath,
+        String entryName,
+        Set<String> entryNames
+    ) throws Exception {
         if (!isNonSymlinkRegularFile(filePath)) {
             logInfo("artifacts.zip.add-file", "Skipping missing or non-regular file: " + filePath);
             return;
         }
 
+        String normalizedEntryName = entryName.replace('\\', '/');
+        if (entryNames != null && !entryNames.add(normalizedEntryName)) {
+            logWarn(
+                "artifacts.zip.add-file",
+                "Skipping duplicate zip entry " + normalizedEntryName + " from " + filePath
+            );
+            return;
+        }
+
         logInfo(
             "artifacts.zip.add-file",
-            "Adding file to zip entry " + entryName + " from " + filePath
+            "Adding file to zip entry " + normalizedEntryName + " from " + filePath
         );
         try (InputStream inputStream = openRegularFileInputStreamNoFollow(filePath)) {
-            zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
+            zipOutputStream.putNextEntry(new ZipEntry(normalizedEntryName));
             try {
                 copyStream(inputStream, zipOutputStream);
             } finally {
@@ -3724,6 +3954,24 @@ public class EcsRunnerMain {
         ZipOutputStream zipOutputStream,
         Path directoryPath,
         String entryPrefix
+    ) throws Exception {
+        addDirectoryToZip(zipOutputStream, directoryPath, entryPrefix, null);
+    }
+
+    /**
+     * Recursively adds non-symlink regular directory contents to a zip stream.
+     *
+     * @param zipOutputStream Destination zip stream receiving directory entries.
+     * @param directoryPath Directory to traverse without following symlinked directories.
+     * @param entryPrefix Prefix prepended to each zip entry name.
+     * @param entryNames Mutable set of existing entry names, or {@code null} to skip duplicate checks.
+     * @throws Exception when walking the directory or archiving a regular file fails.
+     */
+    private static void addDirectoryToZip(
+        ZipOutputStream zipOutputStream,
+        Path directoryPath,
+        String entryPrefix,
+        Set<String> entryNames
     ) throws Exception {
         if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
@@ -3746,7 +3994,14 @@ public class EcsRunnerMain {
                     .relativize(entryPath)
                     .toString()
                     .replace('\\', '/');
-                String entryName = entryPrefix + relativePath;
+                String entryName = (entryPrefix + relativePath).replace('\\', '/');
+                if (entryNames != null && !entryNames.add(entryName)) {
+                    logWarn(
+                        "artifacts.zip.add-directory",
+                        "Skipping duplicate zip entry " + entryName + " from " + entryPath
+                    );
+                    continue;
+                }
 
                 logInfo(
                     "artifacts.zip.add-directory",
@@ -4361,6 +4616,7 @@ public class EcsRunnerMain {
 
                 Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
                 seedResult.put("testcase", Integer.toString(testCaseNumber));
+                seedResult.put("seed", seed);
                 seedResult.put("score", seedScore);
                 seedResult.put("runTimeMs", testResult.getRunTime());
                 seedResult.put("error", seedError);

@@ -130,7 +130,7 @@ public class EcsRunnerMainTest {
     }
 
     @Test
-    public void buildInternalReviewArtifactPayloadIncludesPerTestScores()
+    public void buildInternalReviewArtifactPayloadIncludesSeededMetadataTestScores()
         throws Exception {
         Map<String, Object> scoreEntry = new LinkedHashMap<String, Object>();
         scoreEntry.put("testcase", "1");
@@ -147,6 +147,17 @@ public class EcsRunnerMainTest {
 
         Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
         currentReview.put("metadata", metadata);
+
+        Map<String, Object> callbackScoreEntry = new LinkedHashMap<String, Object>();
+        callbackScoreEntry.put("score", 98.5);
+        callbackScoreEntry.put("runTimeMs", 31L);
+        callbackScoreEntry.put("testcase", "1");
+        List<Map<String, Object>> callbackTestScores =
+            new ArrayList<Map<String, Object>>();
+        callbackTestScores.add(callbackScoreEntry);
+
+        Map<String, Object> callbackMetadata = new LinkedHashMap<String, Object>();
+        callbackMetadata.put("testScores", callbackTestScores);
 
         Object testerExecution = createTesterExecutionResult(
             98.5,
@@ -172,8 +183,22 @@ public class EcsRunnerMainTest {
             "review-type-id",
             "scorecard-id",
             testerExecution,
-            metadata
+            callbackMetadata
         );
+
+        Object payloadMetadata = payload.get("metadata");
+        assertTrue(payloadMetadata instanceof Map);
+        Object payloadMetadataScores = ((Map<?, ?>) payloadMetadata).get("testScores");
+        assertTrue(payloadMetadataScores instanceof List);
+        List<?> metadataScoreList = (List<?>) payloadMetadataScores;
+        assertEquals(1, metadataScoreList.size());
+        assertTrue(metadataScoreList.get(0) instanceof Map);
+
+        Map<?, ?> metadataScore = (Map<?, ?>) metadataScoreList.get(0);
+        assertEquals("1", metadataScore.get("testcase"));
+        assertEquals(12345L, ((Number) metadataScore.get("seed")).longValue());
+        assertEquals(98.5, ((Number) metadataScore.get("score")).doubleValue(), 0.0);
+        assertEquals(31L, ((Number) metadataScore.get("runTimeMs")).longValue());
 
         Object payloadScores = payload.get("testScores");
         assertTrue(payloadScores instanceof List);
@@ -183,9 +208,9 @@ public class EcsRunnerMainTest {
 
         Map<?, ?> internalScore = (Map<?, ?>) scoreList.get(0);
         assertEquals("1", internalScore.get("testcase"));
+        assertEquals(12345L, ((Number) internalScore.get("seed")).longValue());
         assertEquals(98.5, ((Number) internalScore.get("score")).doubleValue(), 0.0);
         assertEquals(31L, ((Number) internalScore.get("runTimeMs")).longValue());
-        assertFalse(internalScore.containsKey("seed"));
     }
 
     @Test
@@ -213,6 +238,41 @@ public class EcsRunnerMainTest {
         assertNotNull(zipPath);
         assertEquals("seed stdout\n", readZipEntry(zipPath, "stdout/12345.txt"));
         assertEquals("seed stderr\n", readZipEntry(zipPath, "stderr/12345.txt"));
+        Files.deleteIfExists(zipPath);
+    }
+
+    @Test
+    public void createInternalArtifactZipIncludesPrivateArtifactsAndRunnerLogs()
+        throws Exception {
+        Path artifactsDir = createArtifactsDir();
+        Path privateDir = artifactsDir.resolve("private");
+        Files.write(
+            privateDir.resolve("reviews.json"),
+            "{\"score\":98.5}\n".getBytes(StandardCharsets.UTF_8)
+        );
+        Files.write(
+            artifactsDir.resolve("execution-submission-id.log"),
+            "execution log\n".getBytes(StandardCharsets.UTF_8)
+        );
+        Files.write(
+            artifactsDir.resolve("error-submission-id.log"),
+            "error log\n".getBytes(StandardCharsets.UTF_8)
+        );
+        Files.write(
+            artifactsDir.resolve("public").resolve("compile_log.txt"),
+            "compile log\n".getBytes(StandardCharsets.UTF_8)
+        );
+
+        Path zipPath = invokeCreateInternalArtifactZip(artifactsDir);
+
+        assertNotNull(zipPath);
+        assertEquals("{\"score\":98.5}\n", readZipEntry(zipPath, "reviews.json"));
+        assertEquals(
+            "execution log\n",
+            readZipEntry(zipPath, "execution-submission-id.log")
+        );
+        assertEquals("error log\n", readZipEntry(zipPath, "error-submission-id.log"));
+        assertEquals("compile log\n", readZipEntry(zipPath, "compile_log.txt"));
         Files.deleteIfExists(zipPath);
     }
 
@@ -311,6 +371,22 @@ public class EcsRunnerMainTest {
         );
         method.setAccessible(true);
         return (Path) method.invoke(null, directoryPath, artifactName);
+    }
+
+    private Path invokeCreateInternalArtifactZip(Path artifactsDir) throws Exception {
+        Method method = EcsRunnerMain.class.getDeclaredMethod(
+            "createInternalArtifactZip",
+            Path.class,
+            String.class,
+            String.class
+        );
+        method.setAccessible(true);
+        return (Path) method.invoke(
+            null,
+            artifactsDir,
+            "submission-id",
+            "submission-id-provisional-internal"
+        );
     }
 
     private Path invokePrepareReservedPrivateArtifactDirectory(

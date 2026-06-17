@@ -398,6 +398,26 @@
     {
       "memberId": "88770029",
       "memberHandle": "devtest142",
+      "file": "submissions/submission-timeout-under-limit.zip",
+      "source": {
+        "fileName": "submission-timeout-under-limit.zip",
+        "language": "cpp",
+        "purpose": "Timeout validation sample: reads the Blocks setup, spends 90 ms in the measured response window, then returns -1. With testTimeout=100 ms this should complete successfully."
+      }
+    },
+    {
+      "memberId": "88770030",
+      "memberHandle": "devtest143",
+      "file": "submissions/submission-timeout-over-limit.zip",
+      "source": {
+        "fileName": "submission-timeout-over-limit.zip",
+        "language": "cpp",
+        "purpose": "Timeout validation sample: reads the Blocks setup, spends 125 ms in the measured response window, then returns -1. With testTimeout=100 ms this should fail with the configured timeout."
+      }
+    },
+    {
+      "memberId": "88770029",
+      "memberHandle": "devtest142",
       "file": "submissions/submission-issue-189-delayed-timeout.zip",
       "source": {
         "fileName": "submission-issue-189-delayed-timeout.zip",
