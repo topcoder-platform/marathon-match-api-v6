@@ -1368,6 +1368,7 @@ export class MarathonMatchConfigService {
         undefined,
         {
           memberId,
+          stopSupersededMemberTasks: false,
         },
       );
 

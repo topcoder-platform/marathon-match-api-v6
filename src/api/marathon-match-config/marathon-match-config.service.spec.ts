@@ -812,6 +812,7 @@ describe('MarathonMatchConfigService', () => {
       undefined,
       {
         memberId: '40051399',
+        stopSupersededMemberTasks: false,
       },
     );
   });
