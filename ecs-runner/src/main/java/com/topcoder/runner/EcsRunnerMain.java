@@ -90,6 +90,8 @@ public class EcsRunnerMain {
         "/usr/local/bin/mm-runner-isolate";
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
+    private static final String ENV_COMMAND_PATH = "/usr/bin/env";
+    private static final String RUST_BACKTRACE_ENV = "RUST_BACKTRACE=1";
     private static final String SCORER_STATE_CLEANUP_ARGUMENT =
         "--cleanup-scorer-state";
     private static final int SCORER_STATE_CLEANUP_TIMEOUT_MS = 10_000;
@@ -2965,6 +2967,24 @@ public class EcsRunnerMain {
         Path sourcePath,
         Path targetPath
     ) throws IOException {
+        replaceReservedInternalArtifactPath(sourcePath, targetPath);
+    }
+
+    /**
+     * Replaces one trusted internal artifact path without following target directories.
+     *
+     * <p>If the target path is a real directory, it is removed with symlink-safe
+     * traversal before the replacement. Files and symlinks are replaced by the
+     * move operation itself.
+     *
+     * @param sourcePath Parent-created source file containing trusted artifact content.
+     * @param targetPath Reserved artifact file path to replace.
+     * @throws IOException when an existing reserved path cannot be removed or replaced.
+     */
+    private static void replaceReservedInternalArtifactPath(
+        Path sourcePath,
+        Path targetPath
+    ) throws IOException {
         if (Files.isDirectory(targetPath, LinkOption.NOFOLLOW_LINKS)) {
             deleteDirectoryTreeNoFollow(targetPath);
         }
@@ -3022,9 +3042,108 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Replaces and recreates one reserved private artifact directory.
+     *
+     * <p>Submitted code can write artifact paths before the trusted runner packages
+     * private outputs. Reserved directories are therefore deleted without following
+     * symlinks and recreated by the runner before seed output files are written.
+     *
+     * @param privateArtifactsDir Private artifact root, normally {@code artifacts/private}.
+     * @param directoryName Reserved directory name to prepare.
+     * @return Recreated directory path.
+     * @throws IOException when the private root cannot be created, replaced, or verified.
+     * @throws IllegalArgumentException when the directory name is not a known reserved path.
+     */
+    private static Path prepareReservedPrivateArtifactDirectory(
+        Path privateArtifactsDir,
+        String directoryName
+    ) throws IOException {
+        validateReservedPrivateArtifactDirectoryName(directoryName);
+        Files.createDirectories(privateArtifactsDir);
+        if (!isNonSymlinkDirectory(privateArtifactsDir)) {
+            throw new IOException(
+                "Private artifact root is not a non-symlink directory: "
+                    + privateArtifactsDir
+            );
+        }
+
+        Path directoryPath = privateArtifactsDir.resolve(directoryName);
+        if (Files.exists(directoryPath, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isDirectory(directoryPath, LinkOption.NOFOLLOW_LINKS)) {
+                deleteDirectoryTreeNoFollow(directoryPath);
+            } else {
+                Files.deleteIfExists(directoryPath);
+            }
+        }
+
+        Files.createDirectory(directoryPath);
+        return directoryPath;
+    }
+
+    /**
+     * Validates reserved private artifact directory names used by the runner.
+     *
+     * @param directoryName Candidate directory name.
+     * @throws IllegalArgumentException when the directory is not a supported reserved path.
+     */
+    private static void validateReservedPrivateArtifactDirectoryName(
+        String directoryName
+    ) {
+        if (!"stdout".equals(directoryName) && !"stderr".equals(directoryName)) {
+            throw new IllegalArgumentException(
+                "Unsupported reserved private artifact directory: " + directoryName
+            );
+        }
+    }
+
+    /**
+     * Writes one seed's captured output to a reserved private artifact file.
+     *
+     * <p>The file is named with the actual seed value so operators can inspect a
+     * specific seed directly inside the {@code *-internal} artifact zip.
+     *
+     * @param outputDirectory Reserved output directory, such as {@code stdout} or {@code stderr}.
+     * @param seed Actual seed value for the testcase.
+     * @param outputText Captured output text. {@code null} is written as an empty file.
+     * @throws IOException when the target directory is unsafe or the file cannot be written.
+     * @throws IllegalArgumentException when the seed value is negative.
+     */
+    private static void writeSeedOutputArtifact(
+        Path outputDirectory,
+        long seed,
+        String outputText
+    ) throws IOException {
+        if (seed < 0L) {
+            throw new IllegalArgumentException("Seed output artifacts require a non-negative seed.");
+        }
+        if (!isNonSymlinkDirectory(outputDirectory)) {
+            throw new IOException(
+                "Seed output artifact directory is not a non-symlink directory: "
+                    + outputDirectory
+            );
+        }
+
+        Path targetPath = outputDirectory.resolve(Long.toString(seed) + ".txt");
+        Path tempPath = Files.createTempFile(
+            outputDirectory,
+            "." + seed + "-",
+            ".txt"
+        );
+        try {
+            Files.write(
+                tempPath,
+                (outputText == null ? "" : outputText).getBytes(StandardCharsets.UTF_8)
+            );
+            replaceReservedInternalArtifactPath(tempPath, targetPath);
+        } finally {
+            Files.deleteIfExists(tempPath);
+        }
+    }
+
+    /**
      * Builds the JSON payload stored in the internal {@code reviews.json} artifact.
      * The payload includes sanitized top-level {@code testScores} so private
-     * consumers can inspect per-test scores even though public artifacts hide them.
+     * consumers can inspect per-test scores for every scoring phase.
      *
      * @param submissionId Submission whose review payload is archived.
      * @param testPhase Scoring phase represented by the payload.
@@ -3081,10 +3200,10 @@ public class EcsRunnerMain {
     /**
      * Extracts per-test score entries for the private review artifact.
      *
-     * <p>The member-visible public artifact intentionally omits per-test scores,
-     * but internal tooling still needs those values for diagnostics and score
-     * verification. Seed-bearing fields are removed so the private artifact keeps
-     * the same stable testcase identifiers used by callback metadata.
+     * <p>Internal tooling needs these values for diagnostics and score
+     * verification across every scoring phase. Seed-bearing fields are removed
+     * so the private artifact keeps the same stable testcase identifiers used
+     * by callback metadata.
      *
      * @param metadata Structured tester metadata produced by generic or custom runner code.
      * @return Sanitized per-test score entries, or an empty list when none were produced.
@@ -3207,7 +3326,12 @@ public class EcsRunnerMain {
         Path privateZip = null;
 
         try {
-            publicZip = createPublicArtifactZip(artifactsDir, submissionId, baseArtifactName);
+            publicZip = createMemberVisibleArtifactZip(
+                artifactsDir,
+                submissionId,
+                testPhase,
+                baseArtifactName
+            );
             if (publicZip != null) {
                 logInfo(
                     "artifacts.upload",
@@ -3246,6 +3370,50 @@ public class EcsRunnerMain {
             deletePathRecursively(publicZip);
             deletePathRecursively(privateZip);
         }
+    }
+
+    /**
+     * Creates a member-visible artifact archive only for phases exposed to competitors.
+     *
+     * <p>Only EXAMPLE scoring uploads member-visible artifacts. PROVISIONAL and
+     * SYSTEM scoring still upload private {@code *-internal} artifacts, but do
+     * not publish public zips for competitors.
+     *
+     * @param artifactsDir Root artifacts directory containing public files and logs.
+     * @param submissionId Submission ID used to locate execution/error logs.
+     * @param testPhase Scoring phase represented by the artifacts.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when the phase should not expose
+     *         member-visible artifacts or no public files exist.
+     * @throws Exception when walking or archiving public artifacts fails.
+     */
+    private static Path createMemberVisibleArtifactZip(
+        Path artifactsDir,
+        String submissionId,
+        String testPhase,
+        String artifactName
+    ) throws Exception {
+        if (!shouldCreateMemberVisibleArtifactZip(testPhase)) {
+            logInfo(
+                "artifacts.zip.public",
+                "Skipping member-visible artifact zip for "
+                    + normalizeTestPhase(testPhase)
+                    + " scoring."
+            );
+            return null;
+        }
+
+        return createPublicArtifactZip(artifactsDir, submissionId, artifactName);
+    }
+
+    /**
+     * Determines whether a scoring phase may expose artifacts to competitors.
+     *
+     * @param testPhase Scoring phase name or alias.
+     * @return {@code true} only for EXAMPLE scoring.
+     */
+    private static boolean shouldCreateMemberVisibleArtifactZip(String testPhase) {
+        return "example".equals(normalizeTestPhase(testPhase));
     }
 
     /**
@@ -4084,6 +4252,14 @@ public class EcsRunnerMain {
         Path artifactsPrivateDir = artifactsRoot.resolve("private");
         Files.createDirectories(artifactsPublicDir);
         Files.createDirectories(artifactsPrivateDir);
+        Path stdoutArtifactsDir = prepareReservedPrivateArtifactDirectory(
+            artifactsPrivateDir,
+            "stdout"
+        );
+        Path stderrArtifactsDir = prepareReservedPrivateArtifactDirectory(
+            artifactsPrivateDir,
+            "stderr"
+        );
 
         String expectedSolutionBaseName = deriveExpectedSolutionBaseName(testerClassName);
         Path submissionSource;
@@ -4159,6 +4335,16 @@ public class EcsRunnerMain {
 
                 double seedScore = testResult.getScore();
                 String seedError = testResult.getError();
+                writeSeedOutputArtifact(
+                    stdoutArtifactsDir,
+                    seed,
+                    testResult.getStdout()
+                );
+                writeSeedOutputArtifact(
+                    stderrArtifactsDir,
+                    seed,
+                    testResult.getStderr()
+                );
                 String scoreValidationError = validateScoreValue(
                     seedScore,
                     "Test Case #" + testCaseNumber + " score"
@@ -4184,6 +4370,8 @@ public class EcsRunnerMain {
                     outputText,
                     buildMemberVisibleTestOutput(
                         testCaseNumber,
+                        seed,
+                        seedScore,
                         testResult.getRunTime(),
                         seedError,
                         testResult.getStderr()
@@ -4252,12 +4440,14 @@ public class EcsRunnerMain {
     /**
      * Builds the public {@code output.txt} section for one generic Marathon test case.
      *
-     * <p>The public provisional artifact shows runtime, tester errors, and stderr
-     * diagnostics, but it intentionally hides submitted-solution stdout and raw
-     * per-test scores. Per-test scores remain available in metadata and the
-     * private {@code reviews.json} artifact.
+     * <p>The member-visible EXAMPLE artifact shows seed, score, runtime,
+     * tester errors, and stderr diagnostics, but it intentionally hides
+     * submitted-solution stdout. Per-test scores also remain available in
+     * metadata and the private {@code reviews.json} artifact.
      *
      * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param seed Actual configured seed value for the testcase.
+     * @param score Validated score assigned to the submission for the seed.
      * @param runTimeMs Runtime reported by the Marathon tester for the testcase.
      * @param error Tester or runner error text for the testcase.
      * @param stderr Submitted solution stderr captured for the testcase.
@@ -4265,12 +4455,16 @@ public class EcsRunnerMain {
      */
     private static String buildMemberVisibleTestOutput(
         int testCaseNumber,
+        long seed,
+        double score,
         long runTimeMs,
         String error,
         String stderr
     ) {
         StringBuilder testOutputText = new StringBuilder();
         testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
+        testOutputText.append("Seed = ").append(seed).append('\n');
+        testOutputText.append("Score = ").append(score).append('\n');
         testOutputText.append("Run Time = ").append(runTimeMs).append("ms\n");
 
         if (error != null && !error.trim().isEmpty()) {
@@ -4727,7 +4921,7 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                buildScorerExecutionCommand(binaryPath),
+                buildRustScorerExecutionCommand(binaryPath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -4911,6 +5105,23 @@ public class EcsRunnerMain {
      */
     private static String buildScorerExecutionCommand(String command) {
         return SCORER_ISOLATION_WRAPPER_PATH + " " + command;
+    }
+
+    /**
+     * Builds the isolated Rust submission command with panic backtraces enabled.
+     *
+     * <p>{@code mm-scorer-isolate} scrubs inherited environment variables before
+     * launching submitted code, so the Rust runtime flag is set explicitly through
+     * {@code /usr/bin/env} in the command that the wrapper executes.
+     *
+     * @param binaryPath Absolute path to the compiled Rust submission binary.
+     * @return Command that executes the Rust binary as the low-privilege scorer user
+     *         with {@code RUST_BACKTRACE=1}.
+     */
+    private static String buildRustScorerExecutionCommand(String binaryPath) {
+        return buildScorerExecutionCommand(
+            ENV_COMMAND_PATH + " " + RUST_BACKTRACE_ENV + " " + binaryPath
+        );
     }
 
     /**

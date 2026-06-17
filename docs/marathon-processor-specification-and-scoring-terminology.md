@@ -80,10 +80,11 @@ file with `rustc 1.96.0` stable as last verified:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution
-./Solution
+RUST_BACKTRACE=1 ./Solution
 ```
 
 The ECS runner installs Rust through `rustup` with `RUSTUP_TOOLCHAIN=stable`, so the exact compiler patch version advances when the runner image is rebuilt. As of the verification date above, the stable channel resolves to `rustc 1.96.0`.
+Rust submissions are executed with `RUST_BACKTRACE=1` inside the ECS runner so panic diagnostics include a backtrace in captured stderr.
 
 ### C# with Mono
 
@@ -242,10 +243,10 @@ For Rust submissions, compile first and pass the compiled binary:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution
-java -jar Tester.jar -exec "./Solution" -seed 1
+java -jar Tester.jar -exec "env RUST_BACKTRACE=1 ./Solution" -seed 1
 ```
 
-Members may print debug information to standard error. The tester captures solution output and error text and the processor includes relevant output in the scoring artifacts.
+Members may print debug information to standard error. The tester captures solution output and error text. Internal artifacts include per-seed `stdout/{seed}.txt` and `stderr/{seed}.txt` files for operator diagnostics, while member-visible EXAMPLE artifacts expose only the approved output summary for the scoring phase, including each seed and the score received for that seed.
 
 ## Download and Access Submissions
 
@@ -280,10 +281,11 @@ Example and Provisional scoring can both be mapped to the same open Submission p
 
 System scoring is dispatched during Review for the pending review and uses the configured System seed range.
 
-For each executed test, the generic runner records member-visible results with
-1-based testcase ordinals rather than configured seed values:
+For each executed EXAMPLE test, the generic runner records member-visible
+results with 1-based testcase ordinals and the actual configured seed values:
 
 - testcase ordinal
+- actual seed value
 - raw tester score
 - run time in milliseconds
 - tester or solution error text

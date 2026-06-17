@@ -1,6 +1,6 @@
 # Full Marathon Match Test Script
 
-`scripts/run-full-marathon-match-test.mjs` drives a full Marathon Match smoke run against deployed Topcoder APIs. It creates a Marathon Match challenge through challenge-api-v6, creates a custom tester from `tester.java`, configures the Marathon Match challenge, registers submitters, submits fixture submissions during the Submission phase, waits for provisional scoring and artifacts, opens Review, waits for SYSTEM scoring on each member's latest submission, and waits for autopilot-v6 to close Review and complete the challenge.
+`scripts/run-full-marathon-match-test.mjs` drives a full Marathon Match smoke run against deployed Topcoder APIs. It creates a Marathon Match challenge through challenge-api-v6, creates a custom tester from `tester.java`, configures the Marathon Match challenge, registers submitters, submits fixture submissions during the Submission phase, waits for provisional scoring and the example member artifact, opens Review, waits for SYSTEM scoring on each member's latest submission, and waits for autopilot-v6 to close Review and complete the challenge.
 
 ## Fixture Directory
 
@@ -72,7 +72,7 @@ If `submissions` is omitted, submission files can be placed directly in the fixt
 
 Registration and Submission durations are seconds. They default to `3600` each and can be set with `--registration-duration-seconds`, `--submission-duration-seconds`, `REGISTRATION_DURATION_SECONDS`, `SUBMISSION_DURATION_SECONDS`, or `challenge.phaseDurations`.
 
-The tester source can be a standard Topcoder Marathon tester with a `main(...)` method. The ECS runner handles submission source discovery, compilation, seed execution, aggregate scoring, and `metadata.testScores` output with member-visible testcase ordinals. Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special cases.
+The tester source can be a standard Topcoder Marathon tester with a `main(...)` method. The ECS runner handles submission source discovery, compilation, seed execution, aggregate scoring, `metadata.testScores` output with member-visible testcase ordinals, and EXAMPLE `output.txt` entries with actual seed and seed-score details. Custom tester-level `runTester(String, com.topcoder.scorer.models.ScorerConfig)` methods are still supported for special cases.
 
 For advanced create payload fields, add `challenge.createPayload` with any valid `POST /v6/challenges` body fields. The script still applies the configured Registration and Submission duration overrides.
 
@@ -139,7 +139,7 @@ Pass `--challenge-id "<challenge_uuid>"` to reuse an existing challenge instead 
 
 ## Validation
 
-During Submission, every created submission must receive a provisional review summation with a numeric `aggregateScore`. By default, each submission must also have at least one artifact attached through `GET /v6/submissions/:submissionId/artifacts`; override with `--min-artifacts 0` if a tester does not emit artifacts.
+During Submission, every created submission must receive a provisional review summation with a numeric `aggregateScore`. By default, each submission must also have at least one artifact attached through `GET /v6/submissions/:submissionId/artifacts`; in the standard config this is the EXAMPLE member-visible artifact, because PROVISIONAL scoring does not publish competitor-visible artifacts. Override with `--min-artifacts 0` if a tester does not emit artifacts.
 
 During Review, the script waits for a SYSTEM review summation on the latest submission for each member. If `expectedScores.provisional` or `expectedScores.system` is present in the manifest, the script checks the scored value using `--score-tolerance` (default `0.000001`).
 
