@@ -264,6 +264,69 @@ describe('EcsService', () => {
     );
   });
 
+  it('keeps older active tasks when superseded task stopping is disabled', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+              submissionId: 'old-submission',
+            }),
+          ],
+        });
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/new-task',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({ taskDefinition: {} });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await service.launchScorerTask(
+      'challenge-1',
+      'new-submission',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      {
+        memberId: 'member-1',
+        stopSupersededMemberTasks: false,
+      },
+    );
+
+    const sentCommands = send.mock.calls.map((call) => call[0] as unknown);
+    expect(
+      sentCommands.some((command) => command instanceof StopTaskCommand),
+    ).toBe(false);
+    expect(
+      sentCommands.some((command) => command instanceof RunTaskCommand),
+    ).toBe(true);
+  });
+
   it('blocks new launches when the global scorer task cap is reached', async () => {
     process.env.ECS_SCORER_MAX_CONCURRENT_TASKS = '1';
     const { service, m2mService, send } = createService();

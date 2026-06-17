@@ -39,6 +39,7 @@ export interface MarathonMatchScorerTaskLaunchResult {
 
 export interface MarathonMatchScorerTaskLaunchOptions {
   memberId?: string;
+  stopSupersededMemberTasks?: boolean;
 }
 
 interface ActiveScorerTask {
@@ -89,7 +90,7 @@ export class EcsService {
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
    * @param reviewId Optional review-api review id that should be marked completed after callback processing.
-   * @param launchOptions Optional submission owner metadata used for per-member in-flight task cancellation.
+   * @param launchOptions Optional submission owner metadata and cancellation controls for in-flight member tasks.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and Auth0 M2M settings
@@ -117,6 +118,8 @@ export class EcsService {
     const taskDefinitionVersion = mmConfig.taskDefinitionVersion?.trim();
     const testPhase = this.mapConfigTypeToTestPhase(scoringPhase.configType);
     const memberId = launchOptions.memberId?.trim();
+    const shouldStopSupersededMemberTasks =
+      launchOptions.stopSupersededMemberTasks !== false;
 
     if (!taskDefinitionName) {
       throw new Error('Missing required task definition name in mmConfig.');
@@ -136,11 +139,13 @@ export class EcsService {
           containerName,
         );
         const launchableActiveTasks = activeTasks
-          ? await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
-              challengeId,
-              submissionId,
-              memberId,
-            })
+          ? shouldStopSupersededMemberTasks
+            ? await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
+                challengeId,
+                submissionId,
+                memberId,
+              })
+            : activeTasks
           : null;
         let maxConcurrentScorerTasks: number | null = null;
 
