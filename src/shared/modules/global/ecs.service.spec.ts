@@ -377,7 +377,7 @@ describe('EcsService', () => {
         {
           name: 'VALIDATION_SUBMISSION_DOWNLOAD_URL',
           value:
-            'https://api.example.com/challenge/challenge-1/test-submission/validation-run-1/download',
+            'https://api.example.com/v6/marathon-match/challenge/challenge-1/test-submission/validation-run-1/download',
         },
       ]),
     );

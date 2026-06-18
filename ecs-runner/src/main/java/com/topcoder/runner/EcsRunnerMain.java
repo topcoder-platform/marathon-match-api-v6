@@ -105,6 +105,7 @@ public class EcsRunnerMain {
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final String COMPILATION_OUTPUT_METADATA_KEY = "compilationOutput";
     private static final String JAVA_SUBMISSION_RELEASE = "11";
     private static final String CXX_MARCH_FLAG = "-march=x86-64";
     private static final String CXX_MTUNE_FLAG = "-mtune=generic";
@@ -2816,8 +2817,9 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Removes configured seed values from metadata that may be persisted or rendered to members.
-     * Per-test entries keep a stable 1-based testcase ordinal so relative scoring still works.
+     * Removes configured seed values and verbose compile output from metadata that may be
+     * persisted or rendered through scoring callbacks. Per-test entries keep a stable 1-based
+     * testcase ordinal so relative scoring still works.
      *
      * @param metadata Metadata returned by tester execution.
      * @return Copy with seed-bearing fields removed or replaced, or {@code null}.
@@ -2834,6 +2836,9 @@ public class EcsRunnerMain {
         for (Map.Entry<String, Object> entry : metadata.entrySet()) {
             String key = entry.getKey();
             if (isSensitiveSeedMetadataKey(key)) {
+                continue;
+            }
+            if (COMPILATION_OUTPUT_METADATA_KEY.equals(key)) {
                 continue;
             }
 
@@ -3203,7 +3208,8 @@ public class EcsRunnerMain {
     /**
      * Builds the JSON payload stored in the internal {@code reviews.json} artifact.
      * The payload includes sanitized top-level {@code testScores} so private
-     * consumers can inspect per-test scores for every scoring phase.
+     * consumers can inspect per-test scores for every scoring phase. Generic runner
+     * payloads also carry compiler diagnostics in {@code compilationOutput}.
      *
      * @param submissionId Submission whose review payload is archived.
      * @param testPhase Scoring phase represented by the payload.
@@ -3224,6 +3230,7 @@ public class EcsRunnerMain {
         Map<String, Object> internalMetadata = buildInternalArtifactMetadata(
             testerExecution.getMetadata()
         );
+        String compilationOutput = getCompilationOutputFromMetadata(internalMetadata);
         Map<String, Object> currentReview = withDefaultReviewFields(
             testerExecution.getCurrentReview(),
             submissionId,
@@ -3250,6 +3257,9 @@ public class EcsRunnerMain {
         payload.put("scorecardId", scorecardId);
         payload.put("score", testerExecution.getScore());
         payload.put("metadata", internalMetadata);
+        if (compilationOutput != null) {
+            payload.put(COMPILATION_OUTPUT_METADATA_KEY, compilationOutput);
+        }
         payload.put(
             "testScores",
             buildInternalArtifactScoreEntries(testerExecution.getMetadata())
@@ -3258,6 +3268,21 @@ public class EcsRunnerMain {
         payload.put("impactedReviews", impactedReviews);
         payload.put("reviews", reviews);
         return payload;
+    }
+
+    /**
+     * Reads generic-runner compilation output from metadata for top-level private artifacts.
+     *
+     * @param metadata Internal artifact metadata, usually copied from tester execution metadata.
+     * @return Compilation output text, or {@code null} when none was produced.
+     */
+    private static String getCompilationOutputFromMetadata(Map<String, Object> metadata) {
+        if (metadata == null) {
+            return null;
+        }
+
+        Object compilationOutput = metadata.get(COMPILATION_OUTPUT_METADATA_KEY);
+        return compilationOutput instanceof String ? (String) compilationOutput : null;
     }
 
     /**
@@ -4531,8 +4556,9 @@ public class EcsRunnerMain {
      * Runs a standard Topcoder Marathon tester without requiring tester-specific ECS code.
      *
      * <p>The method creates artifact directories, selects a supported submission source file,
-     * compiles it when needed, runs the configured tester for every seed in the phase range, and
-     * returns the aggregate score plus per-test metadata used by relative scoring.
+     * compiles it when needed, writes compilation diagnostics to artifacts, runs the configured
+     * tester for every seed in the phase range, and returns the aggregate score plus per-test
+     * metadata used by relative scoring and internal diagnostics.
      *
      * @param testerClassName Fully qualified Marathon tester class name.
      * @param submissionPath Extracted submission directory.
@@ -4613,6 +4639,7 @@ public class EcsRunnerMain {
         Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
         boolean cleanupDeferred = deferIsolatedChildCleanup(compileWorkDir);
         Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
+        Path outputPath = artifactsPublicDir.resolve("output.txt");
 
         try {
             CompiledSubmission compiledSubmission = compileAndBuildExecutionCommand(
@@ -4622,14 +4649,20 @@ public class EcsRunnerMain {
                 expectedSolutionBaseName,
                 compileLogPath
             );
+            String compilationOutput = readCompilationOutput(compileLogPath);
+            StringBuilder outputText = new StringBuilder();
+            long outputBytes = appendLimitedOutput(
+                outputText,
+                buildMemberVisibleCompilationOutput(compilationOutput),
+                0L,
+                "artifacts/public/output.txt"
+            );
             grantScorerReadExecuteAccess(compileWorkDir);
 
             MarathonController controller = new MarathonController();
             List<Map<String, Object>> testScores = new ArrayList<Map<String, Object>>();
             double totalScore = 0.0;
             int failedTests = 0;
-            StringBuilder outputText = new StringBuilder();
-            long outputBytes = 0L;
 
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
@@ -4717,7 +4750,7 @@ public class EcsRunnerMain {
             }
 
             try (BufferedWriter writer = Files.newBufferedWriter(
-                artifactsPublicDir.resolve("output.txt"),
+                outputPath,
                 StandardCharsets.UTF_8
             )) {
                 writer.write(outputText.toString());
@@ -4731,6 +4764,7 @@ public class EcsRunnerMain {
             metadata.put("numberOfTests", numberOfTests);
             metadata.put("timeLimitMs", timeLimitMs);
             metadata.put("compileTimeoutMs", compileTimeoutMs);
+            metadata.put(COMPILATION_OUTPUT_METADATA_KEY, compilationOutput);
             metadata.put("aggregateMode", "average");
             metadata.put("testScores", testScores);
 
@@ -4745,10 +4779,97 @@ public class EcsRunnerMain {
                 currentReview,
                 new ArrayList<Map<String, Object>>()
             );
+        } catch (Exception error) {
+            writePreResultMemberOutput(outputPath, compileLogPath, error);
+            throw error;
         } finally {
             if (!cleanupDeferred) {
                 deletePathRecursively(compileWorkDir);
             }
+        }
+    }
+
+    /**
+     * Reads the compiler log that should be embedded in member-visible and private outputs.
+     *
+     * @param compileLogPath Public compile log written by compiler commands.
+     * @return Compiler output text, or a short no-output marker when no compiler command ran.
+     * @throws IOException When an existing compile log cannot be read safely.
+     */
+    private static String readCompilationOutput(Path compileLogPath) throws IOException {
+        if (!isNonSymlinkRegularFile(compileLogPath)) {
+            return "No compilation step was run for this submission.";
+        }
+
+        String compilationOutput = new String(
+            readRegularFileBytesNoFollow(compileLogPath),
+            StandardCharsets.UTF_8
+        ).trim();
+        if (compilationOutput.isEmpty()) {
+            return "Compilation completed without output.";
+        }
+        return compilationOutput;
+    }
+
+    /**
+     * Builds the public {@code output.txt} compilation section shown before test cases.
+     *
+     * @param compilationOutput Compiler diagnostics captured for the submission.
+     * @return Member-visible compilation text block ending with a blank line.
+     */
+    private static String buildMemberVisibleCompilationOutput(
+        String compilationOutput
+    ) {
+        StringBuilder outputText = new StringBuilder();
+        outputText.append("Compilation Output:\n");
+        if (compilationOutput == null || compilationOutput.trim().isEmpty()) {
+            outputText.append("No compilation output was produced.");
+        } else {
+            outputText.append(compilationOutput.trim());
+        }
+        outputText.append("\n\n");
+        return outputText.toString();
+    }
+
+    /**
+     * Writes a partial member-visible output file when the generic runner fails
+     * before normal score output can be finalized.
+     *
+     * @param outputPath Public {@code output.txt} artifact path.
+     * @param compileLogPath Public compile log path to embed.
+     * @param error Failure that prevented normal output generation.
+     */
+    private static void writePreResultMemberOutput(
+        Path outputPath,
+        Path compileLogPath,
+        Throwable error
+    ) {
+        if (outputPath == null || isNonSymlinkRegularFile(outputPath)) {
+            return;
+        }
+
+        try {
+            StringBuilder outputText = new StringBuilder();
+            long outputBytes = appendLimitedOutput(
+                outputText,
+                buildMemberVisibleCompilationOutput(readCompilationOutput(compileLogPath)),
+                0L,
+                "artifacts/public/output.txt"
+            );
+            appendLimitedOutput(
+                outputText,
+                "Runner Error:\n" + safeLogValue(error == null ? null : error.getMessage()) + "\n",
+                outputBytes,
+                "artifacts/public/output.txt"
+            );
+
+            Files.createDirectories(outputPath.getParent());
+            Files.write(outputPath, outputText.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception outputError) {
+            logWarn(
+                "artifacts.public-output",
+                "Unable to write partial member output: " + outputError.getMessage()
+            );
         }
     }
 

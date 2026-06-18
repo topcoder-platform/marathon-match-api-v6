@@ -955,8 +955,9 @@ export class EcsService {
    * Resolves a validation submission download location for ECS env overrides.
    * @param marathonMatchApiUrl Base Marathon Match API URL configured for the runner.
    * @param downloadUrl Absolute URL or API path supplied by the caller.
-   * @returns Absolute URL that the runner can fetch with its M2M token.
-   * Used when launching isolated Score Operations validation runs.
+   * @returns Absolute URL under the normalized Marathon Match API base that
+   * the runner can fetch with its M2M token. Used when launching isolated
+   * Score Operations validation runs.
    */
   private resolveValidationSubmissionDownloadUrl(
     marathonMatchApiUrl: string,
@@ -967,11 +968,33 @@ export class EcsService {
       return normalizedDownloadUrl;
     }
 
-    const baseUrl = marathonMatchApiUrl.replace(/\/+$/, '');
+    const baseUrl = this.buildMarathonMatchApiBaseUrl(marathonMatchApiUrl);
     const path = normalizedDownloadUrl.startsWith('/')
       ? normalizedDownloadUrl
       : `/${normalizedDownloadUrl}`;
     return `${baseUrl}${path}`;
+  }
+
+  /**
+   * Normalizes configured Marathon Match API roots to the versioned service
+   * base used by the ECS runner.
+   * @param marathonMatchApiUrl Raw MARATHON_MATCH_API_URL value from env.
+   * @returns API base ending in /v6/marathon-match.
+   * Used when backend-created runner URLs need to match runner-created API URLs.
+   * Does not raise exceptions; required-env validation happens before this helper is called.
+   */
+  private buildMarathonMatchApiBaseUrl(marathonMatchApiUrl: string): string {
+    const normalized = marathonMatchApiUrl.trim().replace(/\/+$/, '');
+
+    if (normalized.endsWith('/v6/marathon-match')) {
+      return normalized;
+    }
+
+    if (normalized.endsWith('/v6')) {
+      return `${normalized}/marathon-match`;
+    }
+
+    return `${normalized}/v6/marathon-match`;
   }
 
   private mapConfigTypeToTestPhase(configType: string): string {

@@ -130,6 +130,60 @@ public class EcsRunnerMainTest {
     }
 
     @Test
+    public void buildMemberVisibleCompilationOutputShowsCompilerDiagnostics()
+        throws Exception {
+        Method method = EcsRunnerMain.class.getDeclaredMethod(
+            "buildMemberVisibleCompilationOutput",
+            String.class
+        );
+        method.setAccessible(true);
+
+        String output = (String) method.invoke(
+            null,
+            "$ javac Solution.java\nwarning: unchecked conversion\nExit code: 0\n"
+        );
+
+        assertTrue(output.startsWith("Compilation Output:\n"));
+        assertTrue(output.contains("$ javac Solution.java"));
+        assertTrue(output.contains("warning: unchecked conversion"));
+        assertTrue(output.endsWith("\n\n"));
+    }
+
+    @Test
+    public void writePreResultMemberOutputIncludesCompilationOutputOnFailure()
+        throws Exception {
+        Path artifactsDir = createArtifactsDir();
+        Path outputPath = artifactsDir.resolve("public").resolve("output.txt");
+        Path compileLogPath = artifactsDir.resolve("public").resolve("compile_log.txt");
+        Files.write(
+            compileLogPath,
+            "$ g++ Solution.cpp\ncompile failed\nExit code: 1\n".getBytes(
+                StandardCharsets.UTF_8
+            )
+        );
+
+        Method method = EcsRunnerMain.class.getDeclaredMethod(
+            "writePreResultMemberOutput",
+            Path.class,
+            Path.class,
+            Throwable.class
+        );
+        method.setAccessible(true);
+        method.invoke(
+            null,
+            outputPath,
+            compileLogPath,
+            new RuntimeException("C++ compilation failed.")
+        );
+
+        String output = new String(Files.readAllBytes(outputPath), StandardCharsets.UTF_8);
+        assertTrue(output.contains("Compilation Output:"));
+        assertTrue(output.contains("compile failed"));
+        assertTrue(output.contains("Runner Error:"));
+        assertTrue(output.contains("C++ compilation failed."));
+    }
+
+    @Test
     public void buildInternalReviewArtifactPayloadIncludesSeededMetadataTestScores()
         throws Exception {
         Map<String, Object> scoreEntry = new LinkedHashMap<String, Object>();
@@ -144,6 +198,7 @@ public class EcsRunnerMainTest {
 
         Map<String, Object> metadata = new LinkedHashMap<String, Object>();
         metadata.put("testScores", testScores);
+        metadata.put("compilationOutput", "$ javac Solution.java\nExit code: 0");
 
         Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
         currentReview.put("metadata", metadata);
@@ -188,6 +243,14 @@ public class EcsRunnerMainTest {
 
         Object payloadMetadata = payload.get("metadata");
         assertTrue(payloadMetadata instanceof Map);
+        assertEquals(
+            "$ javac Solution.java\nExit code: 0",
+            ((Map<?, ?>) payloadMetadata).get("compilationOutput")
+        );
+        assertEquals(
+            "$ javac Solution.java\nExit code: 0",
+            payload.get("compilationOutput")
+        );
         Object payloadMetadataScores = ((Map<?, ?>) payloadMetadata).get("testScores");
         assertTrue(payloadMetadataScores instanceof List);
         List<?> metadataScoreList = (List<?>) payloadMetadataScores;
@@ -211,6 +274,33 @@ public class EcsRunnerMainTest {
         assertEquals(12345L, ((Number) internalScore.get("seed")).longValue());
         assertEquals(98.5, ((Number) internalScore.get("score")).doubleValue(), 0.0);
         assertEquals(31L, ((Number) internalScore.get("runTimeMs")).longValue());
+    }
+
+    @Test
+    public void buildCallbackMetadataOmitsCompilationOutput() throws Exception {
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("compilationOutput", "$ g++ Solution.cpp\nExit code: 0");
+        metadata.put("testScores", new ArrayList<Map<String, Object>>());
+
+        Method method = EcsRunnerMain.class.getDeclaredMethod(
+            "buildCallbackMetadata",
+            Map.class,
+            String.class,
+            String.class
+        );
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> callbackMetadata = (Map<String, Object>) method.invoke(
+            null,
+            metadata,
+            "provisional",
+            "review-type-id"
+        );
+
+        assertFalse(callbackMetadata.containsKey("compilationOutput"));
+        assertEquals("provisional", callbackMetadata.get("testProcess"));
+        assertEquals("provisional", callbackMetadata.get("testType"));
     }
 
     @Test
