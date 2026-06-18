@@ -8,6 +8,7 @@ import {
 import {
   CompilationStatus,
   PhaseConfigType,
+  Prisma,
   ScoreDirection,
 } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -37,6 +38,7 @@ export interface ScoringResultCallbackPayload {
   testPhase: string;
   reviewTypeId: string;
   reviewId?: string;
+  validationRunId?: string;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
   currentReview?: Record<string, unknown>;
@@ -60,6 +62,7 @@ export interface ScoringProgressCallbackPayload {
   progress: number;
   status: ScoringTestStatus;
   reviewId?: string;
+  validationRunId?: string;
   scorecardId?: string;
   completedTests?: number;
   totalTests?: number;
@@ -225,6 +228,16 @@ export class ScoringResultService {
 
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     const config = await this.requireScoringResultConfig(payload.challengeId);
+    const validationRunId = this.asString(payload.validationRunId)?.trim();
+    if (validationRunId) {
+      await this.recordValidationScoringResult(
+        validationRunId,
+        payload,
+        normalizedPhase,
+      );
+      return;
+    }
+
     const token = await this.m2mService.getM2MToken();
 
     if (!token) {
@@ -358,6 +371,16 @@ export class ScoringResultService {
   ): Promise<void> {
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     await this.requireScoringResultConfig(payload.challengeId);
+    const validationRunId = this.asString(payload.validationRunId)?.trim();
+    if (validationRunId) {
+      await this.recordValidationScoringProgress(
+        validationRunId,
+        payload,
+        normalizedPhase,
+      );
+      return;
+    }
+
     const token = await this.m2mService.getM2MToken();
 
     if (!token) {
@@ -394,6 +417,134 @@ export class ScoringResultService {
     });
 
     await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+  }
+
+  /**
+   * Stores the final scorer callback on an isolated validation run without
+   * creating or updating Review API summations.
+   * @param validationRunId Validation run created by Score Operations upload.
+   * @param payload Runner callback payload containing score and scorer metadata.
+   * @param normalizedPhase Normalized example/provisional/system phase name.
+   * @returns Promise that resolves when the validation run has been updated.
+   * @throws NotFoundException When the validation run does not exist for the callback challenge.
+   * Used by `processScoringResult` when the ECS runner includes `validationRunId`.
+   */
+  private async recordValidationScoringResult(
+    validationRunId: string,
+    payload: ScoringResultCallbackPayload,
+    normalizedPhase: string,
+  ): Promise<void> {
+    const metadata = this.withFinalTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      payload.score,
+    );
+    const existingRun = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: validationRunId,
+        challengeId: payload.challengeId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingRun) {
+      throw new NotFoundException(
+        `Validation submission run ${validationRunId} not found for challenge ${payload.challengeId}.`,
+      );
+    }
+
+    await this.prisma.testSubmissionRun.update({
+      where: { id: validationRunId },
+      data: {
+        status: ScoringTestStatus.Success,
+        score: payload.score,
+        message: 'Scoring complete.',
+        metadata: metadata as Prisma.InputJsonValue,
+        currentReview: this.toOptionalJson(payload.currentReview),
+        impactedReviews: this.toOptionalJson(payload.impactedReviews),
+        progress: 1,
+        completedTests:
+          this.countCompletedTestScores(metadata) ||
+          this.resolveTotalTests(metadata) ||
+          undefined,
+        totalTests: this.resolveTotalTests(metadata),
+        failedTests: this.countFailedTestScores(metadata),
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Stores an intermediate runner progress callback on an isolated validation run
+   * without creating or updating Review API summations.
+   * @param validationRunId Validation run created by Score Operations upload.
+   * @param payload Runner progress payload.
+   * @param normalizedPhase Normalized example/provisional/system phase name.
+   * @returns Promise that resolves when the validation run has been updated.
+   * @throws NotFoundException When the validation run does not exist for the callback challenge.
+   * Used by `processScoringProgress` when the ECS runner includes `validationRunId`.
+   */
+  private async recordValidationScoringProgress(
+    validationRunId: string,
+    payload: ScoringProgressCallbackPayload,
+    normalizedPhase: string,
+  ): Promise<void> {
+    const metadata = this.withTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      {
+        completedTests: payload.completedTests,
+        failedTests: payload.failedTests,
+        message: payload.message,
+        progress: payload.progress,
+        reviewId: payload.reviewId,
+        status: payload.status,
+        totalTests: payload.totalTests,
+      },
+    );
+    const existingRun = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: validationRunId,
+        challengeId: payload.challengeId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingRun) {
+      throw new NotFoundException(
+        `Validation submission run ${validationRunId} not found for challenge ${payload.challengeId}.`,
+      );
+    }
+
+    await this.prisma.testSubmissionRun.update({
+      where: { id: validationRunId },
+      data: {
+        status:
+          payload.status === ScoringTestStatus.Failed
+            ? ScoringTestStatus.Failed
+            : ScoringTestStatus.InProgress,
+        message: payload.message,
+        metadata: metadata as Prisma.InputJsonValue,
+        progress: this.clampProgress(payload.progress),
+        completedTests: this.normalizeNonNegativeInteger(
+          payload.completedTests,
+        ),
+        totalTests: this.normalizeNonNegativeInteger(payload.totalTests),
+        failedTests: this.normalizeNonNegativeInteger(payload.failedTests),
+        completedAt:
+          payload.status === ScoringTestStatus.Failed ? new Date() : undefined,
+      },
+    });
   }
 
   /**
@@ -3131,6 +3282,20 @@ export class ScoringResultService {
     }
 
     return Math.max(0, Math.floor(value));
+  }
+
+  /**
+   * Converts optional runner payload fragments into Prisma JSON input values.
+   * @param value Callback fragment from the runner.
+   * @returns JSON input value when present, otherwise undefined so Prisma leaves the field unset.
+   * Used by validation-run persistence for current/impacted review details.
+   */
+  private toOptionalJson(value: unknown): Prisma.InputJsonValue | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return value as Prisma.InputJsonValue;
   }
 
   /**

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -49,6 +48,11 @@ describe('MarathonMatchConfigService', () => {
       },
       tester: {
         findUnique: jest.fn(),
+      },
+      testSubmissionRun: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
       },
     };
     const prismaErrorService = {
@@ -716,8 +720,7 @@ describe('MarathonMatchConfigService', () => {
   });
 
   it('uploads a validation submission and queues scorer execution', async () => {
-    const { service, ecsService, httpService, m2mService, prisma } =
-      createService();
+    const { service, ecsService, prisma } = createService();
     const user = {
       isMachine: false,
       userId: '40051399',
@@ -744,14 +747,21 @@ describe('MarathonMatchConfigService', () => {
         },
       ],
     });
-    m2mService.getM2MToken.mockResolvedValue('m2m-token');
-    httpService.post.mockReturnValue(
-      of({
-        data: {
-          id: 'validation-submission-1',
-        },
-      }),
-    );
+    prisma.testSubmissionRun.create.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+    });
+    prisma.testSubmissionRun.update.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
     ecsService.launchScorerTask.mockResolvedValue({
       taskArn: 'arn:aws:ecs:task/task-1',
       taskId: 'task-1',
@@ -775,31 +785,41 @@ describe('MarathonMatchConfigService', () => {
       user,
     );
 
-    const postedForm = httpService.post.mock.calls[0][1] as FormData;
     expect(result).toEqual({
       challengeId: '30000123',
-      submissionId: 'validation-submission-1',
+      submissionId: 'generated-id',
+      testSubmissionId: 'generated-id',
       configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
       taskArn: 'arn:aws:ecs:task/task-1',
       taskId: 'task-1',
       cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
     });
-    expect(httpService.post).toHaveBeenCalledWith(
-      'https://submissions.example.com/v6/submissions/validation-upload',
-      expect.any(FormData),
-      {
-        headers: {
-          Authorization: 'Bearer m2m-token',
-        },
+    expect(prisma.testSubmissionRun.create).toHaveBeenCalledWith({
+      data: {
+        id: 'generated-id',
+        challengeId: '30000123',
+        configType: PhaseConfigType.PROVISIONAL,
+        memberId: '40051399',
+        fileName: 'solution.zip',
+        mimeType: 'application/zip',
+        fileSize: 3,
+        fileContent: Uint8Array.from(Buffer.from('zip')),
+        status: 'QUEUED',
+        createdBy: '40051399',
       },
-    );
-    expect(postedForm.get('challengeId')).toBe('30000123');
-    expect(postedForm.get('memberId')).toBe('40051399');
-    expect(postedForm.get('type')).toBe('CONTEST_SUBMISSION');
-    expect(postedForm.get('submissionPhaseId')).toBe('provisional-phase');
+    });
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'generated-id' },
+      data: {
+        taskArn: 'arn:aws:ecs:task/task-1',
+        taskId: 'task-1',
+        cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+      },
+    });
     expect(ecsService.launchScorerTask).toHaveBeenCalledWith(
       '30000123',
-      'validation-submission-1',
+      'generated-id',
       {
         taskDefinitionName: 'mm-runner',
         taskDefinitionVersion: '7',
@@ -813,19 +833,15 @@ describe('MarathonMatchConfigService', () => {
       {
         memberId: '40051399',
         stopSupersededMemberTasks: false,
+        validationRunId: 'generated-id',
+        validationSubmissionDownloadUrl:
+          '/challenge/30000123/test-submission/generated-id/download',
       },
     );
   });
 
-  it('preserves Review API validation upload authorization failures', async () => {
-    const {
-      service,
-      ecsService,
-      httpService,
-      m2mService,
-      prisma,
-      prismaErrorService,
-    } = createService();
+  it('marks validation submissions failed when ECS launch fails', async () => {
+    const { service, ecsService, prisma, prismaErrorService } = createService();
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       id: 'config-1',
@@ -848,24 +864,21 @@ describe('MarathonMatchConfigService', () => {
         },
       ],
     });
-    m2mService.getM2MToken.mockResolvedValue('m2m-token');
-    httpService.post.mockReturnValue(
-      throwError(() => ({
-        isAxiosError: true,
-        message: 'Request failed with status code 403',
-        response: {
-          status: 403,
-          data: {
-            message: 'Insufficient permissions',
-            code: 'FORBIDDEN',
-          },
-        },
-      })),
-    );
+    prisma.testSubmissionRun.create.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+    });
+    ecsService.launchScorerTask.mockRejectedValue(new Error('ECS unavailable'));
+    prismaErrorService.handleError.mockReturnValue({
+      message: 'ECS unavailable',
+      code: 'INTERNAL_ERROR',
+      details: {},
+    });
 
-    let thrown: unknown;
-    try {
-      await service.uploadTestSubmission(
+    await expect(
+      service.uploadTestSubmission(
         '30000123',
         {
           configType: PhaseConfigType.PROVISIONAL,
@@ -880,28 +893,81 @@ describe('MarathonMatchConfigService', () => {
           isMachine: false,
           userId: '40051399',
         } as never,
-      );
-    } catch (error) {
-      thrown = error;
-    }
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: expect.stringContaining('ECS unavailable'),
+      }),
+    });
 
-    expect(thrown).toBeInstanceOf(HttpException);
-    const exception = thrown as HttpException;
-    expect(exception.getStatus()).toBe(403);
-    expect(exception.getResponse()).toEqual({
-      message:
-        'Review API rejected the validation submission upload with 403 Forbidden. Confirm the Marathon Match M2M credentials are authorized for create:submission in Review API. Upstream message: Insufficient permissions',
-      code: 'VALIDATION_SUBMISSION_UPLOAD_REJECTED',
-      details: {
-        challengeId: '30000123',
-        memberId: '40051399',
-        upstreamCode: 'FORBIDDEN',
-        upstreamMessage: 'Insufficient permissions',
-        upstreamStatusCode: 403,
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'generated-id' },
+      data: {
+        status: 'FAILED',
+        message: 'ECS unavailable',
+        completedAt: expect.any(Date),
       },
     });
-    expect(prismaErrorService.handleError).not.toHaveBeenCalled();
-    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+  });
+
+  it('returns validation submission status details', async () => {
+    const { service, prisma } = createService();
+
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      memberId: '40051399',
+      fileName: 'solution.zip',
+      fileSize: 3,
+      status: 'SUCCESS',
+      score: 88.5,
+      message: 'Scoring complete.',
+      metadata: { testType: 'provisional' },
+      currentReview: null,
+      impactedReviews: [],
+      progress: 1,
+      completedTests: 50,
+      totalTests: 50,
+      failedTests: 0,
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+      completedAt: new Date('2026-06-17T01:02:03.000Z'),
+      createdAt: new Date('2026-06-17T01:00:00.000Z'),
+      updatedAt: new Date('2026-06-17T01:02:03.000Z'),
+    });
+
+    await expect(
+      service.getTestSubmissionStatus('30000123', 'generated-id'),
+    ).resolves.toMatchObject({
+      challengeId: '30000123',
+      testSubmissionId: 'generated-id',
+      status: 'SUCCESS',
+      score: 88.5,
+      metadata: { testType: 'provisional' },
+      completedAt: '2026-06-17T01:02:03.000Z',
+    });
+  });
+
+  it('returns validation submission file bytes for runner download', async () => {
+    const { service, prisma } = createService();
+
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      fileContent: Buffer.from('zip'),
+      fileName: 'solution.zip',
+      fileSize: 3,
+      mimeType: 'application/zip',
+    });
+
+    await expect(
+      service.getTestSubmissionFile('30000123', 'generated-id'),
+    ).resolves.toEqual({
+      content: Buffer.from('zip'),
+      contentLength: 3,
+      fileName: 'solution.zip',
+      mimeType: 'application/zip',
+    });
   });
 
   it('rejects validation submissions when the tester is not compiled', async () => {

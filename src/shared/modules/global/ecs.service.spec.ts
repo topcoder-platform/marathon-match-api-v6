@@ -327,6 +327,62 @@ describe('EcsService', () => {
     ).toBe(true);
   });
 
+  it('passes validation run routing to scorer tasks', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve({ taskArns: [] });
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/validation-task',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({ taskDefinition: {} });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await service.launchScorerTask(
+      'challenge-1',
+      'validation-run-1',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      {
+        validationRunId: 'validation-run-1',
+        validationSubmissionDownloadUrl:
+          '/challenge/challenge-1/test-submission/validation-run-1/download',
+      },
+    );
+
+    const runCommand = send.mock.calls
+      .map((call) => call[0] as unknown)
+      .find(
+        (command): command is RunTaskCommand =>
+          command instanceof RunTaskCommand,
+      );
+    expect(
+      runCommand?.input.overrides?.containerOverrides?.[0]?.environment,
+    ).toEqual(
+      expect.arrayContaining([
+        { name: 'VALIDATION_RUN_ID', value: 'validation-run-1' },
+        {
+          name: 'VALIDATION_SUBMISSION_DOWNLOAD_URL',
+          value:
+            'https://api.example.com/challenge/challenge-1/test-submission/validation-run-1/download',
+        },
+      ]),
+    );
+  });
+
   it('blocks new launches when the global scorer task cap is reached', async () => {
     process.env.ECS_SCORER_MAX_CONCURRENT_TASKS = '1';
     const { service, m2mService, send } = createService();

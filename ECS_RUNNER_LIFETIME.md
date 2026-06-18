@@ -41,9 +41,9 @@ This is the normal path for `EXAMPLE` and `PROVISIONAL` scoring during the Submi
 
 ### Validation submission scoring
 
-`POST /v6/marathon-match/challenge/:challengeId/test-submission` uploads a validation submission through the configured Submission API and then launches one ECS runner for the requested `configType` (default `PROVISIONAL`). The response includes `submissionId`, `taskArn`, `taskId`, and usually `cloudWatchLogsConsoleUrl`.
+`POST /v6/marathon-match/challenge/:challengeId/test-submission` stores the uploaded ZIP as an isolated Marathon Match validation run, then launches one ECS runner for the requested `configType` (default `PROVISIONAL`). The runner downloads the ZIP from Marathon Match API using `VALIDATION_SUBMISSION_DOWNLOAD_URL`, includes `VALIDATION_RUN_ID` in progress/final callbacks, skips Submission API artifact uploads, and `ScoringResultService` stores progress/final score details on the validation run instead of creating Review API summations. The response includes `testSubmissionId`, `submissionId` (same validation-run id for runner compatibility), `status`, `taskArn`, `taskId`, and usually `cloudWatchLogsConsoleUrl`.
 
-We do this to support admins / copilots having the ability to test the scorer before the challenge launches.
+Use `GET /v6/marathon-match/challenge/:challengeId/test-submission/:testSubmissionId` to poll for completion and display the score/metadata. We do this to support admins / copilots having the ability to test the scorer before the challenge launches without adding a real submission or review to the challenge.
 
 ### Manual latest-submission rerun
 

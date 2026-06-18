@@ -57,12 +57,20 @@ describe('ScoringResultService', () => {
       marathonMatchConfig: {
         findUnique: jest.Mock;
       };
+      testSubmissionRun: {
+        findFirst: jest.Mock;
+        update: jest.Mock;
+      };
     } = {
       $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(),
       marathonMatchConfig: {
         findUnique: jest.fn(),
+      },
+      testSubmissionRun: {
+        findFirst: jest.fn(),
+        update: jest.fn(),
       },
     };
     prisma.$transaction.mockImplementation(
@@ -145,6 +153,93 @@ describe('ScoringResultService', () => {
       },
     });
     expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+  });
+
+  it('stores validation scorer callbacks without writing review summations', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'validation-run-1',
+    });
+
+    await expect(
+      service.processScoringResult({
+        ...basePayload,
+        metadata: {
+          numberOfTests: 2,
+          testScores: [
+            {
+              score: 88,
+              testcase: '1',
+            },
+          ],
+        },
+        validationRunId: 'validation-run-1',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'validation-run-1' },
+      data: expect.objectContaining({
+        status: ScoringTestStatus.Success,
+        score: 88,
+        progress: 1,
+        completedTests: 1,
+        totalTests: 2,
+        failedTests: 0,
+        completedAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it('stores validation scorer progress without writing review summations', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'validation-run-1',
+    });
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 1,
+        failedTests: 0,
+        progress: 0.5,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.InProgress,
+        submissionId: 'validation-run-1',
+        testPhase: 'provisional',
+        totalTests: 2,
+        validationRunId: 'validation-run-1',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'validation-run-1' },
+      data: expect.objectContaining({
+        status: ScoringTestStatus.InProgress,
+        progress: 0.5,
+        completedTests: 1,
+        totalTests: 2,
+        failedTests: 0,
+      }),
+    });
   });
 
   it('accepts scorer callbacks for configured challenges and persists the review summation', async () => {

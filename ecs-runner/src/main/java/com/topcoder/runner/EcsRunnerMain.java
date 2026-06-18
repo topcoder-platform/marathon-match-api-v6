@@ -194,6 +194,8 @@ public class EcsRunnerMain {
         String reviewTypeId = null;
         String scorecardId = null;
         String submissionApiUrl = null;
+        String validationRunId = null;
+        String validationSubmissionDownloadUrl = null;
 
         try {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
@@ -209,9 +211,24 @@ public class EcsRunnerMain {
             if (reviewId != null && reviewId.isEmpty()) {
                 reviewId = null;
             }
+            validationRunId = getOptionalEnv("VALIDATION_RUN_ID", "");
+            if (validationRunId != null && validationRunId.isEmpty()) {
+                validationRunId = null;
+            }
+            validationSubmissionDownloadUrl = getOptionalEnv(
+                "VALIDATION_SUBMISSION_DOWNLOAD_URL",
+                ""
+            );
+            if (
+                validationSubmissionDownloadUrl != null
+                    && validationSubmissionDownloadUrl.isEmpty()
+            ) {
+                validationSubmissionDownloadUrl = null;
+            }
             testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
             long phaseStartSeed = getOptionalLongEnv("PHASE_START_SEED", 0L);
             int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
+            boolean validationMode = !isBlank(validationRunId);
             setLogContext(challengeId, submissionId, testPhase);
 
             logInfo(
@@ -230,6 +247,8 @@ public class EcsRunnerMain {
                     + phaseStartSeed
                     + ", phaseNumberOfTests="
                     + phaseNumberOfTests
+                    + ", validationRunId="
+                    + (validationMode ? validationRunId : "<none>")
             );
             requireTrustedRunnerProcess();
 
@@ -318,9 +337,24 @@ public class EcsRunnerMain {
                         + " to "
                         + submissionDir
                         + " via "
-                        + config.getSubmissionApiUrl()
+                        + (validationMode
+                            ? validationSubmissionDownloadUrl
+                            : config.getSubmissionApiUrl())
                 );
-                submissionService.downloadSubmission(submissionId, submissionDir.toString());
+                if (validationMode) {
+                    if (isBlank(validationSubmissionDownloadUrl)) {
+                        throw new RuntimeException(
+                            "VALIDATION_SUBMISSION_DOWNLOAD_URL is required when VALIDATION_RUN_ID is set."
+                        );
+                    }
+                    submissionService.downloadSubmissionFromUrl(
+                        validationSubmissionDownloadUrl,
+                        submissionDir.toString(),
+                        submissionId
+                    );
+                } else {
+                    submissionService.downloadSubmission(submissionId, submissionDir.toString());
+                }
                 logInfo("api.download-submission", "Submission download and extraction complete");
                 logDirectorySnapshot(submissionDir, 100);
 
@@ -345,6 +379,7 @@ public class EcsRunnerMain {
                             testPhase,
                             reviewTypeId,
                             reviewId,
+                            validationRunId,
                             scorecardId,
                             0.0,
                             TEST_STATUS_IN_PROGRESS,
@@ -380,6 +415,7 @@ public class EcsRunnerMain {
                         accessTokenProvider,
                         reviewTypeId,
                         reviewId,
+                        validationRunId,
                         scorecardId
                     );
                 } finally {
@@ -427,16 +463,24 @@ public class EcsRunnerMain {
                     callbackMetadata
                 );
 
-                logInfo("artifacts.upload", "Uploading submission artifacts");
-                uploadArtifacts(
-                    httpClient,
-                    config.getSubmissionApiUrl(),
-                    accessTokenProvider,
-                    submissionId,
-                    testPhase,
-                    submissionDir
-                );
-                logInfo("artifacts.upload", "Artifact upload completed");
+                if (validationMode) {
+                    logInfo(
+                        "artifacts.upload",
+                        "Skipping submission artifact upload for validation run "
+                            + validationRunId
+                    );
+                } else {
+                    logInfo("artifacts.upload", "Uploading submission artifacts");
+                    uploadArtifacts(
+                        httpClient,
+                        config.getSubmissionApiUrl(),
+                        accessTokenProvider,
+                        submissionId,
+                        testPhase,
+                        submissionDir
+                    );
+                    logInfo("artifacts.upload", "Artifact upload completed");
+                }
 
                 ScoringCallbackRequest callbackRequest = new ScoringCallbackRequest(
                     challengeId,
@@ -445,6 +489,7 @@ public class EcsRunnerMain {
                     testPhase,
                     reviewTypeId,
                     reviewId,
+                    validationRunId,
                     scorerConfig.getScoreCardId(),
                     callbackMetadata,
                     callbackCurrentReview,
@@ -486,18 +531,27 @@ public class EcsRunnerMain {
                 error
             );
             writeFailureArtifactLog(submissionDir, submissionId, error);
-            uploadFailureArtifactsSafely(
-                submissionApiUrl,
-                accessTokenProvider,
-                submissionId,
-                testPhase,
-                submissionDir
-            );
+            if (isBlank(validationRunId)) {
+                uploadFailureArtifactsSafely(
+                    submissionApiUrl,
+                    accessTokenProvider,
+                    submissionId,
+                    testPhase,
+                    submissionDir
+                );
+            } else {
+                logInfo(
+                    "artifacts.upload",
+                    "Skipping failure artifact upload for validation run "
+                        + validationRunId
+                );
+            }
             postFailureProgressSafely(
                 challengeId,
                 submissionId,
                 testPhase,
                 reviewId,
+                validationRunId,
                 accessTokenProvider,
                 marathonMatchBaseUrl,
                 reviewTypeId,
@@ -646,6 +700,7 @@ public class EcsRunnerMain {
         AccessTokenProvider accessTokenProvider,
         String reviewTypeId,
         String reviewId,
+        String validationRunId,
         String scorecardId
     ) throws Exception {
         Path scorerConfigPath = null;
@@ -712,6 +767,7 @@ public class EcsRunnerMain {
                                     testPhase,
                                     reviewTypeId,
                                     reviewId,
+                                    validationRunId,
                                     scorecardId,
                                     progressUpdate.getProgress(),
                                     progressUpdate.getStatus(),
@@ -2520,6 +2576,7 @@ public class EcsRunnerMain {
      * @param submissionId Submission ID.
      * @param testPhase Scoring phase.
      * @param reviewId Optional review ID for system scoring.
+     * @param validationRunId Optional isolated validation run ID for Score Operations tests.
      * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param marathonMatchBaseUrl Marathon Match API base URL, when available.
      * @param reviewTypeId Review type ID, when available.
@@ -2531,6 +2588,7 @@ public class EcsRunnerMain {
         String submissionId,
         String testPhase,
         String reviewId,
+        String validationRunId,
         AccessTokenProvider accessTokenProvider,
         String marathonMatchBaseUrl,
         String reviewTypeId,
@@ -2561,6 +2619,7 @@ public class EcsRunnerMain {
                     testPhase,
                     reviewTypeId,
                     reviewId,
+                    validationRunId,
                     scorecardId,
                     lastReportedProgress,
                     TEST_STATUS_FAILED,
@@ -6166,6 +6225,9 @@ public class EcsRunnerMain {
         @JsonProperty("reviewId")
         private final String reviewId;
 
+        @JsonProperty("validationRunId")
+        private final String validationRunId;
+
         @JsonProperty("scorecardId")
         private final String scorecardId;
 
@@ -6185,6 +6247,7 @@ public class EcsRunnerMain {
             String testPhase,
             String reviewTypeId,
             String reviewId,
+            String validationRunId,
             String scorecardId,
             Map<String, Object> metadata,
             Map<String, Object> currentReview,
@@ -6196,6 +6259,7 @@ public class EcsRunnerMain {
             this.testPhase = testPhase;
             this.reviewTypeId = reviewTypeId;
             this.reviewId = reviewId;
+            this.validationRunId = validationRunId;
             this.scorecardId = scorecardId;
             this.metadata = metadata;
             this.currentReview = currentReview;
@@ -6221,6 +6285,9 @@ public class EcsRunnerMain {
 
         @JsonProperty("reviewId")
         private final String reviewId;
+
+        @JsonProperty("validationRunId")
+        private final String validationRunId;
 
         @JsonProperty("scorecardId")
         private final String scorecardId;
@@ -6252,6 +6319,7 @@ public class EcsRunnerMain {
             String testPhase,
             String reviewTypeId,
             String reviewId,
+            String validationRunId,
             String scorecardId,
             double progress,
             String status,
@@ -6266,6 +6334,7 @@ public class EcsRunnerMain {
             this.testPhase = testPhase;
             this.reviewTypeId = reviewTypeId;
             this.reviewId = reviewId;
+            this.validationRunId = validationRunId;
             this.scorecardId = scorecardId;
             this.progress = Math.min(1.0, Math.max(0.0, progress));
             this.status = status;

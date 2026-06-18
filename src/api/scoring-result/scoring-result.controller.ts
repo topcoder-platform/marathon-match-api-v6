@@ -81,6 +81,15 @@ class ScoringResultCallbackDto implements ScoringResultCallbackPayload {
   reviewId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Isolated validation run ID. When present, scorer output is stored on the validation run instead of Review API.',
+    example: 'valRun12345678',
+  })
+  @IsOptional()
+  @IsString()
+  validationRunId?: string;
+
+  @ApiPropertyOptional({
     description: 'Scorecard ID to attach to the review summation',
     example: '31d0ad44-2d47-43d7-b1c7-436f26d4673d',
   })
@@ -196,6 +205,15 @@ class ScoringProgressCallbackDto implements ScoringProgressCallbackPayload {
   @IsOptional()
   @IsString()
   reviewId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Isolated validation run ID. When present, progress is stored on the validation run instead of Review API.',
+    example: 'valRun12345678',
+  })
+  @IsOptional()
+  @IsString()
+  validationRunId?: string;
 
   @ApiPropertyOptional({
     description: 'Scorecard ID to attach to the review summation',

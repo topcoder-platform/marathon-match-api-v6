@@ -3,12 +3,10 @@ import {
   BadRequestException,
   ConflictException,
   HttpException,
-  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { isAxiosError } from 'axios';
 import {
   CompilationStatus,
   PhaseConfigType,
@@ -28,6 +26,7 @@ import {
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
   TestSubmissionResponseDto,
+  TestSubmissionStatusResponseDto,
   TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
@@ -86,6 +85,40 @@ type RerunScorerTaskDispatchCandidate = RerunSubmissionDispatchCandidate & {
     scorecardId?: string | null;
   };
 };
+
+type TestSubmissionRunRecord = {
+  id: string;
+  challengeId: string;
+  configType: PhaseConfigType;
+  memberId: string | null;
+  fileName: string;
+  mimeType: string | null;
+  fileSize: number;
+  fileContent?: Buffer | Uint8Array;
+  status: string;
+  score: number | null;
+  message: string | null;
+  metadata: Prisma.JsonValue | null;
+  currentReview: Prisma.JsonValue | null;
+  impactedReviews: Prisma.JsonValue | null;
+  progress: number | null;
+  completedTests: number | null;
+  totalTests: number | null;
+  failedTests: number | null;
+  taskArn: string | null;
+  taskId: string | null;
+  cloudWatchLogsConsoleUrl: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export interface TestSubmissionFileDownload {
+  content: Buffer;
+  contentLength: number;
+  fileName: string;
+  mimeType?: string;
+}
 
 interface ChallengePhaseResponse {
   id?: string;
@@ -1259,17 +1292,16 @@ export class MarathonMatchConfigService {
   }
 
   /**
-   * Creates a clean Review API validation submission and queues one scorer ECS task.
+   * Creates an isolated validation run and queues one scorer ECS task.
    * @param challengeId Challenge ID from POST /challenge/:challengeId/test-submission.
    * @param body Multipart fields selecting the phase config and optional member/file overrides.
    * @param file Uploaded submission archive captured by Nest memory storage.
    * @param user Authenticated caller used as the fallback member id and audit context.
-   * @returns Validation submission id and ECS task launch details.
+   * @returns Validation run id and ECS task launch details.
    * @throws NotFoundException When the Marathon Match config does not exist.
    * @throws BadRequestException When file contents are missing, the tester is not compiled, or the phase config is missing.
-   * @throws HttpException When Review API rejects the validation upload.
    * @throws InternalServerErrorException When ECS launch fails unexpectedly.
-   * Used by challenge managers and copilots to validate scorer behavior before launch.
+   * Used by challenge managers and copilots to validate scorer behavior without creating Review API submissions or summations.
    */
   async uploadTestSubmission(
     challengeId: string,
@@ -1328,54 +1360,83 @@ export class MarathonMatchConfigService {
         );
       }
 
-      const submissionApiBaseUrl =
-        process.env.SUBMISSION_API_URL?.trim() ||
-        config.submissionApiUrl?.trim();
-      if (!submissionApiBaseUrl) {
-        throw new Error(
-          `Submission API URL is not configured for challenge ${challengeId}.`,
-        );
-      }
-
-      const token = await this.m2mService.getM2MToken();
-      if (!token) {
-        throw new Error(
-          'Unable to get M2M token for validation submission upload.',
-        );
-      }
-
-      const submissionId = await this.createValidationSubmission(
-        token,
-        submissionApiBaseUrl,
-        challengeId,
-        memberId,
-        phaseConfigData.phaseId,
-        body.fileName,
-        file,
-      );
-      const launchResult = await this.ecsService.launchScorerTask(
-        challengeId,
-        submissionId,
-        {
-          taskDefinitionName: config.taskDefinitionName,
-          taskDefinitionVersion: config.taskDefinitionVersion,
-        },
-        {
+      const resolvedFileName =
+        body.fileName?.trim() ||
+        file.originalname ||
+        file.filename ||
+        'submission.zip';
+      const testSubmissionId = nanoid(14);
+      const fileContent = new Uint8Array(file.buffer.byteLength);
+      fileContent.set(file.buffer);
+      const createdRun = await this.prisma.testSubmissionRun.create({
+        data: {
+          id: testSubmissionId,
+          challengeId,
           configType: phaseConfigData.configType,
-          startSeed: phaseConfigData.startSeed,
-          numberOfTests: phaseConfigData.numberOfTests,
-        },
-        undefined,
-        {
           memberId,
-          stopSupersededMemberTasks: false,
+          fileName: resolvedFileName,
+          mimeType: file.mimetype || 'application/octet-stream',
+          fileSize:
+            typeof file.size === 'number' && file.size > 0
+              ? file.size
+              : file.buffer.length,
+          fileContent,
+          status: 'QUEUED',
+          createdBy: this.getActor(user),
         },
-      );
+      });
+
+      let launchResult: MarathonMatchScorerTaskLaunchResult;
+      try {
+        launchResult = await this.ecsService.launchScorerTask(
+          challengeId,
+          testSubmissionId,
+          {
+            taskDefinitionName: config.taskDefinitionName,
+            taskDefinitionVersion: config.taskDefinitionVersion,
+          },
+          {
+            configType: phaseConfigData.configType,
+            startSeed: phaseConfigData.startSeed,
+            numberOfTests: phaseConfigData.numberOfTests,
+          },
+          undefined,
+          {
+            memberId,
+            stopSupersededMemberTasks: false,
+            validationRunId: testSubmissionId,
+            validationSubmissionDownloadUrl:
+              this.buildValidationSubmissionDownloadPath(
+                challengeId,
+                testSubmissionId,
+              ),
+          },
+        );
+      } catch (error) {
+        await this.prisma.testSubmissionRun.update({
+          where: { id: testSubmissionId },
+          data: {
+            status: 'FAILED',
+            message: error instanceof Error ? error.message : String(error),
+            completedAt: new Date(),
+          },
+        });
+        throw error;
+      }
+
+      const updatedRun = await this.prisma.testSubmissionRun.update({
+        where: { id: testSubmissionId },
+        data: {
+          taskArn: launchResult.taskArn,
+          taskId: launchResult.taskId,
+          cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+        },
+      });
 
       this.logger.log({
         message: 'Marathon Match validation submission queued for scoring.',
         challengeId,
-        submissionId,
+        testSubmissionId,
         memberId,
         configType: phaseConfigData.configType,
         taskId: launchResult.taskId,
@@ -1384,8 +1445,10 @@ export class MarathonMatchConfigService {
 
       return {
         challengeId,
-        submissionId,
-        configType: phaseConfigData.configType,
+        submissionId: createdRun.id,
+        testSubmissionId: createdRun.id,
+        configType: updatedRun.configType,
+        status: updatedRun.status,
         taskArn: launchResult.taskArn,
         taskId: launchResult.taskId,
         cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
@@ -1409,216 +1472,156 @@ export class MarathonMatchConfigService {
   }
 
   /**
-   * Uploads a validation submission to Review API and extracts the created submission id.
-   * @param token M2M bearer token for Review API.
-   * @param submissionApiBaseUrl Review API base URL from configuration.
-   * @param challengeId Challenge that owns the validation submission.
-   * @param memberId Member id used as the submission owner for runner metadata.
-   * @param phaseId Configured challenge phase id to persist on the validation submission when present.
-   * @param fileName Optional file name override from the multipart request.
-   * @param file Uploaded submission archive.
-   * @returns Created Review API submission id.
-   * @throws BadRequestException When file bytes are unavailable or Review API omits an id.
-   * @throws HttpException When Review API rejects the validation upload request.
-   * Used by `uploadTestSubmission` before scorer ECS dispatch.
+   * Returns the current status and final scorer details for an isolated
+   * validation run.
+   * @param challengeId Challenge that owns the validation run.
+   * @param testSubmissionId Validation run identifier returned by upload.
+   * @returns Current validation run status, task details, progress, and final score metadata.
+   * @throws NotFoundException When the run does not exist for the challenge.
+   * Used by the Work app after upload to poll until scoring is complete.
    */
-  private async createValidationSubmission(
-    token: string,
-    submissionApiBaseUrl: string,
+  async getTestSubmissionStatus(
     challengeId: string,
-    memberId: string,
-    phaseId: string | undefined,
-    fileName: string | undefined,
-    file: Express.Multer.File,
-  ): Promise<string> {
-    if (!file.buffer || file.buffer.length === 0) {
-      throw new BadRequestException(
-        'File buffer is required for validation submission upload.',
-      );
-    }
-
-    const resolvedFileName =
-      fileName?.trim() ||
-      file.originalname ||
-      file.filename ||
-      'submission.zip';
-    const form = new FormData();
-
-    form.set('challengeId', challengeId);
-    form.set('memberId', memberId);
-    form.set('type', 'CONTEST_SUBMISSION');
-    form.set('fileName', resolvedFileName);
-    if (phaseId?.trim()) {
-      form.set('submissionPhaseId', phaseId.trim());
-    }
-    const fileArrayBuffer = new ArrayBuffer(file.buffer.byteLength);
-    new Uint8Array(fileArrayBuffer).set(file.buffer);
-    form.set(
-      'file',
-      new Blob([fileArrayBuffer], {
-        type: file.mimetype || 'application/octet-stream',
-      }),
-      resolvedFileName,
-    );
-
-    let responseData: unknown;
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post(
-          `${submissionApiBaseUrl.replace(/\/+$/, '')}/submissions/validation-upload`,
-          form,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        ),
-      );
-      responseData = response.data;
-    } catch (error) {
-      const uploadException = this.createValidationUploadException(
-        error,
+    testSubmissionId: string,
+  ): Promise<TestSubmissionStatusResponseDto> {
+    const run = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: testSubmissionId,
         challengeId,
-        memberId,
-      );
-      if (uploadException) {
-        this.logger.error(uploadException.getResponse());
-        throw uploadException;
-      }
+      },
+    });
 
-      throw error;
-    }
-
-    const submissionId = this.extractCreatedSubmissionId(responseData);
-    if (!submissionId) {
-      throw new BadRequestException(
-        'Validation submission upload did not return a submission id.',
+    if (!run) {
+      throw new NotFoundException(
+        `Validation submission run ${testSubmissionId} not found for challenge ${challengeId}.`,
       );
     }
 
-    return submissionId;
+    return this.mapTestSubmissionRunResponse(run);
   }
 
   /**
-   * Converts Review API validation-upload HTTP failures into API exceptions
-   * that preserve the upstream status and enough context to fix auth/config issues.
-   * @param error Candidate error thrown by the outbound Review API request.
-   * @param challengeId Challenge ID submitted to Review API.
-   * @param memberId Member ID submitted to Review API.
-   * @returns HttpException for upstream Axios HTTP responses, otherwise undefined.
-   * @throws Nothing directly; callers throw the returned exception.
-   * Used by `createValidationSubmission` so Review API rejections do not get
-   * reported as Prisma errors or generic unknown failures.
+   * Reads the uploaded ZIP for a validation run so the ECS runner can download it.
+   * @param challengeId Challenge that owns the validation run.
+   * @param testSubmissionId Validation run identifier passed to the runner.
+   * @returns File bytes and response headers for the uploaded test ZIP.
+   * @throws NotFoundException When the run does not exist for the challenge.
+   * Used by the ECS runner instead of Review API's submission download endpoint.
    */
-  private createValidationUploadException(
-    error: unknown,
+  async getTestSubmissionFile(
     challengeId: string,
-    memberId: string,
-  ): HttpException | undefined {
-    if (!isAxiosError(error) || !error.response) {
+    testSubmissionId: string,
+  ): Promise<TestSubmissionFileDownload> {
+    const run = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: testSubmissionId,
+        challengeId,
+      },
+      select: {
+        fileContent: true,
+        fileName: true,
+        fileSize: true,
+        mimeType: true,
+      },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Validation submission run ${testSubmissionId} not found for challenge ${challengeId}.`,
+      );
+    }
+
+    return {
+      content: Buffer.from(run.fileContent),
+      contentLength: run.fileSize,
+      fileName: run.fileName,
+      mimeType: run.mimeType || undefined,
+    };
+  }
+
+  /**
+   * Builds the marathon-match API path used by ECS runners to download isolated
+   * validation submissions.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID.
+   * @returns Absolute-path URL component for the protected download endpoint.
+   * Used by `uploadTestSubmission` when launching the ECS task.
+   */
+  private buildValidationSubmissionDownloadPath(
+    challengeId: string,
+    testSubmissionId: string,
+  ): string {
+    return `/challenge/${encodeURIComponent(challengeId)}/test-submission/${encodeURIComponent(testSubmissionId)}/download`;
+  }
+
+  /**
+   * Maps a persisted validation run into the API response DTO.
+   * @param run Validation run persistence record.
+   * @returns Status response consumed by Work app polling and result modal.
+   * Used by upload and status endpoints to keep response shape consistent.
+   */
+  private mapTestSubmissionRunResponse(
+    run: TestSubmissionRunRecord,
+  ): TestSubmissionStatusResponseDto {
+    return {
+      challengeId: run.challengeId,
+      cloudWatchLogsConsoleUrl: run.cloudWatchLogsConsoleUrl || undefined,
+      completedAt: run.completedAt?.toISOString(),
+      completedTests: run.completedTests ?? undefined,
+      configType: run.configType,
+      createdAt: run.createdAt.toISOString(),
+      currentReview: this.asJsonRecord(run.currentReview),
+      failedTests: run.failedTests ?? undefined,
+      fileName: run.fileName,
+      fileSize: run.fileSize,
+      impactedReviews: this.asJsonRecordArray(run.impactedReviews),
+      memberId: run.memberId || undefined,
+      message: run.message || undefined,
+      metadata: this.asJsonRecord(run.metadata),
+      progress: run.progress ?? undefined,
+      score: run.score ?? undefined,
+      status: run.status,
+      submissionId: run.id,
+      taskArn: run.taskArn || '',
+      taskId: run.taskId || '',
+      testSubmissionId: run.id,
+      totalTests: run.totalTests ?? undefined,
+      updatedAt: run.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Converts stored JSON objects into plain records for DTO responses.
+   * @param value Stored Prisma JSON value.
+   * @returns Record when the JSON value is an object; otherwise undefined.
+   * Used by `mapTestSubmissionRunResponse`.
+   */
+  private asJsonRecord(
+    value: Prisma.JsonValue | null,
+  ): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return undefined;
     }
 
-    const upstreamStatusCode =
-      typeof error.response.status === 'number' && error.response.status > 0
-        ? error.response.status
-        : HttpStatus.BAD_GATEWAY;
-    const upstreamBody = this.asRecord(error.response.data);
-    const upstreamError = this.asRecord(upstreamBody.error);
-    const upstreamResult = this.asRecord(upstreamBody.result);
-    const upstreamCode =
-      this.asString(upstreamBody.code)?.trim() ||
-      this.asString(upstreamError.code)?.trim() ||
-      this.asString(upstreamResult.code)?.trim();
-    const upstreamMessage = this.extractUpstreamErrorMessage(
-      error.response.data,
-      error.message,
-    );
-    const forbiddenStatusCode = 403;
-    const statusLabel =
-      upstreamStatusCode === forbiddenStatusCode
-        ? '403 Forbidden'
-        : `status ${upstreamStatusCode}`;
-    const permissionHint =
-      upstreamStatusCode === forbiddenStatusCode
-        ? ' Confirm the Marathon Match M2M credentials are authorized for create:submission in Review API.'
-        : '';
-    const message = [
-      `Review API rejected the validation submission upload with ${statusLabel}.${permissionHint}`,
-      upstreamMessage ? `Upstream message: ${upstreamMessage}` : undefined,
-    ]
-      .filter(Boolean)
-      .join(' ');
-
-    return new HttpException(
-      {
-        message,
-        code: 'VALIDATION_SUBMISSION_UPLOAD_REJECTED',
-        details: {
-          challengeId,
-          memberId,
-          upstreamCode,
-          upstreamMessage,
-          upstreamStatusCode,
-        },
-      },
-      upstreamStatusCode,
-    );
+    return value as Record<string, unknown>;
   }
 
   /**
-   * Extracts a concise message from common downstream API error wrappers.
-   * @param data Raw upstream response body.
-   * @param fallback Fallback message from the transport error.
-   * @returns First non-empty message found in the response body or fallback.
-   * Used when converting Review API upload failures into user-facing exceptions.
+   * Converts stored JSON arrays into record arrays for DTO responses.
+   * @param value Stored Prisma JSON value.
+   * @returns Array of object records when present; otherwise undefined.
+   * Used by `mapTestSubmissionRunResponse`.
    */
-  private extractUpstreamErrorMessage(
-    data: unknown,
-    fallback?: string,
-  ): string | undefined {
-    const wrapper = this.asRecord(data);
-    const errorRecord = this.asRecord(wrapper.error);
-    const resultRecord = this.asRecord(wrapper.result);
-    const candidates = [
-      wrapper.message,
-      errorRecord.message,
-      resultRecord.message,
-      data,
-      fallback,
-    ];
-
-    for (const candidate of candidates) {
-      const message = Array.isArray(candidate)
-        ? candidate
-            .map((entry) => this.asString(entry)?.trim())
-            .filter(Boolean)
-            .join('; ')
-        : this.asString(candidate)?.trim();
-
-      if (message) {
-        return message;
-      }
+  private asJsonRecordArray(
+    value: Prisma.JsonValue | null,
+  ): Record<string, unknown>[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
     }
 
-    return undefined;
-  }
-
-  /**
-   * Extracts a created submission id from common Review API response wrappers.
-   * @param data Raw Review API response body.
-   * @returns Created submission id, or undefined when no supported field exists.
-   * Used after validation upload because environments return direct or wrapped DTOs.
-   */
-  private extractCreatedSubmissionId(data: unknown): string | undefined {
-    const wrapper = this.asRecord(data);
-    const resultRecord = this.asRecord(wrapper.result);
-    const dataRecord = this.asRecord(wrapper.data);
-
-    return (
-      this.asString(wrapper.id)?.trim() ||
-      this.asString(resultRecord.id)?.trim() ||
-      this.asString(dataRecord.id)?.trim()
+    return (value as unknown[]).filter(
+      (entry): entry is Record<string, unknown> =>
+        !!entry && typeof entry === 'object' && !Array.isArray(entry),
     );
   }
 

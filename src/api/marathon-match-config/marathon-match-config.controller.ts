@@ -37,6 +37,7 @@ import {
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
   TestSubmissionResponseDto,
+  TestSubmissionStatusResponseDto,
   TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
@@ -263,7 +264,7 @@ export class MarathonMatchConfigController {
   @ApiResponse({
     status: 202,
     description:
-      'Validation submission created and queued for asynchronous scoring.',
+      'Isolated validation submission run queued for asynchronous scoring.',
     type: TestSubmissionResponseDto,
   })
   @ApiResponse({
@@ -285,6 +286,111 @@ export class MarathonMatchConfigController {
       file,
       user,
     );
+  }
+
+  /**
+   * Returns the current status for an isolated validation submission run.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID returned by upload.
+   * @returns Current validation run progress and final scoring details when complete.
+   */
+  @Get('/:challengeId/test-submission/:testSubmissionId')
+  @Roles(
+    UserRole.Admin,
+    UserRole.Copilot,
+    UserRole.ProjectManager,
+    UserRole.User,
+  )
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @ApiOperation({
+    summary: 'Get Marathon Match validation submission scoring status',
+    description:
+      'Roles: Admin or challenge Copilot/Manager resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the validation submission run',
+    example: '30000123',
+  })
+  @ApiParam({
+    name: 'testSubmissionId',
+    description: 'Validation run ID returned by upload',
+    example: 'valRun12345678',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation submission run status.',
+    type: TestSubmissionStatusResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Validation submission run not found.',
+  })
+  async getTestSubmissionStatus(
+    @Param('challengeId') challengeId: string,
+    @Param('testSubmissionId') testSubmissionId: string,
+  ): Promise<TestSubmissionStatusResponseDto> {
+    return await this.marathonMatchConfigService.getTestSubmissionStatus(
+      challengeId,
+      testSubmissionId,
+    );
+  }
+
+  /**
+   * Streams the uploaded ZIP for an isolated validation submission run.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID passed to ECS.
+   * @param res HTTP response used for download headers and binary payload.
+   * @returns A binary ZIP response for the ECS runner.
+   */
+  @Get('/:challengeId/test-submission/:testSubmissionId/download')
+  @Roles(UserRole.Admin)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @ApiOperation({
+    summary: 'Download an isolated Marathon Match validation submission',
+    description:
+      'Roles: Admin | Scopes: update:marathon-match. Intended for ECS runner use.',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the validation submission run',
+    example: '30000123',
+  })
+  @ApiParam({
+    name: 'testSubmissionId',
+    description: 'Validation run ID passed to ECS',
+    example: 'valRun12345678',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Uploaded validation submission ZIP.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Validation submission run not found.',
+  })
+  async downloadTestSubmission(
+    @Param('challengeId') challengeId: string,
+    @Param('testSubmissionId') testSubmissionId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const download =
+      await this.marathonMatchConfigService.getTestSubmissionFile(
+        challengeId,
+        testSubmissionId,
+      );
+    const fileName = download.fileName.replace(/[\r\n"]/g, '_');
+
+    res.setHeader(
+      'Content-Type',
+      download.mimeType || 'application/octet-stream',
+    );
+    res.setHeader('Content-Length', String(download.contentLength));
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(download.content);
   }
 
   /**

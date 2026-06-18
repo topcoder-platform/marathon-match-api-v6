@@ -28,4 +28,16 @@ describe('EcsRunnerMain C# .NET extension handling', () => {
       /if \("\.cs_net7"\.equals\(extension\)\) \{\s*return "csharp-net7";\s*\}/,
     );
   });
+
+  it('routes validation runs outside submission artifacts and review callbacks', () => {
+    expect(source).toContain('getOptionalEnv("VALIDATION_RUN_ID", "")');
+    expect(source).toContain(
+      'getOptionalEnv(\n                "VALIDATION_SUBMISSION_DOWNLOAD_URL"',
+    );
+    expect(source).toContain('downloadSubmissionFromUrl(');
+    expect(source).toContain(
+      'Skipping submission artifact upload for validation run ',
+    );
+    expect(source).toContain('@JsonProperty("validationRunId")');
+  });
 });

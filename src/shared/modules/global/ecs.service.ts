@@ -40,6 +40,8 @@ export interface MarathonMatchScorerTaskLaunchResult {
 export interface MarathonMatchScorerTaskLaunchOptions {
   memberId?: string;
   stopSupersededMemberTasks?: boolean;
+  validationRunId?: string;
+  validationSubmissionDownloadUrl?: string;
 }
 
 interface ActiveScorerTask {
@@ -90,7 +92,7 @@ export class EcsService {
    * @param mmConfig Task definition name and version from the marathonMatchConfig record.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
    * @param reviewId Optional review-api review id that should be marked completed after callback processing.
-   * @param launchOptions Optional submission owner metadata and cancellation controls for in-flight member tasks.
+   * @param launchOptions Optional submission owner metadata, cancellation controls, and validation-run routing.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and Auth0 M2M settings
@@ -118,6 +120,9 @@ export class EcsService {
     const taskDefinitionVersion = mmConfig.taskDefinitionVersion?.trim();
     const testPhase = this.mapConfigTypeToTestPhase(scoringPhase.configType);
     const memberId = launchOptions.memberId?.trim();
+    const validationRunId = launchOptions.validationRunId?.trim();
+    const validationSubmissionDownloadUrl =
+      launchOptions.validationSubmissionDownloadUrl?.trim();
     const shouldStopSupersededMemberTasks =
       launchOptions.stopSupersededMemberTasks !== false;
 
@@ -213,6 +218,23 @@ export class EcsService {
           runnerEnvironment.push({
             name: 'REVIEW_ID',
             value: reviewId.trim(),
+          });
+        }
+
+        if (validationRunId) {
+          runnerEnvironment.push({
+            name: 'VALIDATION_RUN_ID',
+            value: validationRunId,
+          });
+        }
+
+        if (validationSubmissionDownloadUrl) {
+          runnerEnvironment.push({
+            name: 'VALIDATION_SUBMISSION_DOWNLOAD_URL',
+            value: this.resolveValidationSubmissionDownloadUrl(
+              marathonMatchApiUrl,
+              validationSubmissionDownloadUrl,
+            ),
           });
         }
 
@@ -927,6 +949,29 @@ export class EcsService {
       return;
     }
     environment.push({ name: envName, value });
+  }
+
+  /**
+   * Resolves a validation submission download location for ECS env overrides.
+   * @param marathonMatchApiUrl Base Marathon Match API URL configured for the runner.
+   * @param downloadUrl Absolute URL or API path supplied by the caller.
+   * @returns Absolute URL that the runner can fetch with its M2M token.
+   * Used when launching isolated Score Operations validation runs.
+   */
+  private resolveValidationSubmissionDownloadUrl(
+    marathonMatchApiUrl: string,
+    downloadUrl: string,
+  ): string {
+    const normalizedDownloadUrl = downloadUrl.trim();
+    if (/^https?:\/\//i.test(normalizedDownloadUrl)) {
+      return normalizedDownloadUrl;
+    }
+
+    const baseUrl = marathonMatchApiUrl.replace(/\/+$/, '');
+    const path = normalizedDownloadUrl.startsWith('/')
+      ? normalizedDownloadUrl
+      : `/${normalizedDownloadUrl}`;
+    return `${baseUrl}${path}`;
   }
 
   private mapConfigTypeToTestPhase(configType: string): string {

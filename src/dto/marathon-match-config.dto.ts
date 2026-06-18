@@ -818,8 +818,8 @@ export class TestSubmissionUploadDto {
 }
 
 /**
- * Response payload returned after a validation submission has been created and
- * queued for ECS scorer execution.
+ * Response payload returned after an isolated validation run has been created
+ * and queued for ECS scorer execution.
  */
 export class TestSubmissionResponseDto {
   @ApiProperty({
@@ -829,10 +829,18 @@ export class TestSubmissionResponseDto {
   challengeId: string;
 
   @ApiProperty({
-    description: 'Submission ID created for scorer validation',
-    example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
+    description:
+      'Validation run ID used by the scorer. This is not a Review API submission.',
+    example: 'valRun12345678',
   })
   submissionId: string;
+
+  @ApiProperty({
+    description:
+      'Validation run ID used for status polling and scorer callbacks.',
+    example: 'valRun12345678',
+  })
+  testSubmissionId: string;
 
   @ApiProperty({
     description: 'Phase configuration used for validation scoring',
@@ -840,6 +848,12 @@ export class TestSubmissionResponseDto {
     example: PhaseConfigType.PROVISIONAL,
   })
   configType: PhaseConfigType;
+
+  @ApiProperty({
+    description: 'Current validation run status',
+    example: 'QUEUED',
+  })
+  status: string;
 
   @ApiProperty({
     description: 'AWS ECS task ARN when scorer launch succeeded',
@@ -858,6 +872,118 @@ export class TestSubmissionResponseDto {
     required: false,
   })
   cloudWatchLogsConsoleUrl?: string;
+}
+
+/**
+ * Current status and final details for an isolated validation submission run.
+ */
+export class TestSubmissionStatusResponseDto extends TestSubmissionResponseDto {
+  @ApiProperty({
+    description: 'Original uploaded file name',
+    example: 'sample-solution.zip',
+  })
+  fileName: string;
+
+  @ApiProperty({
+    description: 'Uploaded file size in bytes',
+    example: 2048,
+  })
+  fileSize: number;
+
+  @ApiProperty({
+    description: 'Member ID used as runner metadata, when supplied',
+    required: false,
+    example: '40166514',
+  })
+  memberId?: string;
+
+  @ApiProperty({
+    description: 'Final aggregate score once scoring completes',
+    required: false,
+    example: 97.25,
+  })
+  score?: number;
+
+  @ApiProperty({
+    description: 'Current runner progress from 0 to 1',
+    required: false,
+    example: 0.45,
+  })
+  progress?: number;
+
+  @ApiProperty({
+    description: 'Completed testcase count reported by the runner',
+    required: false,
+    example: 9,
+  })
+  completedTests?: number;
+
+  @ApiProperty({
+    description: 'Total testcase count reported by the runner',
+    required: false,
+    example: 20,
+  })
+  totalTests?: number;
+
+  @ApiProperty({
+    description: 'Failed testcase count reported by the runner',
+    required: false,
+    example: 1,
+  })
+  failedTests?: number;
+
+  @ApiProperty({
+    description: 'Latest runner status or failure message',
+    required: false,
+    example: 'Completed test 9 of 20',
+  })
+  message?: string;
+
+  @ApiProperty({
+    description: 'Final scorer metadata returned by the runner',
+    required: false,
+    type: Object,
+    additionalProperties: true,
+  })
+  metadata?: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Current review object returned by custom scorer logic',
+    required: false,
+    type: Object,
+    additionalProperties: true,
+  })
+  currentReview?: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Impacted review objects returned by custom scorer logic',
+    required: false,
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: true,
+    },
+  })
+  impactedReviews?: Record<string, unknown>[];
+
+  @ApiProperty({
+    description: 'Validation run creation timestamp',
+    example: '2026-06-17T02:15:00.000Z',
+  })
+  createdAt: string;
+
+  @ApiProperty({
+    description: 'Validation run last update timestamp',
+    example: '2026-06-17T02:16:00.000Z',
+  })
+  updatedAt: string;
+
+  @ApiProperty({
+    description: 'Validation run completion timestamp',
+    required: false,
+    example: '2026-06-17T02:17:00.000Z',
+  })
+  completedAt?: string;
 }
 
 /**
