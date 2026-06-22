@@ -195,6 +195,7 @@ For `PROVISIONAL` and `SYSTEM`, the runner posts progress to `POST /v6/marathon-
 - `timed_out: true` for SYSTEM timeout failures
 
 Treat `IN PROGRESS` summations as unavailable, even when they carry a placeholder score.
+Completed scoring may report `SUCCESS` with nonzero `failedTests` when individual testcases timed out or crashed; `FAILED` is reserved for explicit scorer or skipped-scoring failures.
 
 ## Stopping or killing runners
 

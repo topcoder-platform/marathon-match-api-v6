@@ -2183,9 +2183,7 @@ export class ScoringResultService {
         failedTests,
         progress: 1,
         status:
-          failedTests > 0
-            ? ScoringTestStatus.Failed
-            : ScoringTestStatus.Success,
+          totalTests > 0 ? ScoringTestStatus.Success : ScoringTestStatus.Failed,
         totalTests,
       },
     );
@@ -2687,11 +2685,11 @@ export class ScoringResultService {
     finalScore: number,
   ): Record<string, unknown> {
     const totalTests = this.resolveTotalTests(metadata);
-    const completedTests =
-      totalTests ?? this.countCompletedTestScores(metadata);
+    const completedTestScores = this.countCompletedTestScores(metadata);
+    const completedTests = totalTests ?? completedTestScores;
     const failedTests = this.countFailedTestScores(metadata);
     const status =
-      finalScore < 0 || failedTests > 0
+      finalScore < 0 && completedTestScores === 0
         ? ScoringTestStatus.Failed
         : ScoringTestStatus.Success;
 

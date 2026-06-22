@@ -4732,7 +4732,7 @@ public class EcsRunnerMain {
                     testScores.size(),
                     numberOfTests,
                     failedTests,
-                    failedTests > 0 ? TEST_STATUS_FAILED : TEST_STATUS_IN_PROGRESS,
+                    TEST_STATUS_IN_PROGRESS,
                     "Completed test " + testCaseNumber + " of " + numberOfTests
                 );
             }

@@ -66,7 +66,7 @@ sequenceDiagram
 
 After `ScoringResultService` writes the SYSTEM review summation, `completeSystemReviewIfNeeded` patches the originating review to `COMPLETED` and writes the final score back to Review API.
 
-While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested. In-progress summations keep a neutral placeholder score and should be displayed as unavailable from `testStatus`; failed progress uses the failed-score sentinel.
+While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested. In-progress summations keep a neutral placeholder score and should be displayed as unavailable from `testStatus`; explicit failed progress uses the failed-score sentinel. Completed scoring can report `testStatus = SUCCESS` with nonzero `testProgressDetails.failedTests` when individual testcases timed out or crashed.
 
 Each dispatched SYSTEM task also schedules a pg-boss timeout check using the config's `systemTestTimeout` value. The default is 24 hours (`86400000` ms). When the delayed check runs, the API describes the ECS task and checks the SYSTEM summation; if the task is still active and the summation is not complete, it stops the ECS task, writes a failed SYSTEM summation with score `-1`, and includes `metadata.timed_out = true`.
 
