@@ -727,7 +727,6 @@ describe('ScoringResultService', () => {
     expect(
       scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
     ).toHaveBeenCalledWith('m2m-token', {
-      aggregateExampleScore: 96,
       aggregateProvisionalScore: 88,
       challengeId: basePayload.challengeId,
       challengeName: 'Marathon Match 2026 Beta Test',
@@ -908,7 +907,6 @@ describe('ScoringResultService', () => {
     ).toHaveBeenCalledWith(
       'm2m-token',
       expect.objectContaining({
-        aggregateExampleScore: 96,
         aggregateProvisionalScore: -1,
         scoringStatus: 'fail',
       }),
