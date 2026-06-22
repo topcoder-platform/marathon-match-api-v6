@@ -337,7 +337,6 @@ Both email payloads include:
 
 The Example/Provisional completion payload also includes:
 
-- aggregate example score after relative scoring updates
 - aggregate provisional score after relative scoring updates
 
 The System completion payload also includes:

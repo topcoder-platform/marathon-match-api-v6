@@ -16,7 +16,6 @@ describe('ScoringCompletionEmailService', () => {
   };
 
   const details = {
-    aggregateExampleScore: 95.25,
     aggregateProvisionalScore: 87.5,
     challengeId: '76d6e4b8-1cca-4850-8bc5-bdaddfece87a',
     challengeName: 'Blocks',
@@ -112,7 +111,6 @@ describe('ScoringCompletionEmailService', () => {
           recipients: ['competitor@example.com'],
           sendgrid_template_id: 'sendgrid-template-id',
           data: expect.objectContaining({
-            aggregateExampleScore: details.aggregateExampleScore,
             aggregateProvisionalScore: details.aggregateProvisionalScore,
             challengeId: details.challengeId,
             challengeName: details.challengeName,
@@ -131,6 +129,8 @@ describe('ScoringCompletionEmailService', () => {
         }),
       }),
     );
+    const sentPayload = httpService.post.mock.calls[0][1].payload.data;
+    expect(sentPayload.aggregateExampleScore).toBeUndefined();
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
   });
 

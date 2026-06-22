@@ -15,7 +15,6 @@ export interface SubmissionScoringCompletionEmailDetails {
   memberId?: string;
   userId?: string;
   scoringStatus: ScoringCompletionStatus;
-  aggregateExampleScore: number;
   aggregateProvisionalScore: number;
 }
 
@@ -78,7 +77,7 @@ export class ScoringCompletionEmailService {
    * Sends the completion email if the template is configured and this
    * submission has not already produced a successful notification.
    * @param token M2M token used for member-api-v6 and Bus API calls.
-   * @param details Submission, challenge, member, and score values for the email.
+   * @param details Submission, challenge, member, status, and provisional score values for the email.
    * @returns Resolves after the email is sent, skipped, or marked failed.
    */
   async sendSubmissionScoringCompleteEmail(
@@ -460,7 +459,7 @@ export class ScoringCompletionEmailService {
 
   /**
    * Builds the email payload expected by the `external.action.email` topic.
-   * @param details Submission, challenge, member, and score values.
+   * @param details Submission, challenge, member, status, and provisional score values.
    * @param recipientEmail Email address to receive the notification.
    * @param memberHandle Resolved member handle for template data.
    * @param sendgridTemplateId SendGrid dynamic template ID.
@@ -487,7 +486,6 @@ export class ScoringCompletionEmailService {
         challengeUrl,
         challengeURL: challengeUrl,
         scoringStatus: details.scoringStatus,
-        aggregateExampleScore: details.aggregateExampleScore,
         aggregateProvisionalScore: details.aggregateProvisionalScore,
       },
       sendgrid_template_id: sendgridTemplateId,
