@@ -339,6 +339,68 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('keeps completed scoring successful when all individual tests fail', async () => {
+    const { service, m2mService, prisma } = createService();
+    const payloadWithFailedSeed: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: -1,
+      metadata: {
+        numberOfTests: 2,
+        testScores: [
+          {
+            error: 'Timed out.',
+            score: -1,
+            testcase: '753388858',
+          },
+          {
+            error: 'Crashed.',
+            score: -1,
+            testcase: '753388859',
+          },
+        ],
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.processScoringResult(payloadWithFailedSeed),
+    ).resolves.toBe(undefined);
+
+    expect(createReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        aggregateScore: payloadWithFailedSeed.score,
+        isPassing: false,
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+          testProgressDetails: expect.objectContaining({
+            failedTests: 2,
+            status: ScoringTestStatus.Success,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('persists finite relative scores when the maximize best testcase score is zero', async () => {
     const { service, m2mService, prisma } = createService();
     const zeroScorePayload: ScoringResultCallbackPayload = {
@@ -1637,6 +1699,73 @@ describe('ScoringResultService', () => {
     );
 
     expect(result.payload.reviewedDate).toBe(reviewedDate);
+  });
+
+  it('keeps relative scoring status successful when all individual tests fail', () => {
+    const { service } = createService();
+    const buildRelativeReviewPayload = (
+      service as any
+    ).buildRelativeReviewPayload.bind(service) as (
+      reviewRecord: {
+        submissionId: string;
+        reviewObject: Record<string, unknown>;
+        metadata: Record<string, unknown>;
+        rawTestScores: Array<{
+          error?: string;
+          score: number;
+          testcase: string;
+        }>;
+      },
+      bestScores: Map<string, number>,
+      scoreDirection: ScoreDirection,
+      fallbackScorecardId: string | undefined,
+      testPhase: string,
+    ) => {
+      payload: {
+        aggregateScore: number;
+        metadata: {
+          testProgressDetails: {
+            failedTests: number;
+            status: ScoringTestStatus;
+          };
+          testStatus: ScoringTestStatus;
+        };
+      };
+    };
+
+    const result = buildRelativeReviewPayload(
+      {
+        submissionId: 'failed-testcase-submission',
+        reviewObject: {
+          id: 'review-summation-1',
+          isProvisional: true,
+        },
+        metadata: {
+          testScores: [
+            { error: 'Timed out.', score: -1, testcase: '1' },
+            { error: 'Crashed.', score: -1, testcase: '2' },
+          ],
+          testType: 'provisional',
+        },
+        rawTestScores: [
+          { error: 'Timed out.', score: -1, testcase: '1' },
+          { error: 'Crashed.', score: -1, testcase: '2' },
+        ],
+      },
+      new Map(),
+      ScoreDirection.MAXIMIZE,
+      undefined,
+      'provisional',
+    );
+
+    expect(result.payload.aggregateScore).toBe(-1);
+    expect(result.payload.metadata.testStatus).toBe(ScoringTestStatus.Success);
+    expect(result.payload.metadata.testProgressDetails).toEqual(
+      expect.objectContaining({
+        failedTests: 2,
+        status: ScoringTestStatus.Success,
+      }),
+    );
   });
 
   it('marks timed-out system tests as failed with timed_out metadata', async () => {

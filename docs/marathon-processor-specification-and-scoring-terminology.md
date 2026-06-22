@@ -315,6 +315,8 @@ For Provisional and System scoring, the runner posts progress updates while test
 | `testProgressDetails.failedTests`    | testcase count with errors                |
 | `testProgressDetails.message`        | latest runner progress or failure message |
 
+Completed scoring may report `testStatus = SUCCESS` with nonzero `testProgressDetails.failedTests` when individual testcases timed out or crashed. `FAILED` is reserved for explicit scorer or skipped-scoring failures.
+
 Operators can also inspect ECS runner logs. Runner log mappings are stored for each launched scoring task and can be exposed through:
 
 ```text
@@ -376,7 +378,7 @@ For each testcase:
 - the best raw score receives `100`
 - all other valid scores receive `(lower score / higher score) * 100`
 
-The final relative score is the average of those per-testcase relative scores. If every testcase fails, the aggregate score is `-1`.
+The final relative score is the average of those per-testcase relative scores. If every testcase fails, the aggregate score is `-1` while completed test status remains `SUCCESS`.
 
 ### Score direction
 
