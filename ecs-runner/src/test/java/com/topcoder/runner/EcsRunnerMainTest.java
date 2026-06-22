@@ -130,27 +130,7 @@ public class EcsRunnerMainTest {
     }
 
     @Test
-    public void buildMemberVisibleCompilationOutputShowsCompilerDiagnostics()
-        throws Exception {
-        Method method = EcsRunnerMain.class.getDeclaredMethod(
-            "buildMemberVisibleCompilationOutput",
-            String.class
-        );
-        method.setAccessible(true);
-
-        String output = (String) method.invoke(
-            null,
-            "$ javac Solution.java\nwarning: unchecked conversion\nExit code: 0\n"
-        );
-
-        assertTrue(output.startsWith("Compilation Output:\n"));
-        assertTrue(output.contains("$ javac Solution.java"));
-        assertTrue(output.contains("warning: unchecked conversion"));
-        assertTrue(output.endsWith("\n\n"));
-    }
-
-    @Test
-    public void writePreResultMemberOutputIncludesCompilationOutputOnFailure()
+    public void writePreResultMemberOutputLeavesCompilationInCompileLogOnFailure()
         throws Exception {
         Path artifactsDir = createArtifactsDir();
         Path outputPath = artifactsDir.resolve("public").resolve("output.txt");
@@ -165,22 +145,25 @@ public class EcsRunnerMainTest {
         Method method = EcsRunnerMain.class.getDeclaredMethod(
             "writePreResultMemberOutput",
             Path.class,
-            Path.class,
             Throwable.class
         );
         method.setAccessible(true);
         method.invoke(
             null,
             outputPath,
-            compileLogPath,
             new RuntimeException("C++ compilation failed.")
         );
 
         String output = new String(Files.readAllBytes(outputPath), StandardCharsets.UTF_8);
-        assertTrue(output.contains("Compilation Output:"));
-        assertTrue(output.contains("compile failed"));
+        String compileLog = new String(
+            Files.readAllBytes(compileLogPath),
+            StandardCharsets.UTF_8
+        );
+        assertFalse(output.contains("Compilation Output:"));
+        assertFalse(output.contains("compile failed"));
         assertTrue(output.contains("Runner Error:"));
         assertTrue(output.contains("C++ compilation failed."));
+        assertTrue(compileLog.contains("compile failed"));
     }
 
     @Test
