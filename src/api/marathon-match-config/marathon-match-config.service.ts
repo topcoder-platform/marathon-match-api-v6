@@ -25,6 +25,9 @@ import {
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
+  TestSubmissionResponseDto,
+  TestSubmissionStatusResponseDto,
+  TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import {
@@ -36,7 +39,11 @@ import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { ScoringResultService } from '../scoring-result/scoring-result.service';
+import {
+  ScoringResultService,
+  SkippedSystemScoreDispatchResult,
+  SystemScoreDispatchResult,
+} from '../scoring-result/scoring-result.service';
 
 type MarathonMatchConfigWithPhaseConfigs =
   Prisma.marathonMatchConfigGetPayload<{
@@ -63,6 +70,55 @@ type SystemReviewRerunCandidate = {
   reviewId: string;
   submissionId: string;
 };
+
+type RerunSubmissionDispatchCandidate = {
+  submissionId: string;
+  memberId?: string;
+  virusScan?: boolean;
+};
+
+type RerunScorerTaskDispatchCandidate = RerunSubmissionDispatchCandidate & {
+  scoringPhase: {
+    configType: PhaseConfigType;
+    startSeed: bigint;
+    numberOfTests: number;
+    scorecardId?: string | null;
+  };
+};
+
+type TestSubmissionRunRecord = {
+  id: string;
+  challengeId: string;
+  configType: PhaseConfigType;
+  memberId: string | null;
+  fileName: string;
+  mimeType: string | null;
+  fileSize: number;
+  fileContent?: Buffer | Uint8Array;
+  status: string;
+  score: number | null;
+  message: string | null;
+  metadata: Prisma.JsonValue | null;
+  currentReview: Prisma.JsonValue | null;
+  impactedReviews: Prisma.JsonValue | null;
+  progress: number | null;
+  completedTests: number | null;
+  totalTests: number | null;
+  failedTests: number | null;
+  taskArn: string | null;
+  taskId: string | null;
+  cloudWatchLogsConsoleUrl: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export interface TestSubmissionFileDownload {
+  content: Buffer;
+  contentLength: number;
+  fileName: string;
+  mimeType?: string;
+}
 
 interface ChallengePhaseResponse {
   id?: string;
@@ -513,7 +569,8 @@ export class MarathonMatchConfigService {
    * Uses the challenge's currently open phase config, validates active/open
    * challenge runtime state through challenge-api, reduces submission API
    * results to one latest submission per member, and launches ECS scorer tasks
-   * in bounded batches to avoid RunTask API throttling.
+   * for every phase config that matches the currently open phase in bounded
+   * batches to avoid RunTask API throttling.
    * @param challengeId Challenge ID from path params in POST /challenge/:challengeId/rerun.
    * @param user Authenticated user or machine token payload for audit-aware logging.
    * @returns Rerun dispatch summary mapped to `RerunResponseDto`.
@@ -793,18 +850,6 @@ export class MarathonMatchConfigService {
         const currentPhaseId = extractPhaseId(currentPhase);
         return currentPhaseId ? [currentPhaseId] : [];
       };
-      const findPhaseConfigForOpenPhase = (openPhaseIds: string[]) => {
-        for (const openPhaseId of openPhaseIds) {
-          const openPhaseConfig = config.phaseConfigs.find(
-            (phaseConfigData) => phaseConfigData.phaseId.trim() === openPhaseId,
-          );
-          if (openPhaseConfig) {
-            return openPhaseConfig;
-          }
-        }
-
-        return null;
-      };
       type RerunSubmissionCandidate = {
         submissionId: string;
         memberId: string;
@@ -812,6 +857,7 @@ export class MarathonMatchConfigService {
         receivedOrSubmittedDate: string;
         sortTimestamp: number;
         isLatest?: boolean;
+        virusScan?: boolean;
         sequence: number;
       };
       const normalizeSubmission = (
@@ -846,6 +892,7 @@ export class MarathonMatchConfigService {
           isLatest: Object.prototype.hasOwnProperty.call(submission, 'isLatest')
             ? asBoolean(submission.isLatest)
             : undefined,
+          virusScan: asBoolean(submission.virusScan),
           sequence,
         };
       };
@@ -895,8 +942,11 @@ export class MarathonMatchConfigService {
         );
       }
 
-      const openPhaseConfig = findPhaseConfigForOpenPhase(openPhaseIds);
-      if (!openPhaseConfig) {
+      const openPhaseConfigs = this.findPhaseConfigsForOpenPhases(
+        config.phaseConfigs,
+        openPhaseIds,
+      );
+      if (openPhaseConfigs.length === 0) {
         throw new BadRequestException(
           `Marathon match config ${challengeId} has no phase config for currently open challenge phase ${openPhaseIds.join(', ')}.`,
         );
@@ -980,6 +1030,7 @@ export class MarathonMatchConfigService {
           submissionId: submission.submissionId,
           memberId: submission.memberId,
           submittedDate: submission.submittedDate,
+          virusScan: submission.virusScan,
         }));
 
       if (submissions.length === 0) {
@@ -996,26 +1047,34 @@ export class MarathonMatchConfigService {
         };
       }
 
+      const dispatchCandidates: RerunScorerTaskDispatchCandidate[] =
+        openPhaseConfigs.flatMap((openPhaseConfig) =>
+          submissions.map((submission) => ({
+            ...submission,
+            scoringPhase: {
+              configType: openPhaseConfig.configType,
+              startSeed: openPhaseConfig.startSeed,
+              numberOfTests: openPhaseConfig.numberOfTests,
+              scorecardId: config.reviewScorecardId,
+            },
+          })),
+        );
       const launchResults = await this.launchScorerTasksWithRateLimit(
         challengeId,
-        submissions,
+        dispatchCandidates,
         {
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
         },
-        {
-          configType: openPhaseConfig.configType,
-          startSeed: openPhaseConfig.startSeed,
-          numberOfTests: openPhaseConfig.numberOfTests,
-        },
       );
 
-      const results: RerunResponseDto['results'] = submissions.map(
-        ({ submissionId }, index) => {
+      const results: RerunResponseDto['results'] = dispatchCandidates.map(
+        ({ submissionId, scoringPhase }, index) => {
           const launchResult = launchResults[index];
           if (launchResult.status === 'fulfilled') {
             return {
               submissionId,
+              configType: scoringPhase.configType,
               taskArn: launchResult.value.taskArn,
               taskId: launchResult.value.taskId,
             };
@@ -1024,6 +1083,7 @@ export class MarathonMatchConfigService {
           const reason = launchResult.reason;
           return {
             submissionId,
+            configType: scoringPhase.configType,
             error: reason instanceof Error ? reason.message : String(reason),
           };
         },
@@ -1034,6 +1094,10 @@ export class MarathonMatchConfigService {
         challengeId,
         actor: this.getActor(user),
         submissionsQueued: submissions.length,
+        phaseConfigsQueued: openPhaseConfigs.map(
+          (phaseConfigData) => phaseConfigData.configType,
+        ),
+        tasksQueued: dispatchCandidates.length,
         launchedCount: results.filter((result) => !!result.taskId).length,
         failedCount: results.filter((result) => !!result.error).length,
       });
@@ -1167,6 +1231,14 @@ export class MarathonMatchConfigService {
         ({ reviewId, submissionId }, index) => {
           const launchResult = launchResults[index];
           if (launchResult.status === 'fulfilled') {
+            if (this.isSkippedSystemScoreDispatchResult(launchResult.value)) {
+              return {
+                reviewId,
+                submissionId,
+                error: launchResult.value.reason,
+              };
+            }
+
             return {
               reviewId,
               submissionId,
@@ -1217,6 +1289,340 @@ export class MarathonMatchConfigService {
         details: errorResponse.details,
       });
     }
+  }
+
+  /**
+   * Creates an isolated validation run and queues one scorer ECS task.
+   * @param challengeId Challenge ID from POST /challenge/:challengeId/test-submission.
+   * @param body Multipart fields selecting the phase config and optional member/file overrides.
+   * @param file Uploaded submission archive captured by Nest memory storage.
+   * @param user Authenticated caller used as the fallback member id and audit context.
+   * @returns Validation run id and ECS task launch details.
+   * @throws NotFoundException When the Marathon Match config does not exist.
+   * @throws BadRequestException When file contents are missing, the tester is not compiled, or the phase config is missing.
+   * @throws InternalServerErrorException When ECS launch fails unexpectedly.
+   * Used by challenge managers and copilots to validate scorer behavior without creating Review API submissions or summations.
+   */
+  async uploadTestSubmission(
+    challengeId: string,
+    body: TestSubmissionUploadDto,
+    file: Express.Multer.File,
+    user: JwtUser,
+  ): Promise<TestSubmissionResponseDto> {
+    try {
+      const hasUploadedFile =
+        !!file &&
+        ((typeof file.size === 'number' && file.size > 0) ||
+          (file.buffer && file.buffer.length > 0));
+
+      if (!hasUploadedFile) {
+        throw new BadRequestException(
+          'File contents are required for validation submission upload.',
+        );
+      }
+
+      const config = await this.prisma.marathonMatchConfig.findUnique({
+        where: { challengeId },
+        include: {
+          phaseConfigs: true,
+          tester: true,
+        },
+      });
+
+      if (!config) {
+        throw new NotFoundException(
+          `Marathon match config with challenge ID ${challengeId} not found.`,
+        );
+      }
+
+      if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
+        const compilationError = config.tester.compilationError?.trim();
+        throw new BadRequestException(
+          `Tester ${config.testerId} for challenge ${challengeId} is not ready for validation scoring. Current compilation status: ${config.tester.compilationStatus}.${compilationError ? ` compilationError: ${compilationError}` : ''}`,
+        );
+      }
+
+      const configType = body.configType ?? PhaseConfigType.PROVISIONAL;
+      const phaseConfigData = config.phaseConfigs.find(
+        (phaseConfigEntry) => phaseConfigEntry.configType === configType,
+      );
+      if (!phaseConfigData) {
+        throw new BadRequestException(
+          `Marathon match config ${challengeId} requires a ${configType} phase config for validation submission scoring.`,
+        );
+      }
+
+      const memberId =
+        body.memberId?.trim() || this.asString(user.userId)?.trim();
+      if (!memberId) {
+        throw new BadRequestException(
+          'Member ID is required for validation submission upload.',
+        );
+      }
+
+      const resolvedFileName =
+        body.fileName?.trim() ||
+        file.originalname ||
+        file.filename ||
+        'submission.zip';
+      const testSubmissionId = nanoid(14);
+      const fileContent = new Uint8Array(file.buffer.byteLength);
+      fileContent.set(file.buffer);
+      const createdRun = await this.prisma.testSubmissionRun.create({
+        data: {
+          id: testSubmissionId,
+          challengeId,
+          configType: phaseConfigData.configType,
+          memberId,
+          fileName: resolvedFileName,
+          mimeType: file.mimetype || 'application/octet-stream',
+          fileSize:
+            typeof file.size === 'number' && file.size > 0
+              ? file.size
+              : file.buffer.length,
+          fileContent,
+          status: 'QUEUED',
+          createdBy: this.getActor(user),
+        },
+      });
+
+      let launchResult: MarathonMatchScorerTaskLaunchResult;
+      try {
+        launchResult = await this.ecsService.launchScorerTask(
+          challengeId,
+          testSubmissionId,
+          {
+            taskDefinitionName: config.taskDefinitionName,
+            taskDefinitionVersion: config.taskDefinitionVersion,
+          },
+          {
+            configType: phaseConfigData.configType,
+            startSeed: phaseConfigData.startSeed,
+            numberOfTests: phaseConfigData.numberOfTests,
+          },
+          undefined,
+          {
+            memberId,
+            stopSupersededMemberTasks: false,
+            validationRunId: testSubmissionId,
+            validationSubmissionDownloadUrl:
+              this.buildValidationSubmissionDownloadPath(
+                challengeId,
+                testSubmissionId,
+              ),
+          },
+        );
+      } catch (error) {
+        await this.prisma.testSubmissionRun.update({
+          where: { id: testSubmissionId },
+          data: {
+            status: 'FAILED',
+            message: error instanceof Error ? error.message : String(error),
+            completedAt: new Date(),
+          },
+        });
+        throw error;
+      }
+
+      const updatedRun = await this.prisma.testSubmissionRun.update({
+        where: { id: testSubmissionId },
+        data: {
+          taskArn: launchResult.taskArn,
+          taskId: launchResult.taskId,
+          cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+        },
+      });
+
+      this.logger.log({
+        message: 'Marathon Match validation submission queued for scoring.',
+        challengeId,
+        testSubmissionId,
+        memberId,
+        configType: phaseConfigData.configType,
+        taskId: launchResult.taskId,
+        actor: this.getActor(user),
+      });
+
+      return {
+        challengeId,
+        submissionId: createdRun.id,
+        testSubmissionId: createdRun.id,
+        configType: updatedRun.configType,
+        status: updatedRun.status,
+        taskArn: launchResult.taskArn,
+        taskId: launchResult.taskId,
+        cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      const errorResponse = this.prismaErrorService.handleError(
+        error,
+        `uploading marathon match validation submission with challenge ID: ${challengeId} for actor: ${this.getActor(user)}`,
+      );
+      this.logger.error(errorResponse.message);
+      throw new InternalServerErrorException({
+        message: errorResponse.message,
+        code: errorResponse.code,
+        details: errorResponse.details,
+      });
+    }
+  }
+
+  /**
+   * Returns the current status and final scorer details for an isolated
+   * validation run.
+   * @param challengeId Challenge that owns the validation run.
+   * @param testSubmissionId Validation run identifier returned by upload.
+   * @returns Current validation run status, task details, progress, and final score metadata.
+   * @throws NotFoundException When the run does not exist for the challenge.
+   * Used by the Work app after upload to poll until scoring is complete.
+   */
+  async getTestSubmissionStatus(
+    challengeId: string,
+    testSubmissionId: string,
+  ): Promise<TestSubmissionStatusResponseDto> {
+    const run = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: testSubmissionId,
+        challengeId,
+      },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Validation submission run ${testSubmissionId} not found for challenge ${challengeId}.`,
+      );
+    }
+
+    return this.mapTestSubmissionRunResponse(run);
+  }
+
+  /**
+   * Reads the uploaded ZIP for a validation run so the ECS runner can download it.
+   * @param challengeId Challenge that owns the validation run.
+   * @param testSubmissionId Validation run identifier passed to the runner.
+   * @returns File bytes and response headers for the uploaded test ZIP.
+   * @throws NotFoundException When the run does not exist for the challenge.
+   * Used by the ECS runner instead of Review API's submission download endpoint.
+   */
+  async getTestSubmissionFile(
+    challengeId: string,
+    testSubmissionId: string,
+  ): Promise<TestSubmissionFileDownload> {
+    const run = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: testSubmissionId,
+        challengeId,
+      },
+      select: {
+        fileContent: true,
+        fileName: true,
+        fileSize: true,
+        mimeType: true,
+      },
+    });
+
+    if (!run) {
+      throw new NotFoundException(
+        `Validation submission run ${testSubmissionId} not found for challenge ${challengeId}.`,
+      );
+    }
+
+    return {
+      content: Buffer.from(run.fileContent),
+      contentLength: run.fileSize,
+      fileName: run.fileName,
+      mimeType: run.mimeType || undefined,
+    };
+  }
+
+  /**
+   * Builds the marathon-match API path used by ECS runners to download isolated
+   * validation submissions.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID.
+   * @returns Absolute-path URL component for the protected download endpoint.
+   * Used by `uploadTestSubmission` when launching the ECS task.
+   */
+  private buildValidationSubmissionDownloadPath(
+    challengeId: string,
+    testSubmissionId: string,
+  ): string {
+    return `/challenge/${encodeURIComponent(challengeId)}/test-submission/${encodeURIComponent(testSubmissionId)}/download`;
+  }
+
+  /**
+   * Maps a persisted validation run into the API response DTO.
+   * @param run Validation run persistence record.
+   * @returns Status response consumed by Work app polling and result modal.
+   * Used by upload and status endpoints to keep response shape consistent.
+   */
+  private mapTestSubmissionRunResponse(
+    run: TestSubmissionRunRecord,
+  ): TestSubmissionStatusResponseDto {
+    return {
+      challengeId: run.challengeId,
+      cloudWatchLogsConsoleUrl: run.cloudWatchLogsConsoleUrl || undefined,
+      completedAt: run.completedAt?.toISOString(),
+      completedTests: run.completedTests ?? undefined,
+      configType: run.configType,
+      createdAt: run.createdAt.toISOString(),
+      currentReview: this.asJsonRecord(run.currentReview),
+      failedTests: run.failedTests ?? undefined,
+      fileName: run.fileName,
+      fileSize: run.fileSize,
+      impactedReviews: this.asJsonRecordArray(run.impactedReviews),
+      memberId: run.memberId || undefined,
+      message: run.message || undefined,
+      metadata: this.asJsonRecord(run.metadata),
+      progress: run.progress ?? undefined,
+      score: run.score ?? undefined,
+      status: run.status,
+      submissionId: run.id,
+      taskArn: run.taskArn || '',
+      taskId: run.taskId || '',
+      testSubmissionId: run.id,
+      totalTests: run.totalTests ?? undefined,
+      updatedAt: run.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Converts stored JSON objects into plain records for DTO responses.
+   * @param value Stored Prisma JSON value.
+   * @returns Record when the JSON value is an object; otherwise undefined.
+   * Used by `mapTestSubmissionRunResponse`.
+   */
+  private asJsonRecord(
+    value: Prisma.JsonValue | null,
+  ): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  /**
+   * Converts stored JSON arrays into record arrays for DTO responses.
+   * @param value Stored Prisma JSON value.
+   * @returns Array of object records when present; otherwise undefined.
+   * Used by `mapTestSubmissionRunResponse`.
+   */
+  private asJsonRecordArray(
+    value: Prisma.JsonValue | null,
+  ): Record<string, unknown>[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    return (value as unknown[]).filter(
+      (entry): entry is Record<string, unknown> =>
+        !!entry && typeof entry === 'object' && !Array.isArray(entry),
+    );
   }
 
   /**
@@ -1350,9 +1756,8 @@ export class MarathonMatchConfigService {
   private async triggerSystemReviewsWithRateLimit(
     challengeId: string,
     reviews: SystemReviewRerunCandidate[],
-  ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
-    const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
-      [];
+  ): Promise<PromiseSettledResult<SystemScoreDispatchResult>[]> {
+    const launchResults: PromiseSettledResult<SystemScoreDispatchResult>[] = [];
 
     for (
       let index = 0;
@@ -1387,25 +1792,120 @@ export class MarathonMatchConfigService {
   }
 
   /**
+   * Checks whether a SYSTEM dispatch result was skipped before ECS launch.
+   * @param result SYSTEM dispatch result returned by ScoringResultService.
+   * @returns True when the result represents a skipped scoring marker.
+   */
+  private isSkippedSystemScoreDispatchResult(
+    result: SystemScoreDispatchResult,
+  ): result is SkippedSystemScoreDispatchResult {
+    return 'skipped' in result && result.skipped === true;
+  }
+
+  /**
+   * Finds all marathon phase configs that should run for the ordered open
+   * challenge phases.
+   * @param phaseConfigs Stored phase configuration rows for the challenge.
+   * @param openPhaseIds Canonical open challenge phase IDs ordered by priority.
+   * @returns Matching phase configs in deterministic scorer launch order.
+   */
+  private findPhaseConfigsForOpenPhases(
+    phaseConfigs: phaseConfig[],
+    openPhaseIds: string[],
+  ): phaseConfig[] {
+    const matchingPhaseConfigs: phaseConfig[] = [];
+    const seenPhaseConfigIds = new Set<string>();
+
+    for (const openPhaseId of openPhaseIds) {
+      const normalizedOpenPhaseId = openPhaseId.trim();
+      if (!normalizedOpenPhaseId) {
+        continue;
+      }
+
+      const phaseConfigsForOpenPhase = phaseConfigs
+        .filter(
+          (phaseConfigData) =>
+            phaseConfigData.phaseId.trim() === normalizedOpenPhaseId,
+        )
+        .sort((left, right) =>
+          this.comparePhaseConfigLaunchPriority(
+            left.configType,
+            right.configType,
+          ),
+        );
+
+      for (const phaseConfigData of phaseConfigsForOpenPhase) {
+        if (seenPhaseConfigIds.has(phaseConfigData.id)) {
+          continue;
+        }
+
+        seenPhaseConfigIds.add(phaseConfigData.id);
+        matchingPhaseConfigs.push(phaseConfigData);
+      }
+    }
+
+    return matchingPhaseConfigs;
+  }
+
+  /**
+   * Orders scorer phase configs when multiple configs share one open phase.
+   * @param leftConfigType Left phase config type.
+   * @param rightConfigType Right phase config type.
+   * @returns Sort value that launches Example before Provisional before System.
+   */
+  private comparePhaseConfigLaunchPriority(
+    leftConfigType: string,
+    rightConfigType: string,
+  ): number {
+    const leftValue = leftConfigType;
+    const rightValue = rightConfigType;
+    const leftPriority = this.resolvePhaseConfigLaunchPriority(leftValue);
+    const rightPriority = this.resolvePhaseConfigLaunchPriority(rightValue);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return leftValue.trim().localeCompare(rightValue.trim(), 'en', {
+      sensitivity: 'base',
+    });
+  }
+
+  /**
+   * Maps a phase config type to a stable scorer launch priority.
+   * @param configType Phase config type from the stored config.
+   * @returns Numeric priority where lower values launch first.
+   */
+  private resolvePhaseConfigLaunchPriority(configType: string): number {
+    const normalizedConfigType = configType.trim().toUpperCase();
+    if (normalizedConfigType === PhaseConfigType.EXAMPLE) {
+      return 0;
+    }
+
+    if (normalizedConfigType === PhaseConfigType.PROVISIONAL) {
+      return 1;
+    }
+
+    if (normalizedConfigType === PhaseConfigType.SYSTEM) {
+      return 2;
+    }
+
+    return 99;
+  }
+
+  /**
    * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
    * @param challengeId Challenge ID passed to each scorer task.
-   * @param submissions Latest submissions to rerun, in response order.
+   * @param dispatchCandidates Submission and phase-config scorer launches in response order.
    * @param mmConfig Task definition name and version from the marathon match config.
-   * @param scoringPhase PROVISIONAL phase settings passed to scorer tasks.
-   * @returns Settled launch results in the same order as `submissions`.
+   * @returns Settled launch results in the same order as `dispatchCandidates`.
    * @throws Does not throw for individual scorer launch failures; those are returned as rejected settled results.
    */
   private async launchScorerTasksWithRateLimit(
     challengeId: string,
-    submissions: { submissionId: string; memberId?: string }[],
+    dispatchCandidates: RerunScorerTaskDispatchCandidate[],
     mmConfig: {
       taskDefinitionName: string;
       taskDefinitionVersion: string;
-    },
-    scoringPhase: {
-      configType: PhaseConfigType;
-      startSeed: bigint;
-      numberOfTests: number;
     },
   ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
     const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
@@ -1413,23 +1913,40 @@ export class MarathonMatchConfigService {
 
     for (
       let index = 0;
-      index < submissions.length;
+      index < dispatchCandidates.length;
       index += MarathonMatchConfigService.scorerLaunchBatchSize
     ) {
-      const batch = submissions.slice(
+      const batch = dispatchCandidates.slice(
         index,
         index + MarathonMatchConfigService.scorerLaunchBatchSize,
       );
       const batchResults = await Promise.allSettled(
-        batch.map(({ submissionId, memberId }) =>
-          this.ecsService.launchScorerTask(
-            challengeId,
-            submissionId,
-            mmConfig,
-            scoringPhase,
-            undefined,
-            { memberId },
-          ),
+        batch.map(
+          async ({ submissionId, memberId, virusScan, scoringPhase }) => {
+            if (virusScan !== true) {
+              const reason = `Marathon Match ${scoringPhase.configType} scoring skipped because the submission has not passed virus scanning.`;
+              await this.scoringResultService.markSubmissionScoringSkipped({
+                challengeId,
+                details: {
+                  virusScan: virusScan ?? null,
+                },
+                reason,
+                scorecardId: scoringPhase.scorecardId ?? undefined,
+                submissionId,
+                testPhase: scoringPhase.configType,
+              });
+              throw new Error(reason);
+            }
+
+            return this.ecsService.launchScorerTask(
+              challengeId,
+              submissionId,
+              mmConfig,
+              scoringPhase,
+              undefined,
+              { memberId },
+            );
+          },
         ),
       );
 
@@ -1437,7 +1954,7 @@ export class MarathonMatchConfigService {
 
       if (
         index + MarathonMatchConfigService.scorerLaunchBatchSize <
-        submissions.length
+        dispatchCandidates.length
       ) {
         await this.delay(MarathonMatchConfigService.scorerLaunchBatchDelayMs);
       }

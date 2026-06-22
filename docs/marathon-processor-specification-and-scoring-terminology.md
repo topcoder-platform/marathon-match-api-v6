@@ -26,19 +26,19 @@ Supported source extensions are:
 
 | Extension   | Language / runtime                                                           |
 | ----------- | ---------------------------------------------------------------------------- |
-| `.cpp`      | C++                                                                          |
-| `.java`     | Java                                                                         |
+| `.cpp`      | C++23 / GNU++23 using G++ 14.2.0                                             |
+| `.java`     | Java 11 using Temurin OpenJDK 11.0.31+11 and `javac --release 11`            |
 | `.py`       | Python 3.12                                                                  |
 | `.cs`       | C# using Mono                                                                |
 | `.cs_net10` | C# using .NET 10 / C# 14                                                     |
 | `.cs_net7`  | C# using .NET 7 / C# 11                                                      |
-| `.rs`       | Rust latest stable                                                           |
+| `.rs`       | Rust 2024 edition using `rustc 1.96.0` stable as last verified               |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
 ### C++
 
-C++ submissions are compiled with `g++` using GNU++23 and a fixed
+C++ submissions are compiled with G++ 14.2.0 using GNU++23 and a fixed
 `x86-64` architecture target with generic tuning. The runner does not use
 `-march=native`, so binaries do not depend on the specific Fargate host that
 compiled the submission.
@@ -50,7 +50,8 @@ g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic Solution.cpp -o Solution
 
 ### Java
 
-Java submissions are compiled and executed with:
+Java submissions are compiled with Temurin OpenJDK `javac 11.0.31` and
+executed on the Java 11 runtime:
 
 ```bash
 javac --release 11 Solution.java
@@ -74,14 +75,16 @@ python3 Solution.py
 
 ### Rust
 
-Rust submissions use the `.rs` extension and are compiled as a single source file with the latest stable Rust compiler:
+Rust submissions use the `.rs` extension and are compiled as a single source
+file with `rustc 1.96.0` stable as last verified:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution
-./Solution
+RUST_BACKTRACE=1 ./Solution
 ```
 
 The ECS runner installs Rust through `rustup` with `RUSTUP_TOOLCHAIN=stable`, so the exact compiler patch version advances when the runner image is rebuilt. As of the verification date above, the stable channel resolves to `rustc 1.96.0`.
+Rust submissions are executed with `RUST_BACKTRACE=1` inside the ECS runner so panic diagnostics include a backtrace in captured stderr.
 
 ### C# with Mono
 
@@ -108,7 +111,7 @@ Compile and test timeouts are configured per Marathon Match challenge.
 - `compileTimeout` controls submission compilation timeout.
 - For Java submissions, `compileTimeout` also covers class startup and static
   initializer checks performed after `javac`.
-- `testTimeout` controls per-seed tester execution timeout.
+- `testTimeout` controls the per-seed measured submitted-solution execution timeout. Runner setup, initial tester input writes, and artifact IO before the tester starts its timed section are outside this limit; a timed-out seed reports the configured limit as its runtime.
 - `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 - `POST /v6/marathon-match/challenge/:challengeId/rerun/system` restarts existing non-cancelled SYSTEM reviews with the current `testTimeout`, `systemTestTimeout`, SYSTEM seed, and SYSTEM test count settings.
 
@@ -240,10 +243,10 @@ For Rust submissions, compile first and pass the compiled binary:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution
-java -jar Tester.jar -exec "./Solution" -seed 1
+java -jar Tester.jar -exec "env RUST_BACKTRACE=1 ./Solution" -seed 1
 ```
 
-Members may print debug information to standard error. The tester captures solution output and error text and the processor includes relevant output in the scoring artifacts.
+Members may print debug information to standard error. The tester captures solution output and error text. Internal artifacts include `compile_log.txt`, `execution-{submissionId}.log`, optional `error-{submissionId}.log`, and per-seed `stdout/{seed}.txt` and `stderr/{seed}.txt` files for operator diagnostics, while member-visible EXAMPLE artifacts expose only the approved output summary for the scoring phase, including each seed and the score received for that seed.
 
 ## Download and Access Submissions
 
@@ -278,10 +281,11 @@ Example and Provisional scoring can both be mapped to the same open Submission p
 
 System scoring is dispatched during Review for the pending review and uses the configured System seed range.
 
-For each executed test, the generic runner records member-visible results with
-1-based testcase ordinals rather than configured seed values:
+For each executed EXAMPLE test, the generic runner records member-visible
+results with 1-based testcase ordinals and the actual configured seed values:
 
 - testcase ordinal
+- actual seed value
 - raw tester score
 - run time in milliseconds
 - tester or solution error text
@@ -311,6 +315,8 @@ For Provisional and System scoring, the runner posts progress updates while test
 | `testProgressDetails.failedTests`    | testcase count with errors                |
 | `testProgressDetails.message`        | latest runner progress or failure message |
 
+Completed scoring may report `testStatus = SUCCESS` with nonzero `testProgressDetails.failedTests` when individual testcases timed out or crashed. `FAILED` is reserved for explicit scorer or skipped-scoring failures.
+
 Operators can also inspect ECS runner logs. Runner log mappings are stored for each launched scoring task and can be exposed through:
 
 ```text
@@ -331,7 +337,6 @@ Both email payloads include:
 
 The Example/Provisional completion payload also includes:
 
-- aggregate example score after relative scoring updates
 - aggregate provisional score after relative scoring updates
 
 The System completion payload also includes:
@@ -372,7 +377,7 @@ For each testcase:
 - the best raw score receives `100`
 - all other valid scores receive `(lower score / higher score) * 100`
 
-The final relative score is the average of those per-testcase relative scores. If every testcase fails, the aggregate score is `-1`.
+The final relative score is the average of those per-testcase relative scores. If every testcase fails, the aggregate score is `-1` while completed test status remains `SUCCESS`.
 
 ### Score direction
 

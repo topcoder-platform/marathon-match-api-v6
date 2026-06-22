@@ -112,7 +112,7 @@ The POST request validates the challenge ID against challenge-api and validates 
 | `relativeScoringEnabled` | boolean | Enables relative-score normalization |
 | `scoreDirection` | string | `MAXIMIZE` or `MINIMIZE` |
 | `reviewScorecardId` | string | Review API scorecard used for summations. Must resolve via review-api using either the canonical scorecard id or a legacy scorecard id. |
-| `testTimeout` | number | Per-seed tester execution timeout in milliseconds |
+| `testTimeout` | number | Per-seed measured submitted-solution execution timeout in milliseconds. Tester setup, initial input writes, artifact IO, and other runner work before the tester starts its timed section are not charged to this limit. |
 | `compileTimeout` | number | Submission compile timeout in milliseconds |
 | `systemTestTimeout` | number | Total SYSTEM scoring timeout in milliseconds. Defaults to 24 hours (`86400000`) when omitted; if the timeout fires while the ECS task is still active and the SYSTEM summation is incomplete, the API stops the task and writes a failed summation with `metadata.timed_out = true`. |
 | `taskDefinitionName` | string | ECS task definition family |
@@ -158,9 +158,9 @@ To switch an active challenge to a newer tester:
 1. Publish the new tester version with `PUT /v6/marathon-match/testers/:id`
 2. Wait for `GET /v6/marathon-match/testers/:newTesterId` to return `compilationStatus = SUCCESS`
 3. Update the challenge config with `PUT /v6/marathon-match/challenge/:challengeId` and the new `testerId`
-4. Trigger a rescore of current competitors with `POST /v6/marathon-match/challenge/:challengeId/rerun`
+4. The update automatically reruns the latest submission from each submitter when the config is active. You can also trigger the same rescore manually with `POST /v6/marathon-match/challenge/:challengeId/rerun`.
 
-The standard rerun endpoint selects `isLatest` submissions for the challenge in received order and launches ECS scorer tasks for them in parallel using the scorer config for the currently open challenge phase. This does not happen automatically when `testerId` changes, so the rerun call is the operational step that recalculates Submission/Provisional scores.
+The standard rerun endpoint selects `isLatest` submissions for the challenge in received order and launches ECS scorer tasks for every scorer config that matches the currently open challenge phase. During Submission, this normally reruns both `EXAMPLE` and `PROVISIONAL` scoring when both configs are mapped to the Submission phase, so the latest displayed scores are recalculated with the current tester.
 
 To restart Review/System tests, call:
 

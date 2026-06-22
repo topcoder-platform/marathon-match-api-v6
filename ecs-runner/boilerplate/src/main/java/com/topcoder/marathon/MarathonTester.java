@@ -35,6 +35,7 @@ public abstract class MarathonTester {
     private final List<BufferedWriter> solInputWriters = new ArrayList<BufferedWriter>();
     private static final int maxSolutionOutputLength = 10_000_000;
     private static final long processDrainTimeoutMillis = 250;
+    private static final long processTimeoutDestroyMillis = 250;
     private static final long errorReaderDrainTimeoutMillis = 250;
     private BufferedWriter solOutputWriter;
     private BufferedWriter solErrorWriter;
@@ -100,38 +101,37 @@ public abstract class MarathonTester {
         return timeout;
     }
 
+    /**
+     * Starts measuring submitted-solution execution time.
+     *
+     * <p>Process startup, tester setup, and initial input writes that happen
+     * before this call are intentionally outside the configured timeout. The
+     * timeout watcher uses the same monotonic start instant as the elapsed-time
+     * counter so it cannot consume part of the submitted solution's configured
+     * runtime before measurement begins.
+     */
     protected final void startTime() {
         synchronized (timeLock) {
             if (lastStart != 0) {
                 System.out.println("ERROR startTime() was called again, before endTime() closed the first one.");
                 System.exit(-1);
             }
+            lastStart = System.nanoTime();
             if (timeLimit > 0) {
+                final long timeoutDeadline = lastStart + Math.max(1L, timeLimit - elapsedTime);
                 lastTimeoutThread = new Thread() {
                     public void run() {
-                        try {
-                            boolean finished = process.waitFor(timeLimit - elapsedTime, TimeUnit.NANOSECONDS);
-                            if (!finished) {
-                                synchronized (timeLock) {
-                                    if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
-                                    lastStart = 0;
-                                    if (process != null) process.destroyForcibly();
-                                    if (!timeout) {
-                                        timeout = true;
-                                        timeout();
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                        }
+                        waitForTimeoutDeadline(timeoutDeadline);
                     }
                 };
                 lastTimeoutThread.start();
             }
-            lastStart = System.nanoTime();
         }
     }
 
+    /**
+     * Stops measuring submitted-solution execution time.
+     */
     protected final void stopTime() {
         synchronized (timeLock) {
             if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
@@ -154,12 +154,7 @@ public abstract class MarathonTester {
             score = getErrorScore();
             score = run();
             if (timeLimit > 0 && elapsedTime > timeLimit) {
-                synchronized (timeLock) {
-                    if (!timeout) {
-                        timeout = true;
-                        timeout();
-                    }
-                }
+                if (recordTimeout(false)) timeout();
             }
             end();
         } catch (Exception e) {
@@ -184,6 +179,118 @@ public abstract class MarathonTester {
             score = getErrorScore();
         }
         return score;
+    }
+
+    /**
+     * Waits for the submitted process to exit or for the measured timeout
+     * deadline to pass.
+     *
+     * @param timeoutDeadline Monotonic {@link System#nanoTime()} deadline for
+     *                        the current measured execution interval.
+     */
+    private void waitForTimeoutDeadline(long timeoutDeadline) {
+        Process watchedProcess = process;
+        if (watchedProcess == null) return;
+
+        try {
+            while (true) {
+                long remainingTime = timeoutDeadline - System.nanoTime();
+                if (remainingTime <= 0) break;
+                if (watchedProcess.waitFor(remainingTime, TimeUnit.NANOSECONDS)) return;
+            }
+
+            if (recordTimeout(true)) {
+                terminateTimedOutProcess();
+                timeout();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+        }
+    }
+
+    /**
+     * Records that the configured measured execution timeout was reached.
+     *
+     * @param requireActiveInterval True when timeout should only be recorded if
+     *                              {@link #startTime()} is still active.
+     * @return True when this call transitioned the tester into timeout state.
+     */
+    private boolean recordTimeout(boolean requireActiveInterval) {
+        synchronized (timeLock) {
+            if (timeout || (requireActiveInterval && lastStart == 0)) return false;
+            if (timeLimit > 0) elapsedTime = timeLimit;
+            lastStart = 0;
+            timeout = true;
+            return true;
+        }
+    }
+
+    /**
+     * Terminates the submitted solution process after its measured execution
+     * time expires and closes runner-side streams so blocked tester reads unwind.
+     *
+     * <p>The ECS scorer command is wrapped by a small native supervisor. A
+     * graceful destroy gives that wrapper a catchable signal it can relay to the
+     * low-privilege scorer process group before this method escalates to a hard
+     * process kill.
+     */
+    private void terminateTimedOutProcess() {
+        Process processToStop = process;
+        if (processToStop != null) {
+            processToStop.destroy();
+            try {
+                if (!processToStop.waitFor(processTimeoutDestroyMillis, TimeUnit.MILLISECONDS)) {
+                    processToStop.destroyForcibly();
+                    processToStop.waitFor(processDrainTimeoutMillis, TimeUnit.MILLISECONDS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                processToStop.destroyForcibly();
+            } catch (Exception e) {
+                processToStop.destroyForcibly();
+            }
+        }
+
+        closeSolutionStreamsAfterTimeout();
+    }
+
+    /**
+     * Closes solution pipes after timeout termination.
+     *
+     * <p>Some failed process-tree terminations can leave descendant processes
+     * holding the stdout pipe open. Closing the Java-side reader prevents
+     * {@link #readLine()} from blocking forever after the timeout has already
+     * been recorded.
+     */
+    private void closeSolutionStreamsAfterTimeout() {
+        for (BufferedWriter out : solInputWriters) {
+            try {
+                out.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solOutputReader != null) {
+            try {
+                solOutputReader.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solOutputWriter != null) {
+            try {
+                solOutputWriter.close();
+            } catch (Exception e) {
+            }
+        }
+        if (solErrorReader != null) {
+            solErrorReader.closeAndWait(errorReaderDrainTimeoutMillis);
+            solutionError = solErrorReader.getOutput();
+        } else if (solErrorWriter != null) {
+            try {
+                solErrorWriter.close();
+            } catch (Exception e) {
+            }
+        }
     }
 
     protected final void writeLine(int v) throws Exception {

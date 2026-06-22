@@ -668,6 +668,13 @@ export class RerunResponseDto {
           description: 'Submission identifier that was selected for rerun',
           example: '7f6d7b6c-4b8a-4e1d-b5cf-1a2b3c4d5e6f',
         },
+        configType: {
+          type: 'string',
+          enum: Object.values(PhaseConfigType),
+          description:
+            'Phase config used for this scorer launch. Multiple rows can exist for one submission when Example and Provisional share the open Submission phase.',
+          example: PhaseConfigType.PROVISIONAL,
+        },
         taskArn: {
           type: 'string',
           description: 'AWS ECS task ARN when the scorer task launch succeeded',
@@ -694,6 +701,7 @@ export class RerunResponseDto {
   })
   results: Array<{
     submissionId: string;
+    configType: PhaseConfigType;
     taskArn?: string;
     taskId?: string;
     error?: string;
@@ -767,6 +775,215 @@ export class SystemRerunResponseDto {
     taskId?: string;
     error?: string;
   }>;
+}
+
+/**
+ * Multipart form fields for uploading a Marathon Match scorer validation submission.
+ * Used by POST /challenge/:challengeId/test-submission alongside the uploaded ZIP file.
+ */
+export class TestSubmissionUploadDto {
+  @ApiProperty({
+    description:
+      'Saved phase configuration to use when scoring the validation submission. Defaults to PROVISIONAL.',
+    required: false,
+    enum: PhaseConfigType,
+    default: PhaseConfigType.PROVISIONAL,
+    example: PhaseConfigType.PROVISIONAL,
+  })
+  @IsOptional()
+  @IsEnum(PhaseConfigType)
+  configType?: PhaseConfigType;
+
+  @ApiProperty({
+    description:
+      'Optional member ID to attach to the validation submission. Defaults to the authenticated user id.',
+    required: false,
+    example: '40166514',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  memberId?: string;
+
+  @ApiProperty({
+    description:
+      'Optional filename override forwarded to the submission validation upload endpoint.',
+    required: false,
+    example: 'sample-solution.zip',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  fileName?: string;
+}
+
+/**
+ * Response payload returned after an isolated validation run has been created
+ * and queued for ECS scorer execution.
+ */
+export class TestSubmissionResponseDto {
+  @ApiProperty({
+    description: 'Challenge ID for the validation scoring request',
+    example: '30000123',
+  })
+  challengeId: string;
+
+  @ApiProperty({
+    description:
+      'Validation run ID used by the scorer. This is not a Review API submission.',
+    example: 'valRun12345678',
+  })
+  submissionId: string;
+
+  @ApiProperty({
+    description:
+      'Validation run ID used for status polling and scorer callbacks.',
+    example: 'valRun12345678',
+  })
+  testSubmissionId: string;
+
+  @ApiProperty({
+    description: 'Phase configuration used for validation scoring',
+    enum: PhaseConfigType,
+    example: PhaseConfigType.PROVISIONAL,
+  })
+  configType: PhaseConfigType;
+
+  @ApiProperty({
+    description: 'Current validation run status',
+    example: 'QUEUED',
+  })
+  status: string;
+
+  @ApiProperty({
+    description: 'AWS ECS task ARN when scorer launch succeeded',
+    example: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/0123456789abcdef',
+  })
+  taskArn: string;
+
+  @ApiProperty({
+    description: 'Short AWS ECS task ID when scorer launch succeeded',
+    example: '0123456789abcdef',
+  })
+  taskId: string;
+
+  @ApiProperty({
+    description: 'CloudWatch logs console URL when available',
+    required: false,
+  })
+  cloudWatchLogsConsoleUrl?: string;
+}
+
+/**
+ * Current status and final details for an isolated validation submission run.
+ */
+export class TestSubmissionStatusResponseDto extends TestSubmissionResponseDto {
+  @ApiProperty({
+    description: 'Original uploaded file name',
+    example: 'sample-solution.zip',
+  })
+  fileName: string;
+
+  @ApiProperty({
+    description: 'Uploaded file size in bytes',
+    example: 2048,
+  })
+  fileSize: number;
+
+  @ApiProperty({
+    description: 'Member ID used as runner metadata, when supplied',
+    required: false,
+    example: '40166514',
+  })
+  memberId?: string;
+
+  @ApiProperty({
+    description: 'Final aggregate score once scoring completes',
+    required: false,
+    example: 97.25,
+  })
+  score?: number;
+
+  @ApiProperty({
+    description: 'Current runner progress from 0 to 1',
+    required: false,
+    example: 0.45,
+  })
+  progress?: number;
+
+  @ApiProperty({
+    description: 'Completed testcase count reported by the runner',
+    required: false,
+    example: 9,
+  })
+  completedTests?: number;
+
+  @ApiProperty({
+    description: 'Total testcase count reported by the runner',
+    required: false,
+    example: 20,
+  })
+  totalTests?: number;
+
+  @ApiProperty({
+    description: 'Failed testcase count reported by the runner',
+    required: false,
+    example: 1,
+  })
+  failedTests?: number;
+
+  @ApiProperty({
+    description: 'Latest runner status or failure message',
+    required: false,
+    example: 'Completed test 9 of 20',
+  })
+  message?: string;
+
+  @ApiProperty({
+    description: 'Final scorer metadata returned by the runner',
+    required: false,
+    type: Object,
+    additionalProperties: true,
+  })
+  metadata?: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Current review object returned by custom scorer logic',
+    required: false,
+    type: Object,
+    additionalProperties: true,
+  })
+  currentReview?: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Impacted review objects returned by custom scorer logic',
+    required: false,
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: true,
+    },
+  })
+  impactedReviews?: Record<string, unknown>[];
+
+  @ApiProperty({
+    description: 'Validation run creation timestamp',
+    example: '2026-06-17T02:15:00.000Z',
+  })
+  createdAt: string;
+
+  @ApiProperty({
+    description: 'Validation run last update timestamp',
+    example: '2026-06-17T02:16:00.000Z',
+  })
+  updatedAt: string;
+
+  @ApiProperty({
+    description: 'Validation run completion timestamp',
+    required: false,
+    example: '2026-06-17T02:17:00.000Z',
+  })
+  completedAt?: string;
 }
 
 /**

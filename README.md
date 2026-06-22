@@ -15,6 +15,7 @@ Swagger UI:
 ## Documentation
 
 - [Marathon Match Setup](docs/marathon-match-setup.md) - for challenge administrators
+- [ECS Runner Lifetime](ECS_RUNNER_LIFETIME.md) - how scorer tasks are launched, monitored, and stopped
 - [Submission Phase Scoring](docs/submission-phase-scoring.md) - for DevOps
 - [Review Phase Scoring](docs/review-phase-scoring.md) - for DevOps
 - [Full Marathon Match Test Script](docs/full-marathon-match-test.md) - for end-to-end smoke tests with production baseline fixtures
@@ -156,7 +157,8 @@ The ECS task still needs trusted outbound access to fetch challenge config, down
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
 - Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept runner-owned mode `0400`, so submitted code cannot read or modify them from `/tmp`.
-- Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
+- Standard generic-runner seed execution asks `mm-scorer-isolate` to reset scorer-owned writable state before and after each test case. The cleanup helper only scans fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and only removes entries owned by the scorer UID.
+- Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads, `/proc/self/maps` for glibc/Mono stack introspection, and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
 - Native wrappers block `io_uring` and creation of non-`AF_UNIX` sockets for submitted solution processes and their fork/exec children, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.
 
@@ -236,7 +238,7 @@ Auth model in code:
 | `POST` | `/v6/marathon-match/internal/system-score`     | `administrator` OR `update:marathon-match` |
 
 `POST /v6/marathon-match/internal/scoring-results` rejects callbacks whose `challengeId` does not map to an existing Marathon Match config.
-`POST /v6/marathon-match/internal/scoring-progress` stores runner progress in review summation metadata as `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`).
+`POST /v6/marathon-match/internal/scoring-progress` stores runner progress in review summation metadata as `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). Completed scoring can still report `SUCCESS` when individual testcases timed out or crashed; those counts stay in `testProgressDetails.failedTests`.
 
 ## How to set up a challenge for marathon match scoring
 

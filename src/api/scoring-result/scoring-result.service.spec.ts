@@ -51,16 +51,26 @@ describe('ScoringResultService', () => {
       getM2MToken: jest.fn(),
     };
     const prisma: {
+      $executeRaw: jest.Mock;
       $queryRaw: jest.Mock;
       $transaction: jest.Mock;
       marathonMatchConfig: {
         findUnique: jest.Mock;
       };
+      testSubmissionRun: {
+        findFirst: jest.Mock;
+        update: jest.Mock;
+      };
     } = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(),
       marathonMatchConfig: {
         findUnique: jest.fn(),
+      },
+      testSubmissionRun: {
+        findFirst: jest.fn(),
+        update: jest.fn(),
       },
     };
     prisma.$transaction.mockImplementation(
@@ -143,6 +153,93 @@ describe('ScoringResultService', () => {
       },
     });
     expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+  });
+
+  it('stores validation scorer callbacks without writing review summations', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'validation-run-1',
+    });
+
+    await expect(
+      service.processScoringResult({
+        ...basePayload,
+        metadata: {
+          numberOfTests: 2,
+          testScores: [
+            {
+              score: 88,
+              testcase: '1',
+            },
+          ],
+        },
+        validationRunId: 'validation-run-1',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'validation-run-1' },
+      data: expect.objectContaining({
+        status: ScoringTestStatus.Success,
+        score: 88,
+        progress: 1,
+        completedTests: 1,
+        totalTests: 2,
+        failedTests: 0,
+        completedAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it('stores validation scorer progress without writing review summations', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'validation-run-1',
+    });
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 1,
+        failedTests: 0,
+        progress: 0.5,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.InProgress,
+        submissionId: 'validation-run-1',
+        testPhase: 'provisional',
+        totalTests: 2,
+        validationRunId: 'validation-run-1',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(m2mService.getM2MToken).not.toHaveBeenCalled();
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'validation-run-1' },
+      data: expect.objectContaining({
+        status: ScoringTestStatus.InProgress,
+        progress: 0.5,
+        completedTests: 1,
+        totalTests: 2,
+        failedTests: 0,
+      }),
+    });
   });
 
   it('accepts scorer callbacks for configured challenges and persists the review summation', async () => {
@@ -239,6 +336,68 @@ describe('ScoringResultService', () => {
         scorecardId: undefined,
         submissionId: payloadWithSeedMetadata.submissionId,
       },
+    );
+  });
+
+  it('keeps completed scoring successful when all individual tests fail', async () => {
+    const { service, m2mService, prisma } = createService();
+    const payloadWithFailedSeed: ScoringResultCallbackPayload = {
+      ...basePayload,
+      score: -1,
+      metadata: {
+        numberOfTests: 2,
+        testScores: [
+          {
+            error: 'Timed out.',
+            score: -1,
+            testcase: '753388858',
+          },
+          {
+            error: 'Crashed.',
+            score: -1,
+            testcase: '753388859',
+          },
+        ],
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.processScoringResult(payloadWithFailedSeed),
+    ).resolves.toBe(undefined);
+
+    expect(createReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        aggregateScore: payloadWithFailedSeed.score,
+        isPassing: false,
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+          testProgressDetails: expect.objectContaining({
+            failedTests: 2,
+            status: ScoringTestStatus.Success,
+          }),
+        }),
+      }),
     );
   });
 
@@ -441,12 +600,12 @@ describe('ScoringResultService', () => {
     ]);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(prisma.$queryRaw.mock.calls[0][1]).toBe(
-      prisma.$queryRaw.mock.calls[1][1],
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.$executeRaw.mock.calls[0][1]).toBe(
+      prisma.$executeRaw.mock.calls[1][1],
     );
-    expect(prisma.$queryRaw.mock.calls[0][2]).toBe(
-      prisma.$queryRaw.mock.calls[1][2],
+    expect(prisma.$executeRaw.mock.calls[0][2]).toBe(
+      prisma.$executeRaw.mock.calls[1][2],
     );
     expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(2);
     expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(3);
@@ -630,7 +789,6 @@ describe('ScoringResultService', () => {
     expect(
       scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
     ).toHaveBeenCalledWith('m2m-token', {
-      aggregateExampleScore: 96,
       aggregateProvisionalScore: 88,
       challengeId: basePayload.challengeId,
       challengeName: 'Marathon Match 2026 Beta Test',
@@ -811,7 +969,6 @@ describe('ScoringResultService', () => {
     ).toHaveBeenCalledWith(
       'm2m-token',
       expect.objectContaining({
-        aggregateExampleScore: 96,
         aggregateProvisionalScore: -1,
         scoringStatus: 'fail',
       }),
@@ -1092,7 +1249,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('does not persist system summation when completing the review fails', async () => {
+  it('persists system summation before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1154,12 +1311,26 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(findExistingReviewSummationsSpy).not.toHaveBeenCalled();
-    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(findExistingReviewSummationsSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      systemPayload.submissionId,
+      'system',
+    );
+    expect(createReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        submissionId: systemPayload.submissionId,
+      }),
+    );
     expect(updateReviewSummationSpy).not.toHaveBeenCalled();
+    expect(createReviewSummationSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      httpService.patch.mock.invocationCallOrder[0],
+    );
   });
 
-  it('does not persist currentReview summation when completing the review fails', async () => {
+  it('persists currentReview summation before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1218,10 +1389,21 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(upsertFromLegacyReviewPayloadSpy).not.toHaveBeenCalled();
+    expect(upsertFromLegacyReviewPayloadSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      expect.objectContaining({
+        fallbackScore: 100,
+        fallbackSubmissionId: systemPayload.submissionId,
+        legacyReview: systemPayload.currentReview,
+        testPhase: 'system',
+      }),
+    );
+    expect(
+      upsertFromLegacyReviewPayloadSpy.mock.invocationCallOrder[0],
+    ).toBeLessThan(httpService.patch.mock.invocationCallOrder[0]);
   });
 
-  it('does not persist relative summations when completing the review fails', async () => {
+  it('persists relative summations before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
       ...basePayload,
@@ -1298,7 +1480,19 @@ describe('ScoringResultService', () => {
         },
       }),
     );
-    expect(upsertReviewSummationSpy).not.toHaveBeenCalled();
+    expect(upsertReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 100,
+        isFinal: true,
+        submissionId: systemPayload.submissionId,
+      }),
+      undefined,
+    );
+    expect(upsertReviewSummationSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      httpService.patch.mock.invocationCallOrder[0],
+    );
   });
 
   it('returns a bad request error when review-api rejects a nonexistent submissionId', async () => {
@@ -1505,6 +1699,73 @@ describe('ScoringResultService', () => {
     expect(result.payload.reviewedDate).toBe(reviewedDate);
   });
 
+  it('keeps relative scoring status successful when all individual tests fail', () => {
+    const { service } = createService();
+    const buildRelativeReviewPayload = (
+      service as any
+    ).buildRelativeReviewPayload.bind(service) as (
+      reviewRecord: {
+        submissionId: string;
+        reviewObject: Record<string, unknown>;
+        metadata: Record<string, unknown>;
+        rawTestScores: Array<{
+          error?: string;
+          score: number;
+          testcase: string;
+        }>;
+      },
+      bestScores: Map<string, number>,
+      scoreDirection: ScoreDirection,
+      fallbackScorecardId: string | undefined,
+      testPhase: string,
+    ) => {
+      payload: {
+        aggregateScore: number;
+        metadata: {
+          testProgressDetails: {
+            failedTests: number;
+            status: ScoringTestStatus;
+          };
+          testStatus: ScoringTestStatus;
+        };
+      };
+    };
+
+    const result = buildRelativeReviewPayload(
+      {
+        submissionId: 'failed-testcase-submission',
+        reviewObject: {
+          id: 'review-summation-1',
+          isProvisional: true,
+        },
+        metadata: {
+          testScores: [
+            { error: 'Timed out.', score: -1, testcase: '1' },
+            { error: 'Crashed.', score: -1, testcase: '2' },
+          ],
+          testType: 'provisional',
+        },
+        rawTestScores: [
+          { error: 'Timed out.', score: -1, testcase: '1' },
+          { error: 'Crashed.', score: -1, testcase: '2' },
+        ],
+      },
+      new Map(),
+      ScoreDirection.MAXIMIZE,
+      undefined,
+      'provisional',
+    );
+
+    expect(result.payload.aggregateScore).toBe(-1);
+    expect(result.payload.metadata.testStatus).toBe(ScoringTestStatus.Success);
+    expect(result.payload.metadata.testProgressDetails).toEqual(
+      expect.objectContaining({
+        failedTests: 2,
+        status: ScoringTestStatus.Success,
+      }),
+    );
+  });
+
   it('marks timed-out system tests as failed with timed_out metadata', async () => {
     const { service } = createService();
     const processScoringResultSpy = jest
@@ -1548,14 +1809,13 @@ describe('ScoringResultService', () => {
     const systemTestTimeoutSchedulerService = {
       scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
     };
-    const { service, ecsService, prisma } = createService(
-      undefined,
-      systemTestTimeoutSchedulerService,
-    );
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService(undefined, systemTestTimeoutSchedulerService);
 
     prisma.marathonMatchConfig.findUnique.mockResolvedValue({
       challengeId: basePayload.challengeId,
       active: true,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
       taskDefinitionName: 'mm-runner',
       taskDefinitionVersion: '7',
       reviewScorecardId: 'scorecard-1',
@@ -1572,6 +1832,15 @@ describe('ScoringResultService', () => {
         },
       ],
     });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: basePayload.submissionId,
+          virusScan: true,
+        },
+      }),
+    );
     ecsService.launchScorerTask.mockResolvedValue({
       taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/task-1',
       taskId: 'task-1',
@@ -1614,6 +1883,132 @@ describe('ScoringResultService', () => {
         timeoutMs: 3600000,
       }),
       3600000,
+    );
+  });
+
+  it('marks system scoring failed without launching when submission has not passed virus scan', async () => {
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService(undefined, systemTestTimeoutSchedulerService);
+    const skipSpy = jest
+      .spyOn(service, 'markSubmissionScoringSkipped')
+      .mockResolvedValue(undefined);
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: basePayload.submissionId,
+          virusScan: false,
+        },
+      }),
+    );
+
+    await expect(
+      service.triggerSystemScore(
+        'review-1',
+        basePayload.submissionId,
+        basePayload.challengeId,
+      ),
+    ).resolves.toEqual({
+      skipped: true,
+      reason:
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.',
+      reviewId: 'review-1',
+      submissionId: basePayload.submissionId,
+    });
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).not.toHaveBeenCalled();
+    expect(skipSpy).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.',
+      reviewId: 'review-1',
+      scorecardId: 'scorecard-1',
+      submissionId: basePayload.submissionId,
+      testPhase: 'system',
+    });
+  });
+
+  it('writes terminal failed summations for skipped submission scoring', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Bridge Runners',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [],
+        },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+
+    await service.markSubmissionScoringSkipped({
+      challengeId: basePayload.challengeId,
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match EXAMPLE scoring skipped because the submission has not passed virus scanning.',
+      submissionId: basePayload.submissionId,
+      testPhase: 'example',
+    });
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        aggregateScore: -1,
+        isExample: true,
+        isPassing: false,
+        submissionId: basePayload.submissionId,
+        metadata: expect.objectContaining({
+          challengeId: basePayload.challengeId,
+          marathonMatchScoringSkipped: true,
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Failed,
+          testType: 'example',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
     );
   });
 

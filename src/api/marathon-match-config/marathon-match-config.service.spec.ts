@@ -27,6 +27,7 @@ describe('MarathonMatchConfigService', () => {
   const createService = () => {
     const httpService = {
       get: jest.fn(),
+      post: jest.fn(),
     };
     const ecsService = {
       launchScorerTask: jest.fn(),
@@ -48,11 +49,17 @@ describe('MarathonMatchConfigService', () => {
       tester: {
         findUnique: jest.fn(),
       },
+      testSubmissionRun: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
     };
     const prismaErrorService = {
       handleError: jest.fn(),
     };
     const scoringResultService = {
+      markSubmissionScoringSkipped: jest.fn(),
       triggerSystemScore: jest.fn(),
     };
 
@@ -251,6 +258,7 @@ describe('MarathonMatchConfigService', () => {
         results: [
           {
             submissionId: 'submission-1',
+            configType: PhaseConfigType.PROVISIONAL,
             taskId: 'task-1',
           },
         ],
@@ -387,6 +395,7 @@ describe('MarathonMatchConfigService', () => {
                   memberId: '40051399',
                   submittedDate: '2026-06-02T00:00:00.000Z',
                   isLatest: true,
+                  virusScan: true,
                 },
               ],
             },
@@ -426,6 +435,584 @@ describe('MarathonMatchConfigService', () => {
     );
   });
 
+  it('reruns all phase configs mapped to the currently open submission phase', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'submission-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+        {
+          id: 'phase-example',
+          configType: PhaseConfigType.EXAMPLE,
+          phaseId: 'submission-phase',
+          startSeed: BigInt(1),
+          numberOfTests: 10,
+        },
+        {
+          id: 'phase-system',
+          configType: PhaseConfigType.SYSTEM,
+          phaseId: 'system-phase',
+          startSeed: BigInt(1000),
+          numberOfTests: 5000,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+            phases: [
+              {
+                phaseId: 'registration-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+              {
+                phaseId: 'submission-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'submission-1',
+                  memberId: '40051399',
+                  submittedDate: '2026-06-02T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: true,
+                },
+                {
+                  id: 'submission-2',
+                  memberId: '40051400',
+                  submittedDate: '2026-06-03T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: true,
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+    ecsService.launchScorerTask.mockImplementation((...args: unknown[]) => {
+      const submissionId = String(args[1]);
+      const scoringPhase = args[3] as { configType: PhaseConfigType };
+      return Promise.resolve({
+        taskArn: `arn:aws:ecs:task/${scoringPhase.configType}-${submissionId}`,
+        taskId: `${scoringPhase.configType}-${submissionId}`,
+      });
+    });
+
+    const result = await service.rerunLatestSubmissions('30000123', user);
+
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionsQueued: 2,
+      results: [
+        {
+          submissionId: 'submission-1',
+          configType: PhaseConfigType.EXAMPLE,
+          taskArn: 'arn:aws:ecs:task/EXAMPLE-submission-1',
+          taskId: 'EXAMPLE-submission-1',
+        },
+        {
+          submissionId: 'submission-2',
+          configType: PhaseConfigType.EXAMPLE,
+          taskArn: 'arn:aws:ecs:task/EXAMPLE-submission-2',
+          taskId: 'EXAMPLE-submission-2',
+        },
+        {
+          submissionId: 'submission-1',
+          configType: PhaseConfigType.PROVISIONAL,
+          taskArn: 'arn:aws:ecs:task/PROVISIONAL-submission-1',
+          taskId: 'PROVISIONAL-submission-1',
+        },
+        {
+          submissionId: 'submission-2',
+          configType: PhaseConfigType.PROVISIONAL,
+          taskArn: 'arn:aws:ecs:task/PROVISIONAL-submission-2',
+          taskId: 'PROVISIONAL-submission-2',
+        },
+      ],
+    });
+    expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(4);
+    expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
+      1,
+      '30000123',
+      'submission-1',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.EXAMPLE,
+        startSeed: BigInt(1),
+        numberOfTests: 10,
+        scorecardId: 'scorecard-1',
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+    expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
+      3,
+      '30000123',
+      'submission-1',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+        startSeed: BigInt(100),
+        numberOfTests: 50,
+        scorecardId: 'scorecard-1',
+      },
+      undefined,
+      {
+        memberId: '40051399',
+      },
+    );
+  });
+
+  it('marks latest submissions failed without launching when virus scan has not passed', async () => {
+    const {
+      service,
+      ecsService,
+      httpService,
+      m2mService,
+      prisma,
+      scoringResultService,
+    } = createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    scoringResultService.markSubmissionScoringSkipped.mockResolvedValue(
+      undefined,
+    );
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            status: 'ACTIVE',
+            phases: [
+              {
+                phaseId: 'provisional-phase',
+                isOpen: true,
+                actualStartDate: '2026-06-01T00:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            result: {
+              content: [
+                {
+                  id: 'submission-1',
+                  memberId: '40051399',
+                  submittedDate: '2026-06-02T00:00:00.000Z',
+                  isLatest: true,
+                  virusScan: false,
+                },
+              ],
+            },
+          },
+          headers: {
+            'x-total-pages': '1',
+          },
+        }),
+      );
+
+    const result = await service.rerunLatestSubmissions('30000123', user);
+
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(
+      scoringResultService.markSubmissionScoringSkipped,
+    ).toHaveBeenCalledWith({
+      challengeId: '30000123',
+      details: {
+        virusScan: false,
+      },
+      reason:
+        'Marathon Match PROVISIONAL scoring skipped because the submission has not passed virus scanning.',
+      scorecardId: 'scorecard-1',
+      submissionId: 'submission-1',
+      testPhase: PhaseConfigType.PROVISIONAL,
+    });
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionsQueued: 1,
+      results: [
+        {
+          submissionId: 'submission-1',
+          configType: PhaseConfigType.PROVISIONAL,
+          error:
+            'Marathon Match PROVISIONAL scoring skipped because the submission has not passed virus scanning.',
+        },
+      ],
+    });
+  });
+
+  it('uploads a validation submission and queues scorer execution', async () => {
+    const { service, ecsService, prisma } = createService();
+    const user = {
+      isMachine: false,
+      userId: '40051399',
+    } as never;
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    prisma.testSubmissionRun.create.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+    });
+    prisma.testSubmissionRun.update.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cluster: 'cluster-1',
+      containerName: 'runner',
+      taskDefinition: 'mm-runner:7',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
+
+    const result = await service.uploadTestSubmission(
+      '30000123',
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+      },
+      {
+        buffer: Buffer.from('zip'),
+        mimetype: 'application/zip',
+        originalname: 'solution.zip',
+        size: 3,
+      } as Express.Multer.File,
+      user,
+    );
+
+    expect(result).toEqual({
+      challengeId: '30000123',
+      submissionId: 'generated-id',
+      testSubmissionId: 'generated-id',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+    });
+    expect(prisma.testSubmissionRun.create).toHaveBeenCalledWith({
+      data: {
+        id: 'generated-id',
+        challengeId: '30000123',
+        configType: PhaseConfigType.PROVISIONAL,
+        memberId: '40051399',
+        fileName: 'solution.zip',
+        mimeType: 'application/zip',
+        fileSize: 3,
+        fileContent: Uint8Array.from(Buffer.from('zip')),
+        status: 'QUEUED',
+        createdBy: '40051399',
+      },
+    });
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'generated-id' },
+      data: {
+        taskArn: 'arn:aws:ecs:task/task-1',
+        taskId: 'task-1',
+        cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+      },
+    });
+    expect(ecsService.launchScorerTask).toHaveBeenCalledWith(
+      '30000123',
+      'generated-id',
+      {
+        taskDefinitionName: 'mm-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: PhaseConfigType.PROVISIONAL,
+        startSeed: BigInt(100),
+        numberOfTests: 50,
+      },
+      undefined,
+      {
+        memberId: '40051399',
+        stopSupersededMemberTasks: false,
+        validationRunId: 'generated-id',
+        validationSubmissionDownloadUrl:
+          '/challenge/30000123/test-submission/generated-id/download',
+      },
+    );
+  });
+
+  it('marks validation submissions failed when ECS launch fails', async () => {
+    const { service, ecsService, prisma, prismaErrorService } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+    prisma.testSubmissionRun.create.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      status: 'QUEUED',
+    });
+    ecsService.launchScorerTask.mockRejectedValue(new Error('ECS unavailable'));
+    prismaErrorService.handleError.mockReturnValue({
+      message: 'ECS unavailable',
+      code: 'INTERNAL_ERROR',
+      details: {},
+    });
+
+    await expect(
+      service.uploadTestSubmission(
+        '30000123',
+        {
+          configType: PhaseConfigType.PROVISIONAL,
+        },
+        {
+          buffer: Buffer.from('zip'),
+          mimetype: 'application/zip',
+          originalname: 'solution.zip',
+          size: 3,
+        } as Express.Multer.File,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: expect.stringContaining('ECS unavailable'),
+      }),
+    });
+
+    expect(prisma.testSubmissionRun.update).toHaveBeenCalledWith({
+      where: { id: 'generated-id' },
+      data: {
+        status: 'FAILED',
+        message: 'ECS unavailable',
+        completedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('returns validation submission status details', async () => {
+    const { service, prisma } = createService();
+
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      id: 'generated-id',
+      challengeId: '30000123',
+      configType: PhaseConfigType.PROVISIONAL,
+      memberId: '40051399',
+      fileName: 'solution.zip',
+      fileSize: 3,
+      status: 'SUCCESS',
+      score: 88.5,
+      message: 'Scoring complete.',
+      metadata: { testType: 'provisional' },
+      currentReview: null,
+      impactedReviews: [],
+      progress: 1,
+      completedTests: 50,
+      totalTests: 50,
+      failedTests: 0,
+      taskArn: 'arn:aws:ecs:task/task-1',
+      taskId: 'task-1',
+      cloudWatchLogsConsoleUrl: 'https://logs.example.com/task-1',
+      completedAt: new Date('2026-06-17T01:02:03.000Z'),
+      createdAt: new Date('2026-06-17T01:00:00.000Z'),
+      updatedAt: new Date('2026-06-17T01:02:03.000Z'),
+    });
+
+    await expect(
+      service.getTestSubmissionStatus('30000123', 'generated-id'),
+    ).resolves.toMatchObject({
+      challengeId: '30000123',
+      testSubmissionId: 'generated-id',
+      status: 'SUCCESS',
+      score: 88.5,
+      metadata: { testType: 'provisional' },
+      completedAt: '2026-06-17T01:02:03.000Z',
+    });
+  });
+
+  it('returns validation submission file bytes for runner download', async () => {
+    const { service, prisma } = createService();
+
+    prisma.testSubmissionRun.findFirst.mockResolvedValue({
+      fileContent: Buffer.from('zip'),
+      fileName: 'solution.zip',
+      fileSize: 3,
+      mimeType: 'application/zip',
+    });
+
+    await expect(
+      service.getTestSubmissionFile('30000123', 'generated-id'),
+    ).resolves.toEqual({
+      content: Buffer.from('zip'),
+      contentLength: 3,
+      fileName: 'solution.zip',
+      mimeType: 'application/zip',
+    });
+  });
+
+  it('rejects validation submissions when the tester is not compiled', async () => {
+    const { service, ecsService, httpService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      testerId: 'tester-1',
+      tester: {
+        compilationStatus: CompilationStatus.FAILED,
+        compilationError: 'javac failed',
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: PhaseConfigType.PROVISIONAL,
+          phaseId: 'provisional-phase',
+          startSeed: BigInt(100),
+          numberOfTests: 50,
+        },
+      ],
+    });
+
+    await expect(
+      service.uploadTestSubmission(
+        '30000123',
+        {},
+        {
+          buffer: Buffer.from('zip'),
+          mimetype: 'application/zip',
+          originalname: 'solution.zip',
+          size: 3,
+        } as Express.Multer.File,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(httpService.post).not.toHaveBeenCalled();
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+  });
+
   it('rate limits rerun scorer task launches in batches', async () => {
     jest.useFakeTimers();
 
@@ -438,6 +1025,7 @@ describe('MarathonMatchConfigService', () => {
         memberId: `member-${index + 1}`,
         submittedDate: `2026-06-01T00:00:${String(index).padStart(2, '0')}.000Z`,
         isLatest: true,
+        virusScan: true,
       }));
       const submissionIds = submissionRows.map((submission) => submission.id);
       const launchResolvers: Array<() => void> = [];
@@ -535,6 +1123,7 @@ describe('MarathonMatchConfigService', () => {
         submissionsQueued: 10,
         results: submissionIds.map((submissionId) => ({
           submissionId,
+          configType: PhaseConfigType.PROVISIONAL,
           taskArn: `arn:aws:ecs:us-east-1:123456789012:task/${submissionId}`,
           taskId: `task-${submissionId}`,
         })),

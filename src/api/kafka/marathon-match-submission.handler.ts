@@ -50,6 +50,7 @@ interface SkippedSubmissionScoringConfig {
 interface SkippedSubmissionScoringPayload {
   submissionId: string;
   challengeId: string;
+  testPhase: string;
   scorecardId?: string;
   reason: string;
   details?: Record<string, unknown>;
@@ -61,7 +62,9 @@ interface SkippedReviewSummationPayload {
   isPassing: boolean;
   reviewedDate: string;
   scorecardId?: string;
-  isProvisional: boolean;
+  isFinal?: boolean;
+  isProvisional?: boolean;
+  isExample?: boolean;
   metadata: Record<string, unknown>;
 }
 
@@ -213,6 +216,61 @@ export class MarathonMatchSubmissionHandler
         );
       }
 
+      const submissionApiBaseUrl =
+        process.env.SUBMISSION_API_URL?.trim() ||
+        config.submissionApiUrl?.trim();
+      if (!submissionApiBaseUrl) {
+        throw new Error(
+          `Submission API URL is not configured for challenge ${challengeId}.`,
+        );
+      }
+
+      const token = await this.m2mService.getM2MToken();
+      if (!token) {
+        throw new Error(
+          'Unable to get M2M token for submission virus scan preflight.',
+        );
+      }
+
+      const submission = await this.fetchSubmissionById(
+        token,
+        submissionApiBaseUrl,
+        submissionId,
+      );
+      if (!this.isSubmissionCleanForScoring(submission)) {
+        const skippedPhaseTasks: Array<Record<string, unknown>> = [];
+        for (const matchingPhaseConfig of matchingPhaseConfigs) {
+          const reason = `Marathon Match ${matchingPhaseConfig.configType} scoring skipped because the submission has not passed virus scanning.`;
+          await this.upsertSkippedReviewSummation(token, {
+            submissionId,
+            challengeId,
+            testPhase: matchingPhaseConfig.configType,
+            reason,
+            details: {
+              configId: config.id,
+              phaseConfigId: matchingPhaseConfig.id,
+              virusScan: submission?.virusScan ?? null,
+            },
+            scorecardId: config.reviewScorecardId?.trim() || undefined,
+          });
+          skippedPhaseTasks.push({
+            configType: matchingPhaseConfig.configType,
+            phaseId: matchingPhaseConfig.phaseId,
+            phaseConfigId: matchingPhaseConfig.id,
+          });
+        }
+
+        this.logger.log({
+          message:
+            'Skipped Marathon Match submission scoring because submission is not virus-scanned.',
+          challengeId,
+          submissionId,
+          virusScan: submission?.virusScan ?? null,
+          skippedPhaseTasks,
+        });
+        return;
+      }
+
       const launchedPhaseTasks: Array<Record<string, unknown>> = [];
       for (const matchingPhaseConfig of matchingPhaseConfigs) {
         const launchResult = await this.ecsService.launchScorerTask(
@@ -306,6 +364,44 @@ export class MarathonMatchSubmissionHandler
     );
 
     return this.extractOpenPhaseResolution(response.data);
+  }
+
+  /**
+   * Fetches one submission record from submission-api-v6 before scorer dispatch.
+   * @param token M2M token for submission-api-v6.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param submissionId Submission identifier to fetch.
+   * @returns Submission record when the API returns one, otherwise undefined.
+   * @throws Error when the submission-api request fails.
+   */
+  private async fetchSubmissionById(
+    token: string,
+    submissionApiUrl: string,
+    submissionId: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    const url = `${this.buildSubmissionApiBaseUrl(
+      submissionApiUrl,
+    )}/submissions/${encodeURIComponent(submissionId)}`;
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }),
+    );
+
+    return this.extractSubmissionRecord(response.data);
+  }
+
+  /**
+   * Checks whether a submission can be safely downloaded by scorer runners.
+   * @param submission Submission record returned by submission-api-v6.
+   * @returns True only when `virusScan` is explicitly true.
+   */
+  private isSubmissionCleanForScoring(
+    submission: Record<string, unknown> | undefined,
+  ): boolean {
+    return this.parseBooleanFlag(submission?.virusScan) === true;
   }
 
   /**
@@ -436,13 +532,14 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Persists a terminal failed provisional summation when a configured
-   * submission cannot be dispatched and would otherwise remain queued forever.
+   * Persists a terminal failed phase summation when a configured submission
+   * cannot be dispatched and would otherwise remain queued forever.
    * @param submissionId Submission ID from the Kafka event.
    * @param challengeId Challenge ID from the Kafka event.
    * @param reason Member-visible reason stored in summation metadata.
    * @param config Marathon Match config used to resolve scorecard context.
    * @param details Additional operator-facing metadata for the skip condition.
+   * @param testPhase Scoring phase to mark failed, defaulting to provisional.
    * @returns Resolves after the review summation is created or updated.
    * @throws Error when token retrieval or review-api persistence fails.
    */
@@ -452,6 +549,7 @@ export class MarathonMatchSubmissionHandler
     reason: string,
     config: SkippedSubmissionScoringConfig,
     details?: Record<string, unknown>,
+    testPhase = 'provisional',
   ): Promise<void> {
     const token = await this.m2mService.getM2MToken();
     if (!token) {
@@ -463,6 +561,7 @@ export class MarathonMatchSubmissionHandler
     await this.upsertSkippedReviewSummation(token, {
       submissionId,
       challengeId,
+      testPhase,
       reason,
       details,
       scorecardId: config.reviewScorecardId?.trim() || undefined,
@@ -470,8 +569,8 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Creates or updates the provisional review summation used to show a skipped
-   * scoring attempt as terminal instead of indefinitely queued.
+   * Creates or updates the phase review summation used to show a skipped scoring
+   * attempt as terminal instead of indefinitely queued.
    * @param token M2M token for review-api.
    * @param input Submission and skip context to persist.
    * @returns Resolves after the review-api write succeeds.
@@ -482,11 +581,11 @@ export class MarathonMatchSubmissionHandler
     input: SkippedSubmissionScoringPayload,
   ): Promise<void> {
     const payload = this.buildSkippedReviewSummationPayload(input);
-    const existingReviewSummations =
-      await this.findExistingProvisionalReviewSummations(
-        token,
-        input.submissionId,
-      );
+    const existingReviewSummations = await this.findExistingReviewSummations(
+      token,
+      input.submissionId,
+      input.testPhase,
+    );
 
     if (existingReviewSummations.length === 0) {
       await this.createSkippedReviewSummation(token, payload);
@@ -512,7 +611,7 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Builds a failed provisional review summation payload for skipped dispatch.
+   * Builds a failed phase review summation payload for skipped dispatch.
    * @param input Submission and skip context to persist.
    * @returns Review summation payload accepted by review-api-v6.
    */
@@ -521,24 +620,27 @@ export class MarathonMatchSubmissionHandler
   ): SkippedReviewSummationPayload {
     const now = new Date().toISOString();
     const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    const normalizedPhase = this.normalizeTestPhase(input.testPhase);
     const testProgressDetails: Record<string, unknown> = {
       message: input.reason,
       progress: 1,
       status: 'FAILED',
-      testProcess: 'provisional',
       updatedAt: now,
     };
     const metadata: Record<string, unknown> = {
       challengeId: input.challengeId,
       marathonMatchScoringSkipped: true,
       marathonMatchScoringSkipReason: input.reason,
-      testProcess: 'provisional',
       testProgress: 1,
       testProgressDetails,
       testStatus: 'FAILED',
-      testType: 'provisional',
+      testType: normalizedPhase,
     };
 
+    if (normalizedPhase !== 'example') {
+      testProgressDetails.testProcess = normalizedPhase;
+      metadata.testProcess = normalizedPhase;
+    }
     if (reviewTypeId) {
       metadata.reviewTypeId = reviewTypeId;
     }
@@ -552,38 +654,53 @@ export class MarathonMatchSubmissionHandler
       isPassing: false,
       reviewedDate: now,
       scorecardId: input.scorecardId,
-      isProvisional: true,
+      ...(normalizedPhase === 'system' ? { isFinal: true } : {}),
+      ...(normalizedPhase === 'provisional' ? { isProvisional: true } : {}),
+      ...(normalizedPhase === 'example' ? { isExample: true } : {}),
       metadata,
     };
   }
 
   /**
-   * Finds provisional summations for a submission so skipped markers are
+   * Finds phase summations for a submission so skipped markers are
    * idempotent across Kafka retries.
    * @param token M2M token for review-api.
    * @param submissionId Submission ID to look up.
-   * @returns Existing provisional summation rows.
+   * @param testPhase Example, provisional, or system scoring phase.
+   * @returns Existing phase summation rows.
    */
-  private async findExistingProvisionalReviewSummations(
+  private async findExistingReviewSummations(
     token: string,
     submissionId: string,
+    testPhase: string,
   ): Promise<Record<string, unknown>[]> {
+    const normalizedPhase = this.normalizeTestPhase(testPhase);
+    const params: Record<string, string> = {
+      metadata: 'true',
+      submissionId,
+    };
+
+    if (normalizedPhase === 'example') {
+      params.example = 'true';
+    } else if (normalizedPhase === 'system') {
+      params.system = 'true';
+    } else {
+      params.provisional = 'true';
+    }
+
     const response = await firstValueFrom(
       this.httpService.get(this.buildReviewSummationUrl(), {
         headers: {
           Authorization: `Bearer ${token}`,
         },
-        params: {
-          metadata: 'true',
-          provisional: 'true',
-          submissionId,
-        },
+        params,
       }),
     );
 
     const reviewSummations = this.extractReviewSummationArray(response.data);
     const matchingReviewSummations = reviewSummations.filter(
-      (reviewSummation) => this.matchesProvisionalReview(reviewSummation),
+      (reviewSummation) =>
+        this.matchesPhaseReview(reviewSummation, normalizedPhase),
     );
 
     if (matchingReviewSummations.length > 0) {
@@ -594,7 +711,7 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Sends a create request for a skipped-dispatch provisional summation.
+   * Sends a create request for a skipped-dispatch phase summation.
    * @param token M2M token for review-api.
    * @param payload Review summation payload to persist.
    */
@@ -677,18 +794,43 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Checks whether a review summation belongs to provisional scoring.
+   * Checks whether a review summation belongs to the requested scoring phase.
    * @param reviewSummation Review summation row from review-api.
-   * @returns True when the row is provisional.
+   * @param testPhase Normalized phase to match.
+   * @returns True when the row belongs to the phase.
    */
-  private matchesProvisionalReview(
+  private matchesPhaseReview(
     reviewSummation: Record<string, unknown>,
+    testPhase: string,
   ): boolean {
     const metadata = this.asRecord(reviewSummation.metadata);
+    const metadataTestType = this.normalizeTestPhase(
+      this.asString(metadata.testType),
+    );
+    const metadataTestProcess = this.normalizeTestPhase(
+      this.asString(metadata.testProcess),
+    );
+    const metadataStage = this.asString(metadata.stage)?.toLowerCase();
+
+    if (testPhase === 'example') {
+      return (
+        this.parseBooleanFlag(reviewSummation.isExample) === true ||
+        metadataTestType === 'example'
+      );
+    }
+
+    if (testPhase === 'system') {
+      return (
+        this.parseBooleanFlag(reviewSummation.isFinal) === true ||
+        metadataTestType === 'system' ||
+        metadataStage === 'final'
+      );
+    }
+
     return (
-      reviewSummation.isProvisional === true ||
-      this.asString(metadata.testType)?.toLowerCase() === 'provisional' ||
-      this.asString(metadata.testProcess)?.toLowerCase() === 'provisional'
+      this.parseBooleanFlag(reviewSummation.isProvisional) === true ||
+      metadataTestType === 'provisional' ||
+      metadataTestProcess === 'provisional'
     );
   }
 
@@ -895,6 +1037,87 @@ export class MarathonMatchSubmissionHandler
    */
   private isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  /**
+   * Builds a submission-api base URL without trailing slashes.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @returns Normalized base URL.
+   */
+  private buildSubmissionApiBaseUrl(submissionApiUrl: string): string {
+    return submissionApiUrl.replace(/\/+$/, '');
+  }
+
+  /**
+   * Normalizes example/provisional/system phase names.
+   * @param testPhase Raw phase config or metadata value.
+   * @returns Canonical phase name.
+   */
+  private normalizeTestPhase(testPhase: string | undefined): string {
+    const normalized = (testPhase || '').trim().toLowerCase();
+
+    if (normalized === 'example') {
+      return 'example';
+    }
+    if (normalized === 'system' || normalized === 'final') {
+      return 'system';
+    }
+
+    return 'provisional';
+  }
+
+  /**
+   * Parses boolean values from booleans, string booleans, and numeric flags.
+   * @param value Value to inspect.
+   * @returns Parsed boolean, or null when the value is not a recognized flag.
+   */
+  private parseBooleanFlag(value: unknown): boolean | null {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') {
+        return true;
+      }
+      if (normalized === 'false') {
+        return false;
+      }
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
+        return false;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts one submission object from direct and wrapped submission-api responses.
+   * @param data Raw submission-api response body.
+   * @returns Submission record when present.
+   */
+  private extractSubmissionRecord(
+    data: unknown,
+  ): Record<string, unknown> | undefined {
+    const direct = this.asRecord(data);
+    const result = this.asRecord(direct.result);
+    if (Object.keys(result).length > 0) {
+      return result;
+    }
+
+    const dataRecord = this.asRecord(direct.data);
+    if (Object.keys(dataRecord).length > 0) {
+      return dataRecord;
+    }
+
+    return Object.keys(direct).length > 0 ? direct : undefined;
   }
 
   /**

@@ -85,6 +85,21 @@ public class SubmissionService {
      */
     public void downloadSubmission(String submissionId, String targetDir) throws Exception {
         String url = submissionApiUrl + "/submissions/" + submissionId + "/download";
+        downloadSubmissionFromUrl(url, targetDir, submissionId);
+    }
+
+    /**
+     * Downloads a submission zip from an explicit URL and extracts it to the target directory.
+     * @param url Absolute URL returning the submission ZIP.
+     * @param targetDir Directory to extract the submission to.
+     * @param submissionId Submission or validation-run ID for contextual logs.
+     * @throws Exception if download or extraction fails.
+     */
+    public void downloadSubmissionFromUrl(
+        String url,
+        String targetDir,
+        String submissionId
+    ) throws Exception {
         HttpGet get = new HttpGet(url);
         get.setHeader("Authorization", "Bearer " + accessToken);
         logInfo(submissionId, "GET " + url + " (submission zip download)");

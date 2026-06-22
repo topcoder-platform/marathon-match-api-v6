@@ -23,17 +23,12 @@ import java.net.URLClassLoader;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -48,6 +43,7 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -95,21 +91,21 @@ public class EcsRunnerMain {
         "/usr/local/bin/mm-runner-isolate";
     private static final String SCORER_ISOLATION_WRAPPER_PATH =
         "/usr/local/bin/mm-scorer-isolate";
+    private static final String ENV_COMMAND_PATH = "/usr/bin/env";
+    private static final String RUST_BACKTRACE_ENV = "RUST_BACKTRACE=1";
+    private static final String SCORER_STATE_CLEANUP_ARGUMENT =
+        "--cleanup-scorer-state";
+    private static final int SCORER_STATE_CLEANUP_TIMEOUT_MS = 10_000;
     private static final String RUNNER_EXECUTION_USER = "runner";
     private static final String RUNNER_EXECUTION_GROUP = "runner";
     private static final String SCORER_EXECUTION_USER = "scorer";
-    private static final List<String> SCORER_WRITABLE_STATE_DIRS = Arrays.asList(
-        "/tmp",
-        "/var/tmp",
-        "/dev/shm",
-        "/home/scorer"
-    );
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
+    private static final String COMPILATION_OUTPUT_METADATA_KEY = "compilationOutput";
     private static final String JAVA_SUBMISSION_RELEASE = "11";
     private static final String CXX_MARCH_FLAG = "-march=x86-64";
     private static final String CXX_MTUNE_FLAG = "-mtune=generic";
@@ -199,6 +195,8 @@ public class EcsRunnerMain {
         String reviewTypeId = null;
         String scorecardId = null;
         String submissionApiUrl = null;
+        String validationRunId = null;
+        String validationSubmissionDownloadUrl = null;
 
         try {
             challengeId = getRequiredEnv("TESTER_CONFIG_ID");
@@ -214,9 +212,24 @@ public class EcsRunnerMain {
             if (reviewId != null && reviewId.isEmpty()) {
                 reviewId = null;
             }
+            validationRunId = getOptionalEnv("VALIDATION_RUN_ID", "");
+            if (validationRunId != null && validationRunId.isEmpty()) {
+                validationRunId = null;
+            }
+            validationSubmissionDownloadUrl = getOptionalEnv(
+                "VALIDATION_SUBMISSION_DOWNLOAD_URL",
+                ""
+            );
+            if (
+                validationSubmissionDownloadUrl != null
+                    && validationSubmissionDownloadUrl.isEmpty()
+            ) {
+                validationSubmissionDownloadUrl = null;
+            }
             testPhase = normalizeTestPhase(getOptionalEnv("TEST_PHASE", "provisional"));
             long phaseStartSeed = getOptionalLongEnv("PHASE_START_SEED", 0L);
             int phaseNumberOfTests = getOptionalIntEnv("PHASE_NUMBER_OF_TESTS", 0);
+            boolean validationMode = !isBlank(validationRunId);
             setLogContext(challengeId, submissionId, testPhase);
 
             logInfo(
@@ -235,6 +248,8 @@ public class EcsRunnerMain {
                     + phaseStartSeed
                     + ", phaseNumberOfTests="
                     + phaseNumberOfTests
+                    + ", validationRunId="
+                    + (validationMode ? validationRunId : "<none>")
             );
             requireTrustedRunnerProcess();
 
@@ -323,9 +338,24 @@ public class EcsRunnerMain {
                         + " to "
                         + submissionDir
                         + " via "
-                        + config.getSubmissionApiUrl()
+                        + (validationMode
+                            ? validationSubmissionDownloadUrl
+                            : config.getSubmissionApiUrl())
                 );
-                submissionService.downloadSubmission(submissionId, submissionDir.toString());
+                if (validationMode) {
+                    if (isBlank(validationSubmissionDownloadUrl)) {
+                        throw new RuntimeException(
+                            "VALIDATION_SUBMISSION_DOWNLOAD_URL is required when VALIDATION_RUN_ID is set."
+                        );
+                    }
+                    submissionService.downloadSubmissionFromUrl(
+                        validationSubmissionDownloadUrl,
+                        submissionDir.toString(),
+                        submissionId
+                    );
+                } else {
+                    submissionService.downloadSubmission(submissionId, submissionDir.toString());
+                }
                 logInfo("api.download-submission", "Submission download and extraction complete");
                 logDirectorySnapshot(submissionDir, 100);
 
@@ -350,6 +380,7 @@ public class EcsRunnerMain {
                             testPhase,
                             reviewTypeId,
                             reviewId,
+                            validationRunId,
                             scorecardId,
                             0.0,
                             TEST_STATUS_IN_PROGRESS,
@@ -385,6 +416,7 @@ public class EcsRunnerMain {
                         accessTokenProvider,
                         reviewTypeId,
                         reviewId,
+                        validationRunId,
                         scorecardId
                     );
                 } finally {
@@ -432,16 +464,24 @@ public class EcsRunnerMain {
                     callbackMetadata
                 );
 
-                logInfo("artifacts.upload", "Uploading submission artifacts");
-                uploadArtifacts(
-                    httpClient,
-                    config.getSubmissionApiUrl(),
-                    accessTokenProvider,
-                    submissionId,
-                    testPhase,
-                    submissionDir
-                );
-                logInfo("artifacts.upload", "Artifact upload completed");
+                if (validationMode) {
+                    logInfo(
+                        "artifacts.upload",
+                        "Skipping submission artifact upload for validation run "
+                            + validationRunId
+                    );
+                } else {
+                    logInfo("artifacts.upload", "Uploading submission artifacts");
+                    uploadArtifacts(
+                        httpClient,
+                        config.getSubmissionApiUrl(),
+                        accessTokenProvider,
+                        submissionId,
+                        testPhase,
+                        submissionDir
+                    );
+                    logInfo("artifacts.upload", "Artifact upload completed");
+                }
 
                 ScoringCallbackRequest callbackRequest = new ScoringCallbackRequest(
                     challengeId,
@@ -450,6 +490,7 @@ public class EcsRunnerMain {
                     testPhase,
                     reviewTypeId,
                     reviewId,
+                    validationRunId,
                     scorerConfig.getScoreCardId(),
                     callbackMetadata,
                     callbackCurrentReview,
@@ -491,18 +532,27 @@ public class EcsRunnerMain {
                 error
             );
             writeFailureArtifactLog(submissionDir, submissionId, error);
-            uploadFailureArtifactsSafely(
-                submissionApiUrl,
-                accessTokenProvider,
-                submissionId,
-                testPhase,
-                submissionDir
-            );
+            if (isBlank(validationRunId)) {
+                uploadFailureArtifactsSafely(
+                    submissionApiUrl,
+                    accessTokenProvider,
+                    submissionId,
+                    testPhase,
+                    submissionDir
+                );
+            } else {
+                logInfo(
+                    "artifacts.upload",
+                    "Skipping failure artifact upload for validation run "
+                        + validationRunId
+                );
+            }
             postFailureProgressSafely(
                 challengeId,
                 submissionId,
                 testPhase,
                 reviewId,
+                validationRunId,
                 accessTokenProvider,
                 marathonMatchBaseUrl,
                 reviewTypeId,
@@ -651,6 +701,7 @@ public class EcsRunnerMain {
         AccessTokenProvider accessTokenProvider,
         String reviewTypeId,
         String reviewId,
+        String validationRunId,
         String scorecardId
     ) throws Exception {
         Path scorerConfigPath = null;
@@ -717,6 +768,7 @@ public class EcsRunnerMain {
                                     testPhase,
                                     reviewTypeId,
                                     reviewId,
+                                    validationRunId,
                                     scorecardId,
                                     progressUpdate.getProgress(),
                                     progressUpdate.getStatus(),
@@ -1398,127 +1450,98 @@ public class EcsRunnerMain {
      * entry is deleted with symlink-safe traversal so a malicious submission cannot redirect
      * cleanup outside the selected writable directory.
      *
-     * @return Number of top-level scorer-owned entries deleted.
+     * <p>The isolated Java child runs as {@code runner}, so it cannot reliably list
+     * {@code /home/scorer} or delete scorer-owned entries under sticky directories such as
+     * {@code /tmp}. Cleanup is therefore delegated to the narrow setuid scorer helper, which only
+     * scans its compiled-in writable directories and only deletes entries owned by the scorer UID.
+     *
+     * @return Number of top-level scorer-owned entries reported as deleted by the helper.
      */
     private static int deleteScorerOwnedWritableStateEntries() {
-        int deletedEntries = 0;
-        for (String directory : SCORER_WRITABLE_STATE_DIRS) {
-            deletedEntries += deleteScorerOwnedDirectoryEntries(Paths.get(directory));
+        List<String> command = Arrays.asList(
+            SCORER_ISOLATION_WRAPPER_PATH,
+            SCORER_STATE_CLEANUP_ARGUMENT
+        );
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+
+        try {
+            Process process = processBuilder.start();
+            boolean finished = process.waitFor(
+                SCORER_STATE_CLEANUP_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            );
+            if (!finished) {
+                process.destroyForcibly();
+                logWarn(
+                    "tester.tmp-isolation",
+                    "Scorer writable-state cleanup helper timed out after "
+                        + SCORER_STATE_CLEANUP_TIMEOUT_MS
+                        + "ms."
+                );
+                return 0;
+            }
+
+            String output;
+            try (InputStream inputStream = process.getInputStream()) {
+                output = new String(readAllBytes(inputStream), StandardCharsets.UTF_8)
+                    .trim();
+            }
+
+            int deletedEntries = parseScorerCleanupDeletedEntries(output);
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                logWarn(
+                    "tester.tmp-isolation",
+                    "Scorer writable-state cleanup helper exited with code "
+                        + exitCode
+                        + (output.isEmpty() ? "" : ", output=" + output)
+                );
+            }
+            return deletedEntries;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            logWarn(
+                "tester.tmp-isolation",
+                "Interrupted while running scorer writable-state cleanup helper."
+            );
+        } catch (IOException error) {
+            logWarn(
+                "tester.tmp-isolation",
+                "Failed to run scorer writable-state cleanup helper: "
+                    + error.getMessage()
+            );
         }
-        return deletedEntries;
+        return 0;
     }
 
     /**
-     * Deletes top-level entries owned by scorer under one writable directory.
+     * Parses the cleanup helper output for the deleted-entry count.
      *
-     * @param directory Writable directory to reset.
-     * @return Number of top-level scorer-owned entries deleted.
+     * <p>The helper writes diagnostics plus a numeric deleted-entry line. The runner reads the
+     * last numeric line so deletion counts are still preserved when warnings are emitted before
+     * the final count.
+     *
+     * @param output Merged stdout/stderr emitted by the cleanup helper.
+     * @return Parsed deleted-entry count, or {@code 0} when the helper did not report one.
      */
-    private static int deleteScorerOwnedDirectoryEntries(Path directory) {
-        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+    private static int parseScorerCleanupDeletedEntries(String output) {
+        if (output == null || output.trim().isEmpty()) {
             return 0;
         }
 
-        int deletedEntries = 0;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
-            for (Path entry : stream) {
-                if (!isScorerOwnedPath(entry)) {
-                    continue;
-                }
-
+        String[] lines = output.split("\\R");
+        for (int index = lines.length - 1; index >= 0; index--) {
+            String line = lines[index].trim();
+            if (line.matches("\\d+")) {
                 try {
-                    deleteUntrustedPathRecursively(entry);
-                    deletedEntries += 1;
-                } catch (NoSuchFileException ignored) {
-                    // Entry disappeared between listing and deletion.
-                } catch (IOException cleanupError) {
-                    logWarn(
-                        "tester.tmp-isolation",
-                        "Failed to delete scorer-owned entry "
-                            + entry
-                            + ": "
-                            + cleanupError.getMessage()
-                    );
+                    return Integer.parseInt(line);
+                } catch (NumberFormatException ignored) {
+                    return 0;
                 }
             }
-        } catch (IOException error) {
-            logWarn(
-                "tester.tmp-isolation",
-                "Failed to list scorer-owned entries under "
-                    + directory
-                    + ": "
-                    + error.getMessage()
-            );
         }
-
-        return deletedEntries;
-    }
-
-    /**
-     * Checks ownership without following symlinks.
-     *
-     * @param path Candidate writable-state entry.
-     * @return {@code true} when the entry is owned by the scorer user.
-     */
-    private static boolean isScorerOwnedPath(Path path) {
-        try {
-            return SCORER_EXECUTION_USER.equals(
-                Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName()
-            );
-        } catch (IOException error) {
-            logWarn(
-                "tester.tmp-isolation",
-                "Unable to read owner for writable entry "
-                    + path
-                    + ": "
-                    + error.getMessage()
-            );
-            return false;
-        }
-    }
-
-    /**
-     * Deletes an untrusted path tree without following symbolic links.
-     *
-     * @param path Top-level scorer-owned writable-state entry to remove.
-     * @throws IOException When deletion fails.
-     */
-    private static void deleteUntrustedPathRecursively(Path path) throws IOException {
-        Files.walkFileTree(
-            path,
-            new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(
-                    Path file,
-                    BasicFileAttributes attributes
-                ) throws IOException {
-                    Files.deleteIfExists(file);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(
-                    Path directory,
-                    IOException error
-                ) throws IOException {
-                    if (error != null) {
-                        throw error;
-                    }
-
-                    Files.deleteIfExists(directory);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult visitFileFailed(
-                    Path file,
-                    IOException error
-                ) throws IOException {
-                    Files.deleteIfExists(file);
-                    return FileVisitResult.CONTINUE;
-                }
-            }
-        );
+        return 0;
     }
 
     /**
@@ -2554,6 +2577,7 @@ public class EcsRunnerMain {
      * @param submissionId Submission ID.
      * @param testPhase Scoring phase.
      * @param reviewId Optional review ID for system scoring.
+     * @param validationRunId Optional isolated validation run ID for Score Operations tests.
      * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param marathonMatchBaseUrl Marathon Match API base URL, when available.
      * @param reviewTypeId Review type ID, when available.
@@ -2565,6 +2589,7 @@ public class EcsRunnerMain {
         String submissionId,
         String testPhase,
         String reviewId,
+        String validationRunId,
         AccessTokenProvider accessTokenProvider,
         String marathonMatchBaseUrl,
         String reviewTypeId,
@@ -2595,6 +2620,7 @@ public class EcsRunnerMain {
                     testPhase,
                     reviewTypeId,
                     reviewId,
+                    validationRunId,
                     scorecardId,
                     lastReportedProgress,
                     TEST_STATUS_FAILED,
@@ -2791,8 +2817,9 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Removes configured seed values from metadata that may be persisted or rendered to members.
-     * Per-test entries keep a stable 1-based testcase ordinal so relative scoring still works.
+     * Removes configured seed values and verbose compile output from metadata that may be
+     * persisted or rendered through scoring callbacks. Per-test entries keep a stable 1-based
+     * testcase ordinal so relative scoring still works.
      *
      * @param metadata Metadata returned by tester execution.
      * @return Copy with seed-bearing fields removed or replaced, or {@code null}.
@@ -2809,6 +2836,9 @@ public class EcsRunnerMain {
         for (Map.Entry<String, Object> entry : metadata.entrySet()) {
             String key = entry.getKey();
             if (isSensitiveSeedMetadataKey(key)) {
+                continue;
+            }
+            if (COMPILATION_OUTPUT_METADATA_KEY.equals(key)) {
                 continue;
             }
 
@@ -3002,6 +3032,24 @@ public class EcsRunnerMain {
         Path sourcePath,
         Path targetPath
     ) throws IOException {
+        replaceReservedInternalArtifactPath(sourcePath, targetPath);
+    }
+
+    /**
+     * Replaces one trusted internal artifact path without following target directories.
+     *
+     * <p>If the target path is a real directory, it is removed with symlink-safe
+     * traversal before the replacement. Files and symlinks are replaced by the
+     * move operation itself.
+     *
+     * @param sourcePath Parent-created source file containing trusted artifact content.
+     * @param targetPath Reserved artifact file path to replace.
+     * @throws IOException when an existing reserved path cannot be removed or replaced.
+     */
+    private static void replaceReservedInternalArtifactPath(
+        Path sourcePath,
+        Path targetPath
+    ) throws IOException {
         if (Files.isDirectory(targetPath, LinkOption.NOFOLLOW_LINKS)) {
             deleteDirectoryTreeNoFollow(targetPath);
         }
@@ -3059,7 +3107,109 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Replaces and recreates one reserved private artifact directory.
+     *
+     * <p>Submitted code can write artifact paths before the trusted runner packages
+     * private outputs. Reserved directories are therefore deleted without following
+     * symlinks and recreated by the runner before seed output files are written.
+     *
+     * @param privateArtifactsDir Private artifact root, normally {@code artifacts/private}.
+     * @param directoryName Reserved directory name to prepare.
+     * @return Recreated directory path.
+     * @throws IOException when the private root cannot be created, replaced, or verified.
+     * @throws IllegalArgumentException when the directory name is not a known reserved path.
+     */
+    private static Path prepareReservedPrivateArtifactDirectory(
+        Path privateArtifactsDir,
+        String directoryName
+    ) throws IOException {
+        validateReservedPrivateArtifactDirectoryName(directoryName);
+        Files.createDirectories(privateArtifactsDir);
+        if (!isNonSymlinkDirectory(privateArtifactsDir)) {
+            throw new IOException(
+                "Private artifact root is not a non-symlink directory: "
+                    + privateArtifactsDir
+            );
+        }
+
+        Path directoryPath = privateArtifactsDir.resolve(directoryName);
+        if (Files.exists(directoryPath, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isDirectory(directoryPath, LinkOption.NOFOLLOW_LINKS)) {
+                deleteDirectoryTreeNoFollow(directoryPath);
+            } else {
+                Files.deleteIfExists(directoryPath);
+            }
+        }
+
+        Files.createDirectory(directoryPath);
+        return directoryPath;
+    }
+
+    /**
+     * Validates reserved private artifact directory names used by the runner.
+     *
+     * @param directoryName Candidate directory name.
+     * @throws IllegalArgumentException when the directory is not a supported reserved path.
+     */
+    private static void validateReservedPrivateArtifactDirectoryName(
+        String directoryName
+    ) {
+        if (!"stdout".equals(directoryName) && !"stderr".equals(directoryName)) {
+            throw new IllegalArgumentException(
+                "Unsupported reserved private artifact directory: " + directoryName
+            );
+        }
+    }
+
+    /**
+     * Writes one seed's captured output to a reserved private artifact file.
+     *
+     * <p>The file is named with the actual seed value so operators can inspect a
+     * specific seed directly inside the {@code *-internal} artifact zip.
+     *
+     * @param outputDirectory Reserved output directory, such as {@code stdout} or {@code stderr}.
+     * @param seed Actual seed value for the testcase.
+     * @param outputText Captured output text. {@code null} is written as an empty file.
+     * @throws IOException when the target directory is unsafe or the file cannot be written.
+     * @throws IllegalArgumentException when the seed value is negative.
+     */
+    private static void writeSeedOutputArtifact(
+        Path outputDirectory,
+        long seed,
+        String outputText
+    ) throws IOException {
+        if (seed < 0L) {
+            throw new IllegalArgumentException("Seed output artifacts require a non-negative seed.");
+        }
+        if (!isNonSymlinkDirectory(outputDirectory)) {
+            throw new IOException(
+                "Seed output artifact directory is not a non-symlink directory: "
+                    + outputDirectory
+            );
+        }
+
+        Path targetPath = outputDirectory.resolve(Long.toString(seed) + ".txt");
+        Path tempPath = Files.createTempFile(
+            outputDirectory,
+            "." + seed + "-",
+            ".txt"
+        );
+        try {
+            Files.write(
+                tempPath,
+                (outputText == null ? "" : outputText).getBytes(StandardCharsets.UTF_8)
+            );
+            replaceReservedInternalArtifactPath(tempPath, targetPath);
+        } finally {
+            Files.deleteIfExists(tempPath);
+        }
+    }
+
+    /**
      * Builds the JSON payload stored in the internal {@code reviews.json} artifact.
+     * The payload includes sanitized top-level {@code testScores} so private
+     * consumers can inspect per-test scores for every scoring phase. Generic runner
+     * payloads also carry compiler diagnostics in {@code compilationOutput}.
      *
      * @param submissionId Submission whose review payload is archived.
      * @param testPhase Scoring phase represented by the payload.
@@ -3077,6 +3227,10 @@ public class EcsRunnerMain {
         TesterExecutionResult testerExecution,
         Map<String, Object> callbackMetadata
     ) {
+        Map<String, Object> internalMetadata = buildInternalArtifactMetadata(
+            testerExecution.getMetadata()
+        );
+        String compilationOutput = getCompilationOutputFromMetadata(internalMetadata);
         Map<String, Object> currentReview = withDefaultReviewFields(
             testerExecution.getCurrentReview(),
             submissionId,
@@ -3102,11 +3256,128 @@ public class EcsRunnerMain {
         payload.put("reviewTypeId", reviewTypeId);
         payload.put("scorecardId", scorecardId);
         payload.put("score", testerExecution.getScore());
-        payload.put("metadata", callbackMetadata);
+        payload.put("metadata", internalMetadata);
+        if (compilationOutput != null) {
+            payload.put(COMPILATION_OUTPUT_METADATA_KEY, compilationOutput);
+        }
+        payload.put(
+            "testScores",
+            buildInternalArtifactScoreEntries(testerExecution.getMetadata())
+        );
         payload.put("currentReview", currentReview);
         payload.put("impactedReviews", impactedReviews);
         payload.put("reviews", reviews);
         return payload;
+    }
+
+    /**
+     * Reads generic-runner compilation output from metadata for top-level private artifacts.
+     *
+     * @param metadata Internal artifact metadata, usually copied from tester execution metadata.
+     * @return Compilation output text, or {@code null} when none was produced.
+     */
+    private static String getCompilationOutputFromMetadata(Map<String, Object> metadata) {
+        if (metadata == null) {
+            return null;
+        }
+
+        Object compilationOutput = metadata.get(COMPILATION_OUTPUT_METADATA_KEY);
+        return compilationOutput instanceof String ? (String) compilationOutput : null;
+    }
+
+    /**
+     * Builds private review artifact metadata from raw tester execution metadata.
+     *
+     * <p>The scoring callback receives seed-sanitized metadata, but the internal
+     * {@code reviews.json} artifact needs actual seed values for operator diagnostics.
+     * The copy preserves raw metadata fields and rewrites {@code testScores} with
+     * stable testcase ordinals plus any actual seed value recorded by runner code.
+     *
+     * @param metadata Structured tester metadata produced by generic or custom runner code.
+     * @return Metadata copy for the internal artifact.
+     */
+    private static Map<String, Object> buildInternalArtifactMetadata(
+        Map<String, Object> metadata
+    ) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if (metadata == null) {
+            return result;
+        }
+
+        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if ("testScores".equals(key) && value instanceof List) {
+                result.put(key, buildInternalArtifactScoreEntries((List<?>) value));
+            } else {
+                result.put(key, value);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Extracts per-test score entries for the private review artifact.
+     *
+     * <p>Internal tooling needs these values for diagnostics and score
+     * verification across every scoring phase. The private artifact keeps the
+     * actual seed beside the same stable testcase identifiers used by callback
+     * metadata.
+     *
+     * @param metadata Structured tester metadata produced by generic or custom runner code.
+     * @return Per-test score entries, or an empty list when none were produced.
+     */
+    private static List<Object> buildInternalArtifactScoreEntries(
+        Map<String, Object> metadata
+    ) {
+        if (metadata == null) {
+            return new ArrayList<Object>();
+        }
+
+        Object testScores = metadata.get("testScores");
+        if (!(testScores instanceof List)) {
+            return new ArrayList<Object>();
+        }
+
+        return buildInternalArtifactScoreEntries((List<?>) testScores);
+    }
+
+    /**
+     * Builds private review artifact score entries with testcase ordinals and seed values.
+     *
+     * @param scoreEntries Raw `testScores` entries produced by runner code.
+     * @return Score entries for the internal artifact.
+     */
+    private static List<Object> buildInternalArtifactScoreEntries(
+        List<?> scoreEntries
+    ) {
+        List<Object> result = new ArrayList<Object>();
+        for (int index = 0; index < scoreEntries.size(); index++) {
+            Object rawEntry = scoreEntries.get(index);
+            Map<String, Object> internalEntry = new LinkedHashMap<String, Object>();
+            if (rawEntry instanceof Map) {
+                Map<?, ?> rawMap = (Map<?, ?>) rawEntry;
+                for (Map.Entry<?, ?> rawMapEntry : rawMap.entrySet()) {
+                    Object rawKey = rawMapEntry.getKey();
+                    if (!(rawKey instanceof String)) {
+                        continue;
+                    }
+
+                    String key = (String) rawKey;
+                    if ("testcase".equals(key)) {
+                        continue;
+                    }
+
+                    internalEntry.put(key, rawMapEntry.getValue());
+                }
+            }
+
+            internalEntry.put("testcase", Integer.toString(index + 1));
+            result.add(internalEntry);
+        }
+
+        return result;
     }
 
     /**
@@ -3212,7 +3483,12 @@ public class EcsRunnerMain {
         Path privateZip = null;
 
         try {
-            publicZip = createPublicArtifactZip(artifactsDir, submissionId, baseArtifactName);
+            publicZip = createMemberVisibleArtifactZip(
+                artifactsDir,
+                submissionId,
+                testPhase,
+                baseArtifactName
+            );
             if (publicZip != null) {
                 logInfo(
                     "artifacts.upload",
@@ -3228,8 +3504,9 @@ public class EcsRunnerMain {
                 );
             }
 
-            privateZip = createDirectoryZip(
-                artifactsDir.resolve("private"),
+            privateZip = createInternalArtifactZip(
+                artifactsDir,
+                submissionId,
                 internalArtifactName
             );
             if (privateZip != null) {
@@ -3251,6 +3528,50 @@ public class EcsRunnerMain {
             deletePathRecursively(publicZip);
             deletePathRecursively(privateZip);
         }
+    }
+
+    /**
+     * Creates a member-visible artifact archive only for phases exposed to competitors.
+     *
+     * <p>Only EXAMPLE scoring uploads member-visible artifacts. PROVISIONAL and
+     * SYSTEM scoring still upload private {@code *-internal} artifacts, but do
+     * not publish public zips for competitors.
+     *
+     * @param artifactsDir Root artifacts directory containing public files and logs.
+     * @param submissionId Submission ID used to locate execution/error logs.
+     * @param testPhase Scoring phase represented by the artifacts.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when the phase should not expose
+     *         member-visible artifacts or no public files exist.
+     * @throws Exception when walking or archiving public artifacts fails.
+     */
+    private static Path createMemberVisibleArtifactZip(
+        Path artifactsDir,
+        String submissionId,
+        String testPhase,
+        String artifactName
+    ) throws Exception {
+        if (!shouldCreateMemberVisibleArtifactZip(testPhase)) {
+            logInfo(
+                "artifacts.zip.public",
+                "Skipping member-visible artifact zip for "
+                    + normalizeTestPhase(testPhase)
+                    + " scoring."
+            );
+            return null;
+        }
+
+        return createPublicArtifactZip(artifactsDir, submissionId, artifactName);
+    }
+
+    /**
+     * Determines whether a scoring phase may expose artifacts to competitors.
+     *
+     * @param testPhase Scoring phase name or alias.
+     * @return {@code true} only for EXAMPLE scoring.
+     */
+    private static boolean shouldCreateMemberVisibleArtifactZip(String testPhase) {
+        return "example".equals(normalizeTestPhase(testPhase));
     }
 
     /**
@@ -3296,6 +3617,84 @@ public class EcsRunnerMain {
         logInfo(
             "artifacts.zip.public",
             "Created public zip " + zipPath + " (" + Files.size(zipPath) + " bytes)"
+        );
+
+        return zipPath;
+    }
+
+    /**
+     * Creates an internal artifact archive with private diagnostics and runner logs.
+     *
+     * <p>Internal artifacts are private to operators for every scoring phase. They
+     * include the private diagnostics directory plus the trusted compile and runner
+     * execution logs that are also present in member-visible EXAMPLE artifacts.
+     *
+     * @param artifactsDir Root artifacts directory containing public files, private
+     *                     diagnostics, and runner logs.
+     * @param submissionId Submission ID used to locate execution/error logs.
+     * @param artifactName Prefix used for the temporary zip file.
+     * @return Temporary zip path, or {@code null} when no internal files exist.
+     * @throws Exception when walking or archiving internal artifacts fails.
+     */
+    private static Path createInternalArtifactZip(
+        Path artifactsDir,
+        String submissionId,
+        String artifactName
+    ) throws Exception {
+        Path privateDir = artifactsDir.resolve("private");
+        Path executionLog = artifactsDir.resolve("execution-" + submissionId + ".log");
+        Path errorLog = artifactsDir.resolve("error-" + submissionId + ".log");
+        Path compileLog = artifactsDir.resolve("public").resolve("compile_log.txt");
+
+        boolean hasInternalArtifacts =
+            isNonSymlinkRegularFile(executionLog)
+                || isNonSymlinkRegularFile(errorLog)
+                || isNonSymlinkRegularFile(compileLog)
+                || directoryHasRegularFiles(privateDir);
+
+        if (!hasInternalArtifacts) {
+            logInfo(
+                "artifacts.zip.private",
+                "No internal artifacts found under " + artifactsDir
+            );
+            return null;
+        }
+
+        enforceInternalArtifactOutputLimit(
+            artifactsDir,
+            privateDir,
+            executionLog,
+            errorLog,
+            compileLog
+        );
+        Path zipPath = Files.createTempFile(artifactName + "-", ".zip");
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(
+            Files.newOutputStream(zipPath)
+        )) {
+            Set<String> entryNames = new LinkedHashSet<String>();
+            addFileToZip(
+                zipOutputStream,
+                executionLog,
+                executionLog.getFileName().toString(),
+                entryNames
+            );
+            addFileToZip(
+                zipOutputStream,
+                errorLog,
+                errorLog.getFileName().toString(),
+                entryNames
+            );
+            addFileToZip(
+                zipOutputStream,
+                compileLog,
+                compileLog.getFileName().toString(),
+                entryNames
+            );
+            addDirectoryToZip(zipOutputStream, privateDir, "", entryNames);
+        }
+        logInfo(
+            "artifacts.zip.private",
+            "Created internal zip " + zipPath + " from " + artifactsDir
         );
 
         return zipPath;
@@ -3396,6 +3795,57 @@ public class EcsRunnerMain {
         logInfo(
             "artifacts.output-limit",
             "Public artifacts total sizeBytes="
+                + totalBytes
+                + ", maxOutputBytes="
+                + MAX_OUTPUT_BYTES
+        );
+    }
+
+    /**
+     * Enforces the output byte cap across private diagnostics and selected runner logs.
+     *
+     * @param artifactsDir Root artifacts directory used to render paths in errors.
+     * @param privateDir Private diagnostics directory.
+     * @param executionLog Runner execution log file.
+     * @param errorLog Runner error log file.
+     * @param compileLog Submission compile log file.
+     * @throws IOException When file size inspection fails.
+     */
+    private static void enforceInternalArtifactOutputLimit(
+        Path artifactsDir,
+        Path privateDir,
+        Path executionLog,
+        Path errorLog,
+        Path compileLog
+    ) throws IOException {
+        long totalBytes = 0L;
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            executionLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            errorLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = addArtifactFileBytesWithLimit(
+            totalBytes,
+            compileLog,
+            artifactsDir,
+            "internal artifacts"
+        );
+        totalBytes = enforceArtifactDirectoryOutputLimit(
+            privateDir,
+            artifactsDir,
+            "internal artifacts",
+            totalBytes
+        );
+        logInfo(
+            "artifacts.output-limit",
+            "Internal artifacts total sizeBytes="
                 + totalBytes
                 + ", maxOutputBytes="
                 + MAX_OUTPUT_BYTES
@@ -3530,17 +3980,44 @@ public class EcsRunnerMain {
         Path filePath,
         String entryName
     ) throws Exception {
+        addFileToZip(zipOutputStream, filePath, entryName, null);
+    }
+
+    /**
+     * Adds a file to zip when it exists, is not a symbolic link, and its entry is unused.
+     *
+     * @param zipOutputStream Destination zip stream receiving the entry.
+     * @param filePath Candidate file path to archive.
+     * @param entryName Zip entry name to use for the file.
+     * @param entryNames Mutable set of existing entry names, or {@code null} to skip duplicate checks.
+     * @throws Exception when a non-symlink regular file cannot be read or archived.
+     */
+    private static void addFileToZip(
+        ZipOutputStream zipOutputStream,
+        Path filePath,
+        String entryName,
+        Set<String> entryNames
+    ) throws Exception {
         if (!isNonSymlinkRegularFile(filePath)) {
             logInfo("artifacts.zip.add-file", "Skipping missing or non-regular file: " + filePath);
             return;
         }
 
+        String normalizedEntryName = entryName.replace('\\', '/');
+        if (entryNames != null && !entryNames.add(normalizedEntryName)) {
+            logWarn(
+                "artifacts.zip.add-file",
+                "Skipping duplicate zip entry " + normalizedEntryName + " from " + filePath
+            );
+            return;
+        }
+
         logInfo(
             "artifacts.zip.add-file",
-            "Adding file to zip entry " + entryName + " from " + filePath
+            "Adding file to zip entry " + normalizedEntryName + " from " + filePath
         );
         try (InputStream inputStream = openRegularFileInputStreamNoFollow(filePath)) {
-            zipOutputStream.putNextEntry(new ZipEntry(entryName.replace('\\', '/')));
+            zipOutputStream.putNextEntry(new ZipEntry(normalizedEntryName));
             try {
                 copyStream(inputStream, zipOutputStream);
             } finally {
@@ -3561,6 +4038,24 @@ public class EcsRunnerMain {
         ZipOutputStream zipOutputStream,
         Path directoryPath,
         String entryPrefix
+    ) throws Exception {
+        addDirectoryToZip(zipOutputStream, directoryPath, entryPrefix, null);
+    }
+
+    /**
+     * Recursively adds non-symlink regular directory contents to a zip stream.
+     *
+     * @param zipOutputStream Destination zip stream receiving directory entries.
+     * @param directoryPath Directory to traverse without following symlinked directories.
+     * @param entryPrefix Prefix prepended to each zip entry name.
+     * @param entryNames Mutable set of existing entry names, or {@code null} to skip duplicate checks.
+     * @throws Exception when walking the directory or archiving a regular file fails.
+     */
+    private static void addDirectoryToZip(
+        ZipOutputStream zipOutputStream,
+        Path directoryPath,
+        String entryPrefix,
+        Set<String> entryNames
     ) throws Exception {
         if (!isNonSymlinkDirectory(directoryPath)) {
             logInfo(
@@ -3583,7 +4078,14 @@ public class EcsRunnerMain {
                     .relativize(entryPath)
                     .toString()
                     .replace('\\', '/');
-                String entryName = entryPrefix + relativePath;
+                String entryName = (entryPrefix + relativePath).replace('\\', '/');
+                if (entryNames != null && !entryNames.add(entryName)) {
+                    logWarn(
+                        "artifacts.zip.add-directory",
+                        "Skipping duplicate zip entry " + entryName + " from " + entryPath
+                    );
+                    continue;
+                }
 
                 logInfo(
                     "artifacts.zip.add-directory",
@@ -4054,8 +4556,9 @@ public class EcsRunnerMain {
      * Runs a standard Topcoder Marathon tester without requiring tester-specific ECS code.
      *
      * <p>The method creates artifact directories, selects a supported submission source file,
-     * compiles it when needed, runs the configured tester for every seed in the phase range, and
-     * returns the aggregate score plus per-test metadata used by relative scoring.
+     * compiles it when needed, writes compilation diagnostics to artifacts, runs the configured
+     * tester for every seed in the phase range, and returns the aggregate score plus per-test
+     * metadata used by relative scoring and internal diagnostics.
      *
      * @param testerClassName Fully qualified Marathon tester class name.
      * @param submissionPath Extracted submission directory.
@@ -4089,6 +4592,14 @@ public class EcsRunnerMain {
         Path artifactsPrivateDir = artifactsRoot.resolve("private");
         Files.createDirectories(artifactsPublicDir);
         Files.createDirectories(artifactsPrivateDir);
+        Path stdoutArtifactsDir = prepareReservedPrivateArtifactDirectory(
+            artifactsPrivateDir,
+            "stdout"
+        );
+        Path stderrArtifactsDir = prepareReservedPrivateArtifactDirectory(
+            artifactsPrivateDir,
+            "stderr"
+        );
 
         String expectedSolutionBaseName = deriveExpectedSolutionBaseName(testerClassName);
         Path submissionSource;
@@ -4128,6 +4639,7 @@ public class EcsRunnerMain {
         Path compileWorkDir = Files.createTempDirectory("mm-submission-solution-");
         boolean cleanupDeferred = deferIsolatedChildCleanup(compileWorkDir);
         Path compileLogPath = artifactsPublicDir.resolve("compile_log.txt");
+        Path outputPath = artifactsPublicDir.resolve("output.txt");
 
         try {
             CompiledSubmission compiledSubmission = compileAndBuildExecutionCommand(
@@ -4137,14 +4649,20 @@ public class EcsRunnerMain {
                 expectedSolutionBaseName,
                 compileLogPath
             );
+            String compilationOutput = readCompilationOutput(compileLogPath);
+            StringBuilder outputText = new StringBuilder();
+            long outputBytes = appendLimitedOutput(
+                outputText,
+                buildMemberVisibleCompilationOutput(compilationOutput),
+                0L,
+                "artifacts/public/output.txt"
+            );
             grantScorerReadExecuteAccess(compileWorkDir);
 
             MarathonController controller = new MarathonController();
             List<Map<String, Object>> testScores = new ArrayList<Map<String, Object>>();
             double totalScore = 0.0;
             int failedTests = 0;
-            StringBuilder outputText = new StringBuilder();
-            long outputBytes = 0L;
 
             long endSeed = startSeed + numberOfTests - 1L;
             for (long seed = startSeed; seed <= endSeed; seed++) {
@@ -4164,6 +4682,16 @@ public class EcsRunnerMain {
 
                 double seedScore = testResult.getScore();
                 String seedError = testResult.getError();
+                writeSeedOutputArtifact(
+                    stdoutArtifactsDir,
+                    seed,
+                    testResult.getStdout()
+                );
+                writeSeedOutputArtifact(
+                    stderrArtifactsDir,
+                    seed,
+                    testResult.getStderr()
+                );
                 String scoreValidationError = validateScoreValue(
                     seedScore,
                     "Test Case #" + testCaseNumber + " score"
@@ -4180,43 +4708,22 @@ public class EcsRunnerMain {
 
                 Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
                 seedResult.put("testcase", Integer.toString(testCaseNumber));
+                seedResult.put("seed", seed);
                 seedResult.put("score", seedScore);
                 seedResult.put("runTimeMs", testResult.getRunTime());
                 seedResult.put("error", seedError);
                 testScores.add(seedResult);
 
-                StringBuilder testOutputText = new StringBuilder();
-                testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
-                testOutputText.append("Score = ").append(seedScore).append('\n');
-                testOutputText.append("Run Time = ")
-                    .append(testResult.getRunTime())
-                    .append("ms\n");
-                if (
-                    testResult.getError() != null
-                        && !testResult.getError().trim().isEmpty()
-                ) {
-                    testOutputText.append(testResult.getError().trim()).append('\n');
-                }
-                if (
-                    testResult.getStdout() != null
-                        && !testResult.getStdout().trim().isEmpty()
-                ) {
-                    testOutputText.append("stdout:\n")
-                        .append(testResult.getStdout().trim())
-                        .append('\n');
-                }
-                if (
-                    testResult.getStderr() != null
-                        && !testResult.getStderr().trim().isEmpty()
-                ) {
-                    testOutputText.append("stderr:\n")
-                        .append(testResult.getStderr().trim())
-                        .append('\n');
-                }
-                testOutputText.append('\n');
                 outputBytes = appendLimitedOutput(
                     outputText,
-                    testOutputText.toString(),
+                    buildMemberVisibleTestOutput(
+                        testCaseNumber,
+                        seed,
+                        seedScore,
+                        testResult.getRunTime(),
+                        seedError,
+                        testResult.getStderr()
+                    ),
                     outputBytes,
                     "artifacts/public/output.txt"
                 );
@@ -4225,7 +4732,7 @@ public class EcsRunnerMain {
                     testScores.size(),
                     numberOfTests,
                     failedTests,
-                    failedTests > 0 ? TEST_STATUS_FAILED : TEST_STATUS_IN_PROGRESS,
+                    TEST_STATUS_IN_PROGRESS,
                     "Completed test " + testCaseNumber + " of " + numberOfTests
                 );
             }
@@ -4243,7 +4750,7 @@ public class EcsRunnerMain {
             }
 
             try (BufferedWriter writer = Files.newBufferedWriter(
-                artifactsPublicDir.resolve("output.txt"),
+                outputPath,
                 StandardCharsets.UTF_8
             )) {
                 writer.write(outputText.toString());
@@ -4257,6 +4764,7 @@ public class EcsRunnerMain {
             metadata.put("numberOfTests", numberOfTests);
             metadata.put("timeLimitMs", timeLimitMs);
             metadata.put("compileTimeoutMs", compileTimeoutMs);
+            metadata.put(COMPILATION_OUTPUT_METADATA_KEY, compilationOutput);
             metadata.put("aggregateMode", "average");
             metadata.put("testScores", testScores);
 
@@ -4271,11 +4779,138 @@ public class EcsRunnerMain {
                 currentReview,
                 new ArrayList<Map<String, Object>>()
             );
+        } catch (Exception error) {
+            writePreResultMemberOutput(outputPath, compileLogPath, error);
+            throw error;
         } finally {
             if (!cleanupDeferred) {
                 deletePathRecursively(compileWorkDir);
             }
         }
+    }
+
+    /**
+     * Reads the compiler log that should be embedded in member-visible and private outputs.
+     *
+     * @param compileLogPath Public compile log written by compiler commands.
+     * @return Compiler output text, or a short no-output marker when no compiler command ran.
+     * @throws IOException When an existing compile log cannot be read safely.
+     */
+    private static String readCompilationOutput(Path compileLogPath) throws IOException {
+        if (!isNonSymlinkRegularFile(compileLogPath)) {
+            return "No compilation step was run for this submission.";
+        }
+
+        String compilationOutput = new String(
+            readRegularFileBytesNoFollow(compileLogPath),
+            StandardCharsets.UTF_8
+        ).trim();
+        if (compilationOutput.isEmpty()) {
+            return "Compilation completed without output.";
+        }
+        return compilationOutput;
+    }
+
+    /**
+     * Builds the public {@code output.txt} compilation section shown before test cases.
+     *
+     * @param compilationOutput Compiler diagnostics captured for the submission.
+     * @return Member-visible compilation text block ending with a blank line.
+     */
+    private static String buildMemberVisibleCompilationOutput(
+        String compilationOutput
+    ) {
+        StringBuilder outputText = new StringBuilder();
+        outputText.append("Compilation Output:\n");
+        if (compilationOutput == null || compilationOutput.trim().isEmpty()) {
+            outputText.append("No compilation output was produced.");
+        } else {
+            outputText.append(compilationOutput.trim());
+        }
+        outputText.append("\n\n");
+        return outputText.toString();
+    }
+
+    /**
+     * Writes a partial member-visible output file when the generic runner fails
+     * before normal score output can be finalized.
+     *
+     * @param outputPath Public {@code output.txt} artifact path.
+     * @param compileLogPath Public compile log path to embed.
+     * @param error Failure that prevented normal output generation.
+     */
+    private static void writePreResultMemberOutput(
+        Path outputPath,
+        Path compileLogPath,
+        Throwable error
+    ) {
+        if (outputPath == null || isNonSymlinkRegularFile(outputPath)) {
+            return;
+        }
+
+        try {
+            StringBuilder outputText = new StringBuilder();
+            long outputBytes = appendLimitedOutput(
+                outputText,
+                buildMemberVisibleCompilationOutput(readCompilationOutput(compileLogPath)),
+                0L,
+                "artifacts/public/output.txt"
+            );
+            appendLimitedOutput(
+                outputText,
+                "Runner Error:\n" + safeLogValue(error == null ? null : error.getMessage()) + "\n",
+                outputBytes,
+                "artifacts/public/output.txt"
+            );
+
+            Files.createDirectories(outputPath.getParent());
+            Files.write(outputPath, outputText.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception outputError) {
+            logWarn(
+                "artifacts.public-output",
+                "Unable to write partial member output: " + outputError.getMessage()
+            );
+        }
+    }
+
+    /**
+     * Builds the public {@code output.txt} section for one generic Marathon test case.
+     *
+     * <p>The member-visible EXAMPLE artifact shows seed, score, runtime,
+     * tester errors, and stderr diagnostics, but it intentionally hides
+     * submitted-solution stdout. Per-test scores also remain available in
+     * metadata and the private {@code reviews.json} artifact.
+     *
+     * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param seed Actual configured seed value for the testcase.
+     * @param score Validated score assigned to the submission for the seed.
+     * @param runTimeMs Runtime reported by the Marathon tester for the testcase.
+     * @param error Tester or runner error text for the testcase.
+     * @param stderr Submitted solution stderr captured for the testcase.
+     * @return Member-visible text block ending with a blank line.
+     */
+    private static String buildMemberVisibleTestOutput(
+        int testCaseNumber,
+        long seed,
+        double score,
+        long runTimeMs,
+        String error,
+        String stderr
+    ) {
+        StringBuilder testOutputText = new StringBuilder();
+        testOutputText.append("Test Case #").append(testCaseNumber).append(":\n");
+        testOutputText.append("Seed = ").append(seed).append('\n');
+        testOutputText.append("Score = ").append(score).append('\n');
+        testOutputText.append("Run Time = ").append(runTimeMs).append("ms\n");
+
+        if (error != null && !error.trim().isEmpty()) {
+            testOutputText.append(error.trim()).append('\n');
+        }
+        if (stderr != null && !stderr.trim().isEmpty()) {
+            testOutputText.append("stderr:\n").append(stderr.trim()).append('\n');
+        }
+        testOutputText.append('\n');
+        return testOutputText.toString();
     }
 
     /**
@@ -4722,7 +5357,7 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             return new CompiledSubmission(
-                buildScorerExecutionCommand(binaryPath),
+                buildRustScorerExecutionCommand(binaryPath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -4906,6 +5541,23 @@ public class EcsRunnerMain {
      */
     private static String buildScorerExecutionCommand(String command) {
         return SCORER_ISOLATION_WRAPPER_PATH + " " + command;
+    }
+
+    /**
+     * Builds the isolated Rust submission command with panic backtraces enabled.
+     *
+     * <p>{@code mm-scorer-isolate} scrubs inherited environment variables before
+     * launching submitted code, so the Rust runtime flag is set explicitly through
+     * {@code /usr/bin/env} in the command that the wrapper executes.
+     *
+     * @param binaryPath Absolute path to the compiled Rust submission binary.
+     * @return Command that executes the Rust binary as the low-privilege scorer user
+     *         with {@code RUST_BACKTRACE=1}.
+     */
+    private static String buildRustScorerExecutionCommand(String binaryPath) {
+        return buildScorerExecutionCommand(
+            ENV_COMMAND_PATH + " " + RUST_BACKTRACE_ENV + " " + binaryPath
+        );
     }
 
     /**
@@ -5694,6 +6346,9 @@ public class EcsRunnerMain {
         @JsonProperty("reviewId")
         private final String reviewId;
 
+        @JsonProperty("validationRunId")
+        private final String validationRunId;
+
         @JsonProperty("scorecardId")
         private final String scorecardId;
 
@@ -5713,6 +6368,7 @@ public class EcsRunnerMain {
             String testPhase,
             String reviewTypeId,
             String reviewId,
+            String validationRunId,
             String scorecardId,
             Map<String, Object> metadata,
             Map<String, Object> currentReview,
@@ -5724,6 +6380,7 @@ public class EcsRunnerMain {
             this.testPhase = testPhase;
             this.reviewTypeId = reviewTypeId;
             this.reviewId = reviewId;
+            this.validationRunId = validationRunId;
             this.scorecardId = scorecardId;
             this.metadata = metadata;
             this.currentReview = currentReview;
@@ -5749,6 +6406,9 @@ public class EcsRunnerMain {
 
         @JsonProperty("reviewId")
         private final String reviewId;
+
+        @JsonProperty("validationRunId")
+        private final String validationRunId;
 
         @JsonProperty("scorecardId")
         private final String scorecardId;
@@ -5780,6 +6440,7 @@ public class EcsRunnerMain {
             String testPhase,
             String reviewTypeId,
             String reviewId,
+            String validationRunId,
             String scorecardId,
             double progress,
             String status,
@@ -5794,6 +6455,7 @@ public class EcsRunnerMain {
             this.testPhase = testPhase;
             this.reviewTypeId = reviewTypeId;
             this.reviewId = reviewId;
+            this.validationRunId = validationRunId;
             this.scorecardId = scorecardId;
             this.progress = Math.min(1.0, Math.max(0.0, progress));
             this.status = status;

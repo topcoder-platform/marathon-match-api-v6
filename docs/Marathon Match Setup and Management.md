@@ -27,7 +27,7 @@ Before starting:
 6. Save the scorer config separately with `Save Scorer Config`.
 7. Launch the challenge after the scorer config is saved and operationally ready.
 8. Monitor submissions from the Work app Submissions tab, including score links, artifacts, and ECS runner logs.
-9. If the tester changes during the challenge, publish a new version, update the scorer config, and rerun the latest submissions.
+9. If the tester changes during the challenge, publish a new version and update the scorer config; active configs automatically rerun the latest submissions for the open scoring phase.
 
 ## Challenge Creation
 
@@ -284,8 +284,8 @@ Use this flow when the tester source changes after the challenge is active.
 2. In the scorer section, select the current scorer and click `New Version`.
 3. Create the new version with the updated Java source.
 4. Wait until compilation reaches `SUCCESS`.
-5. Save the scorer config so the challenge points at the new tester ID.
-6. Trigger a rerun of latest submissions for the open Submission/Provisional phase using the Work app rerun control or `POST /v6/marathon-match/challenge/:challengeId/rerun`.
+5. Save the scorer config so the challenge points at the new tester ID. If the config is active, this automatically reruns the latest submission from each submitter for the open scoring phase.
+6. Use the Work app rerun control or `POST /v6/marathon-match/challenge/:challengeId/rerun` only when you need to manually repeat the same latest-submission rescore.
 7. If Review/System scores also need to be regenerated, call `POST /v6/marathon-match/challenge/:challengeId/rerun/system`.
 8. Monitor the rerun ECS tasks, runner logs, artifacts, and review scores.
 
@@ -296,12 +296,12 @@ Submission/Provisional rerun behavior:
 - Requires at least one open challenge phase.
 - Requires the scorer config to be active.
 - Requires the selected tester to be compiled successfully.
-- Requires a phase config that matches the currently open challenge phase.
+- Requires at least one phase config that matches the currently open challenge phase.
 - Fetches `isLatest=true` submissions from Submission API.
-- Queues one ECS task for the latest submission per member.
-- Uses the current open phase's scorer seeds and test count. During Submission this is normally the `PROVISIONAL` config.
+- Queues one ECS task for the latest submission per member per matching phase config.
+- Uses each matching phase config's scorer seeds and test count. During Submission this normally includes both `EXAMPLE` and `PROVISIONAL` when both are mapped to the Submission phase.
 
-The response includes the queued submission IDs and ECS task IDs or per-submission errors.
+The response includes the queued submission IDs, phase config type, and ECS task IDs or per-submission errors.
 
 System rerun behavior:
 
@@ -399,7 +399,7 @@ During the challenge:
 - Watch Submission tab scores and timestamps.
 - Spot-check artifacts for early submissions.
 - Open runner logs for failures, timeouts, compile errors, and missing output.
-- If tester source changes, publish a new version and rerun latest submissions.
+- If tester source changes, publish a new version and update the scorer config. Active configs automatically rerun latest submissions; use the manual rerun control if you need to repeat that rescore.
 
 After submission closes:
 

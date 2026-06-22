@@ -10,13 +10,18 @@ import {
   Put,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { PhaseConfigType } from '@prisma/client';
 import { Response } from 'express';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -31,6 +36,9 @@ import {
   RerunResponseDto,
   SearchMarathonMatchConfigQueryDto,
   SystemRerunResponseDto,
+  TestSubmissionResponseDto,
+  TestSubmissionStatusResponseDto,
+  TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
@@ -135,7 +143,7 @@ export class MarathonMatchConfigController {
   @ApiResponse({
     status: 400,
     description:
-      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or PROVISIONAL phase config is missing.',
+      'Challenge/config inactive, challenge has no open phase, tester is not compiled successfully, or no phase config matches the open phase.',
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
@@ -191,6 +199,198 @@ export class MarathonMatchConfigController {
       challengeId,
       user,
     );
+  }
+
+  /**
+   * Uploads a validation submission and queues scorer execution through ECS.
+   * @param challengeId Challenge ID.
+   * @param body Multipart form fields for validation scoring.
+   * @param file Uploaded submission ZIP.
+   * @param user Authenticated user for authorization and member fallback.
+   * @returns Created submission and ECS task launch details.
+   */
+  @Post('/:challengeId/test-submission')
+  @Roles(
+    UserRole.Admin,
+    UserRole.Copilot,
+    UserRole.ProjectManager,
+    UserRole.User,
+  )
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Upload and score a Marathon Match validation submission',
+    description:
+      'Roles: Admin or challenge Copilot/Manager resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description:
+      'The challenge ID for the marathon match validation submission request',
+    example: '30000123',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+    }),
+  )
+  @ApiBody({
+    required: true,
+    type: 'multipart/form-data',
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+        configType: {
+          type: 'string',
+          enum: Object.values(PhaseConfigType),
+          default: PhaseConfigType.PROVISIONAL,
+        },
+        memberId: {
+          type: 'string',
+        },
+        fileName: {
+          type: 'string',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({
+    status: 202,
+    description:
+      'Isolated validation submission run queued for asynchronous scoring.',
+    type: TestSubmissionResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Missing file, tester is not compiled successfully, or requested phase config is missing.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({ status: 404, description: 'Marathon match config not found.' })
+  async uploadTestSubmission(
+    @Param('challengeId') challengeId: string,
+    @Body() body: TestSubmissionUploadDto,
+    @UploadedFile() file: Express.Multer.File,
+    @User() user: JwtUser,
+  ): Promise<TestSubmissionResponseDto> {
+    return await this.marathonMatchConfigService.uploadTestSubmission(
+      challengeId,
+      body,
+      file,
+      user,
+    );
+  }
+
+  /**
+   * Returns the current status for an isolated validation submission run.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID returned by upload.
+   * @returns Current validation run progress and final scoring details when complete.
+   */
+  @Get('/:challengeId/test-submission/:testSubmissionId')
+  @Roles(
+    UserRole.Admin,
+    UserRole.Copilot,
+    UserRole.ProjectManager,
+    UserRole.User,
+  )
+  @Scopes(Scope.UpdateMarathonMatch)
+  @UseGuards(ChallengeCopilotResourceGuard)
+  @ApiOperation({
+    summary: 'Get Marathon Match validation submission scoring status',
+    description:
+      'Roles: Admin or challenge Copilot/Manager resource | Scopes: update:marathon-match',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the validation submission run',
+    example: '30000123',
+  })
+  @ApiParam({
+    name: 'testSubmissionId',
+    description: 'Validation run ID returned by upload',
+    example: 'valRun12345678',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation submission run status.',
+    type: TestSubmissionStatusResponseDto,
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Validation submission run not found.',
+  })
+  async getTestSubmissionStatus(
+    @Param('challengeId') challengeId: string,
+    @Param('testSubmissionId') testSubmissionId: string,
+  ): Promise<TestSubmissionStatusResponseDto> {
+    return await this.marathonMatchConfigService.getTestSubmissionStatus(
+      challengeId,
+      testSubmissionId,
+    );
+  }
+
+  /**
+   * Streams the uploaded ZIP for an isolated validation submission run.
+   * @param challengeId Challenge ID.
+   * @param testSubmissionId Validation run ID passed to ECS.
+   * @param res HTTP response used for download headers and binary payload.
+   * @returns A binary ZIP response for the ECS runner.
+   */
+  @Get('/:challengeId/test-submission/:testSubmissionId/download')
+  @Roles(UserRole.Admin)
+  @Scopes(Scope.UpdateMarathonMatch)
+  @ApiOperation({
+    summary: 'Download an isolated Marathon Match validation submission',
+    description:
+      'Roles: Admin | Scopes: update:marathon-match. Intended for ECS runner use.',
+  })
+  @ApiParam({
+    name: 'challengeId',
+    description: 'The challenge ID for the validation submission run',
+    example: '30000123',
+  })
+  @ApiParam({
+    name: 'testSubmissionId',
+    description: 'Validation run ID passed to ECS',
+    example: 'valRun12345678',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Uploaded validation submission ZIP.',
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Validation submission run not found.',
+  })
+  async downloadTestSubmission(
+    @Param('challengeId') challengeId: string,
+    @Param('testSubmissionId') testSubmissionId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const download =
+      await this.marathonMatchConfigService.getTestSubmissionFile(
+        challengeId,
+        testSubmissionId,
+      );
+    const fileName = download.fileName.replace(/[\r\n"]/g, '_');
+
+    res.setHeader(
+      'Content-Type',
+      download.mimeType || 'application/octet-stream',
+    );
+    res.setHeader('Content-Length', String(download.contentLength));
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(download.content);
   }
 
   /**

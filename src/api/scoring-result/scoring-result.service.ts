@@ -8,6 +8,7 @@ import {
 import {
   CompilationStatus,
   PhaseConfigType,
+  Prisma,
   ScoreDirection,
 } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -37,6 +38,7 @@ export interface ScoringResultCallbackPayload {
   testPhase: string;
   reviewTypeId: string;
   reviewId?: string;
+  validationRunId?: string;
   scorecardId?: string;
   metadata?: Record<string, unknown>;
   currentReview?: Record<string, unknown>;
@@ -60,6 +62,7 @@ export interface ScoringProgressCallbackPayload {
   progress: number;
   status: ScoringTestStatus;
   reviewId?: string;
+  validationRunId?: string;
   scorecardId?: string;
   completedTests?: number;
   totalTests?: number;
@@ -67,6 +70,27 @@ export interface ScoringProgressCallbackPayload {
   message?: string;
   metadata?: Record<string, unknown>;
 }
+
+export interface SkippedSubmissionScoringInput {
+  challengeId: string;
+  submissionId: string;
+  testPhase: string;
+  reason: string;
+  reviewId?: string;
+  scorecardId?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface SkippedSystemScoreDispatchResult {
+  skipped: true;
+  reason: string;
+  reviewId: string;
+  submissionId: string;
+}
+
+export type SystemScoreDispatchResult =
+  | MarathonMatchScorerTaskLaunchResult
+  | SkippedSystemScoreDispatchResult;
 
 interface ReviewSummationPayload {
   submissionId: string;
@@ -195,7 +219,7 @@ export class ScoringResultService {
 
   /**
    * Processes one scorer callback payload after verifying the challenge config exists,
-   * then completes any SYSTEM review before final summation writes.
+   * then writes terminal summations before completing any SYSTEM review.
    */
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
@@ -204,6 +228,16 @@ export class ScoringResultService {
 
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     const config = await this.requireScoringResultConfig(payload.challengeId);
+    const validationRunId = this.asString(payload.validationRunId)?.trim();
+    if (validationRunId) {
+      await this.recordValidationScoringResult(
+        validationRunId,
+        payload,
+        normalizedPhase,
+      );
+      return;
+    }
+
     const token = await this.m2mService.getM2MToken();
 
     if (!token) {
@@ -258,18 +292,6 @@ export class ScoringResultService {
         payload.score,
       );
 
-      await this.completeSystemReviewIfNeeded(
-        token,
-        payload.reviewId,
-        currentReviewScore,
-        normalizedPhase,
-        {
-          challengeId: payload.challengeId,
-          scorecardId: fallbackScorecardId,
-          submissionId: payload.submissionId,
-        },
-      );
-
       await this.upsertFromLegacyReviewPayload(token, {
         legacyReview: payload.currentReview,
         fallbackSubmissionId: payload.submissionId,
@@ -290,6 +312,18 @@ export class ScoringResultService {
         });
       }
 
+      await this.completeSystemReviewIfNeeded(
+        token,
+        payload.reviewId,
+        currentReviewScore,
+        normalizedPhase,
+        {
+          challengeId: payload.challengeId,
+          scorecardId: fallbackScorecardId,
+          submissionId: payload.submissionId,
+        },
+      );
+
       await this.notifyScoringCompletionEmailIfReady(
         token,
         payload,
@@ -307,6 +341,7 @@ export class ScoringResultService {
       testPhase: normalizedPhase,
     });
 
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.completeSystemReviewIfNeeded(
       token,
       payload.reviewId,
@@ -318,7 +353,6 @@ export class ScoringResultService {
         submissionId: payload.submissionId,
       },
     );
-    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
     await this.notifyScoringCompletionEmailIfReady(
       token,
       payload,
@@ -337,6 +371,16 @@ export class ScoringResultService {
   ): Promise<void> {
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
     await this.requireScoringResultConfig(payload.challengeId);
+    const validationRunId = this.asString(payload.validationRunId)?.trim();
+    if (validationRunId) {
+      await this.recordValidationScoringProgress(
+        validationRunId,
+        payload,
+        normalizedPhase,
+      );
+      return;
+    }
+
     const token = await this.m2mService.getM2MToken();
 
     if (!token) {
@@ -373,6 +417,204 @@ export class ScoringResultService {
     });
 
     await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+  }
+
+  /**
+   * Stores the final scorer callback on an isolated validation run without
+   * creating or updating Review API summations.
+   * @param validationRunId Validation run created by Score Operations upload.
+   * @param payload Runner callback payload containing score and scorer metadata.
+   * @param normalizedPhase Normalized example/provisional/system phase name.
+   * @returns Promise that resolves when the validation run has been updated.
+   * @throws NotFoundException When the validation run does not exist for the callback challenge.
+   * Used by `processScoringResult` when the ECS runner includes `validationRunId`.
+   */
+  private async recordValidationScoringResult(
+    validationRunId: string,
+    payload: ScoringResultCallbackPayload,
+    normalizedPhase: string,
+  ): Promise<void> {
+    const metadata = this.withFinalTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      payload.score,
+    );
+    const existingRun = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: validationRunId,
+        challengeId: payload.challengeId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingRun) {
+      throw new NotFoundException(
+        `Validation submission run ${validationRunId} not found for challenge ${payload.challengeId}.`,
+      );
+    }
+
+    await this.prisma.testSubmissionRun.update({
+      where: { id: validationRunId },
+      data: {
+        status: ScoringTestStatus.Success,
+        score: payload.score,
+        message: 'Scoring complete.',
+        metadata: metadata as Prisma.InputJsonValue,
+        currentReview: this.toOptionalJson(payload.currentReview),
+        impactedReviews: this.toOptionalJson(payload.impactedReviews),
+        progress: 1,
+        completedTests:
+          this.countCompletedTestScores(metadata) ||
+          this.resolveTotalTests(metadata) ||
+          undefined,
+        totalTests: this.resolveTotalTests(metadata),
+        failedTests: this.countFailedTestScores(metadata),
+        completedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Stores an intermediate runner progress callback on an isolated validation run
+   * without creating or updating Review API summations.
+   * @param validationRunId Validation run created by Score Operations upload.
+   * @param payload Runner progress payload.
+   * @param normalizedPhase Normalized example/provisional/system phase name.
+   * @returns Promise that resolves when the validation run has been updated.
+   * @throws NotFoundException When the validation run does not exist for the callback challenge.
+   * Used by `processScoringProgress` when the ECS runner includes `validationRunId`.
+   */
+  private async recordValidationScoringProgress(
+    validationRunId: string,
+    payload: ScoringProgressCallbackPayload,
+    normalizedPhase: string,
+  ): Promise<void> {
+    const metadata = this.withTestProgressMetadata(
+      this.normalizeMetadata(
+        payload.metadata,
+        normalizedPhase,
+        payload.reviewTypeId,
+      ),
+      {
+        completedTests: payload.completedTests,
+        failedTests: payload.failedTests,
+        message: payload.message,
+        progress: payload.progress,
+        reviewId: payload.reviewId,
+        status: payload.status,
+        totalTests: payload.totalTests,
+      },
+    );
+    const existingRun = await this.prisma.testSubmissionRun.findFirst({
+      where: {
+        id: validationRunId,
+        challengeId: payload.challengeId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existingRun) {
+      throw new NotFoundException(
+        `Validation submission run ${validationRunId} not found for challenge ${payload.challengeId}.`,
+      );
+    }
+
+    await this.prisma.testSubmissionRun.update({
+      where: { id: validationRunId },
+      data: {
+        status:
+          payload.status === ScoringTestStatus.Failed
+            ? ScoringTestStatus.Failed
+            : ScoringTestStatus.InProgress,
+        message: payload.message,
+        metadata: metadata as Prisma.InputJsonValue,
+        progress: this.clampProgress(payload.progress),
+        completedTests: this.normalizeNonNegativeInteger(
+          payload.completedTests,
+        ),
+        totalTests: this.normalizeNonNegativeInteger(payload.totalTests),
+        failedTests: this.normalizeNonNegativeInteger(payload.failedTests),
+        completedAt:
+          payload.status === ScoringTestStatus.Failed ? new Date() : undefined,
+      },
+    });
+  }
+
+  /**
+   * Persists a terminal failed review summation for a submission that should not
+   * be dispatched to the runner. Used when preflight checks, such as virus scan
+   * status, determine that example, provisional, or SYSTEM scoring must be skipped.
+   * @param input Challenge, submission, phase, and skip context to write.
+   * @returns Promise that resolves after the failed summation has been created or updated.
+   * @throws NotFoundException When the Marathon Match config cannot be found.
+   * @throws Error When auth or review-api persistence fails.
+   */
+  async markSubmissionScoringSkipped(
+    input: SkippedSubmissionScoringInput,
+  ): Promise<void> {
+    const normalizedPhase = this.normalizeTestPhase(input.testPhase);
+    await this.requireScoringResultConfig(input.challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error('Unable to get M2M token for skipped scoring marker.');
+    }
+
+    const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
+    const fallbackScorecardId = await this.resolveScorecardId(
+      token,
+      input.scorecardId,
+    );
+    const metadata = this.withTestProgressMetadata(
+      this.normalizeMetadata(
+        {
+          challengeId: input.challengeId,
+          marathonMatchScoringSkipped: true,
+          marathonMatchScoringSkipReason: input.reason,
+          ...(input.details && Object.keys(input.details).length > 0
+            ? { marathonMatchScoringSkipDetails: input.details }
+            : {}),
+        },
+        normalizedPhase,
+        reviewTypeId,
+      ),
+      {
+        completedTests: 0,
+        failedTests: 1,
+        message: input.reason,
+        progress: 1,
+        reviewId: input.reviewId,
+        status: ScoringTestStatus.Failed,
+        totalTests: 0,
+      },
+    );
+    const reviewPayload = this.buildSummationPayload({
+      submissionId: input.submissionId,
+      score: -1,
+      scorecardId: fallbackScorecardId,
+      metadata,
+      testPhase: normalizedPhase,
+    });
+
+    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+    await this.completeSystemReviewIfNeeded(
+      token,
+      input.reviewId,
+      reviewPayload.aggregateScore,
+      normalizedPhase,
+      {
+        challengeId: input.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: input.submissionId,
+      },
+    );
   }
 
   /**
@@ -440,12 +682,13 @@ export class ScoringResultService {
    * @param reviewId Review identifier created in review-api.
    * @param submissionId Submission identifier to score.
    * @param challengeId Challenge identifier used to resolve Marathon Match config.
+   * @returns ECS launch metadata, or a skipped result after writing a failed summation.
    */
   async triggerSystemScore(
     reviewId: string,
     submissionId: string,
     challengeId: string,
-  ): Promise<MarathonMatchScorerTaskLaunchResult> {
+  ): Promise<SystemScoreDispatchResult> {
     const config = await this.prisma.marathonMatchConfig.findUnique({
       where: { challengeId },
       include: {
@@ -486,6 +729,57 @@ export class ScoringResultService {
       throw new BadRequestException(
         `Marathon match config ${challengeId} requires a SYSTEM phase config for system scoring dispatch.`,
       );
+    }
+
+    const submissionApiBaseUrl =
+      process.env.SUBMISSION_API_URL?.trim() || config.submissionApiUrl?.trim();
+    if (!submissionApiBaseUrl) {
+      throw new Error(
+        `Submission API URL is not configured for challenge ${challengeId}.`,
+      );
+    }
+
+    const token = await this.m2mService.getM2MToken();
+    if (!token) {
+      throw new Error(
+        'Unable to get M2M token for SYSTEM scoring submission preflight.',
+      );
+    }
+
+    const submission = await this.fetchSubmissionById(
+      token,
+      submissionApiBaseUrl,
+      submissionId,
+    );
+    if (!this.isSubmissionCleanForScoring(submission)) {
+      const reason =
+        'Marathon Match SYSTEM scoring skipped because the submission has not passed virus scanning.';
+      await this.markSubmissionScoringSkipped({
+        challengeId,
+        details: {
+          virusScan: submission?.virusScan ?? null,
+        },
+        reason,
+        reviewId,
+        scorecardId: config.reviewScorecardId,
+        submissionId,
+        testPhase: 'system',
+      });
+      this.logger.log({
+        message:
+          'Skipped Marathon Match SYSTEM score dispatch because submission is not virus-scanned.',
+        challengeId,
+        submissionId,
+        reviewId,
+        virusScan: submission?.virusScan ?? null,
+      });
+
+      return {
+        skipped: true,
+        reason,
+        reviewId,
+        submissionId,
+      };
     }
 
     const launchResult = await this.ecsService.launchScorerTask(
@@ -612,7 +906,7 @@ export class ScoringResultService {
   /**
    * Recomputes relative scores for the latest submission from each member while
    * holding a challenge/phase advisory lock for the read-compute-write cycle.
-   * Completes the current SYSTEM review before writing the recomputed summations.
+   * Writes recomputed summations before completing the current SYSTEM review.
    * Returns undefined when relative scoring cannot be applied and the caller
    * should fall back to direct review upserts.
    */
@@ -751,18 +1045,6 @@ export class ScoringResultService {
       return undefined;
     }
 
-    await this.completeSystemReviewIfNeeded(
-      token,
-      payload.reviewId,
-      currentReviewPayload.payload.aggregateScore,
-      testPhase,
-      {
-        challengeId: payload.challengeId,
-        scorecardId: fallbackScorecardId,
-        submissionId: payload.submissionId,
-      },
-    );
-
     for (let index = 0; index < relativeReviewPayloads.length; index += 1) {
       const reviewPayload = relativeReviewPayloads[index];
       const reviewId = this.asString(reviewPayload.reviewObject.id);
@@ -787,6 +1069,18 @@ export class ScoringResultService {
       );
     }
 
+    await this.completeSystemReviewIfNeeded(
+      token,
+      payload.reviewId,
+      currentReviewPayload.payload.aggregateScore,
+      testPhase,
+      {
+        challengeId: payload.challengeId,
+        scorecardId: fallbackScorecardId,
+        submissionId: payload.submissionId,
+      },
+    );
+
     return currentReviewPayload?.payload.aggregateScore;
   }
 
@@ -810,7 +1104,7 @@ export class ScoringResultService {
     );
 
     return this.prisma.$transaction(async (prisma) => {
-      await prisma.$queryRaw`
+      await prisma.$executeRaw`
         SELECT pg_advisory_xact_lock(${classId}::integer, ${objectId}::integer)
       `;
       return work();
@@ -1059,7 +1353,6 @@ export class ScoringResultService {
         exampleResult.status === 'pass' && provisionalResult.status === 'pass'
           ? 'pass'
           : 'fail',
-      aggregateExampleScore: exampleResult.aggregateScore,
       aggregateProvisionalScore: provisionalResult.aggregateScore,
     };
   }
@@ -1544,6 +1837,17 @@ export class ScoringResultService {
   }
 
   /**
+   * Checks whether a submission-api record is eligible for scorer execution.
+   * @param submission Submission record returned by submission-api-v6.
+   * @returns True only when `virusScan` is explicitly true.
+   */
+  private isSubmissionCleanForScoring(
+    submission: Record<string, unknown> | undefined,
+  ): boolean {
+    return this.parseBooleanFlag(submission?.virusScan) === true;
+  }
+
+  /**
    * Resolves the public challenge name from challenge-api-v6 for email payloads.
    * Falls back to the stored Marathon Match config name when challenge-api does
    * not return a usable name.
@@ -1878,9 +2182,7 @@ export class ScoringResultService {
         failedTests,
         progress: 1,
         status:
-          failedTests > 0
-            ? ScoringTestStatus.Failed
-            : ScoringTestStatus.Success,
+          totalTests > 0 ? ScoringTestStatus.Success : ScoringTestStatus.Failed,
         totalTests,
       },
     );
@@ -2382,11 +2684,11 @@ export class ScoringResultService {
     finalScore: number,
   ): Record<string, unknown> {
     const totalTests = this.resolveTotalTests(metadata);
-    const completedTests =
-      totalTests ?? this.countCompletedTestScores(metadata);
+    const completedTestScores = this.countCompletedTestScores(metadata);
+    const completedTests = totalTests ?? completedTestScores;
     const failedTests = this.countFailedTestScores(metadata);
     const status =
-      finalScore < 0 || failedTests > 0
+      finalScore < 0 && completedTestScores === 0
         ? ScoringTestStatus.Failed
         : ScoringTestStatus.Success;
 
@@ -2647,7 +2949,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Completes the originating review record before final SYSTEM summations are persisted.
+   * Completes the originating review record after final SYSTEM summations are persisted.
    */
   private async completeSystemReviewIfNeeded(
     token: string,
@@ -2980,6 +3282,20 @@ export class ScoringResultService {
   }
 
   /**
+   * Converts optional runner payload fragments into Prisma JSON input values.
+   * @param value Callback fragment from the runner.
+   * @returns JSON input value when present, otherwise undefined so Prisma leaves the field unset.
+   * Used by validation-run persistence for current/impacted review details.
+   */
+  private toOptionalJson(value: unknown): Prisma.InputJsonValue | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return value as Prisma.InputJsonValue;
+  }
+
+  /**
    * Resolves total test count from runner metadata.
    */
   private resolveTotalTests(
@@ -3030,7 +3346,7 @@ export class ScoringResultService {
   }
 
   /**
-   * Parses boolean values from booleans and string booleans.
+   * Parses boolean values from booleans, string booleans, and numeric flags.
    */
   private parseBooleanFlag(value: unknown): boolean | null {
     if (typeof value === 'boolean') {
@@ -3043,6 +3359,15 @@ export class ScoringResultService {
         return true;
       }
       if (normalized === 'false') {
+        return false;
+      }
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
         return false;
       }
     }
