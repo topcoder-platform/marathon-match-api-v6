@@ -1353,7 +1353,6 @@ export class ScoringResultService {
         exampleResult.status === 'pass' && provisionalResult.status === 'pass'
           ? 'pass'
           : 'fail',
-      aggregateExampleScore: exampleResult.aggregateScore,
       aggregateProvisionalScore: provisionalResult.aggregateScore,
     };
   }
