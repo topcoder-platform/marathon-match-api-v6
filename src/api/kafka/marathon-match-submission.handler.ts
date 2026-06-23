@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
+import type { AxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
@@ -67,6 +68,17 @@ interface SkippedReviewSummationPayload {
   isProvisional?: boolean;
   isExample?: boolean;
   metadata: Record<string, unknown>;
+}
+
+interface ExternalApiRequestLogContext {
+  operation: string;
+  method: string;
+  url: string;
+  challengeId?: string;
+  submissionId?: string;
+  testPhase?: string;
+  reviewSummationId?: string;
+  params?: Record<string, unknown>;
 }
 
 /**
@@ -331,6 +343,7 @@ export class MarathonMatchSubmissionHandler
           message: 'Failed to process marathon match submission event',
           topic: this.topic,
           error: resolvedError.message,
+          httpError: this.extractAxiosErrorDetails(error),
         },
         resolvedError.stack,
       );
@@ -353,12 +366,21 @@ export class MarathonMatchSubmissionHandler
     }
 
     const challengeUrl = `${this.challengeApiBaseUrl}/v6/challenges/${challengeId}`;
-    const response = await firstValueFrom(
-      this.httpService.get<ChallengeResponse>(challengeUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }),
+    const response = await this.callExternalApi(
+      {
+        operation: 'challenge-api.get-challenge',
+        method: 'GET',
+        url: challengeUrl,
+        challengeId,
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.get<ChallengeResponse>(challengeUrl, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        ),
     );
 
     return this.extractOpenPhaseResolution(response.data);
@@ -380,12 +402,21 @@ export class MarathonMatchSubmissionHandler
     const url = `${this.buildSubmissionApiBaseUrl(
       submissionApiUrl,
     )}/submissions/${encodeURIComponent(submissionId)}`;
-    const response = await firstValueFrom(
-      this.httpService.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }),
+    const response = await this.callExternalApi(
+      {
+        operation: 'submission-api.get-submission',
+        method: 'GET',
+        url,
+        submissionId,
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.get(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        ),
     );
 
     return this.extractSubmissionRecord(response.data);
@@ -686,13 +717,25 @@ export class MarathonMatchSubmissionHandler
       params.provisional = 'true';
     }
 
-    const response = await firstValueFrom(
-      this.httpService.get(this.buildReviewSummationUrl(), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    const url = this.buildReviewSummationUrl();
+    const response = await this.callExternalApi(
+      {
+        operation: 'review-api.find-review-summations',
+        method: 'GET',
+        url,
+        submissionId,
+        testPhase: normalizedPhase,
         params,
-      }),
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.get(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            params,
+          }),
+        ),
     );
 
     const reviewSummations = this.extractReviewSummationArray(response.data);
@@ -717,12 +760,25 @@ export class MarathonMatchSubmissionHandler
     token: string,
     payload: SkippedReviewSummationPayload,
   ): Promise<void> {
-    await firstValueFrom(
-      this.httpService.post(this.buildReviewSummationUrl(), payload, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }),
+    const url = this.buildReviewSummationUrl();
+    await this.callExternalApi(
+      {
+        operation: 'review-api.create-review-summation',
+        method: 'POST',
+        url,
+        submissionId: payload.submissionId,
+        testPhase: this.normalizeTestPhase(
+          this.asString(payload.metadata.testType),
+        ),
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.post(url, payload, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        ),
     );
   }
 
@@ -737,17 +793,161 @@ export class MarathonMatchSubmissionHandler
     reviewSummationId: string,
     payload: SkippedReviewSummationPayload,
   ): Promise<void> {
-    await firstValueFrom(
-      this.httpService.put(
-        `${this.buildReviewSummationUrl()}/${encodeURIComponent(reviewSummationId)}`,
-        payload,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      ),
+    const url = `${this.buildReviewSummationUrl()}/${encodeURIComponent(reviewSummationId)}`;
+    await this.callExternalApi(
+      {
+        operation: 'review-api.update-review-summation',
+        method: 'PUT',
+        url,
+        submissionId: payload.submissionId,
+        reviewSummationId,
+        testPhase: this.normalizeTestPhase(
+          this.asString(payload.metadata.testType),
+        ),
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.put(url, payload, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        ),
     );
+  }
+
+  /**
+   * Logs external API request/failure context without token-bearing headers.
+   * @param context Operation and request metadata safe for logs.
+   * @param request Deferred HTTP request.
+   * @returns HTTP response from the deferred request.
+   */
+  private async callExternalApi<T>(
+    context: ExternalApiRequestLogContext,
+    request: () => Promise<T>,
+  ): Promise<T> {
+    this.logger.log({
+      message: 'Calling external API',
+      ...context,
+    });
+
+    try {
+      return await request();
+    } catch (error) {
+      this.logger.error({
+        message: 'External API call failed',
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+        httpError: this.extractAxiosErrorDetails(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Extracts safe Axios failure details for request diagnostics.
+   * @param error Unknown error thrown by Axios/RxJS request flow.
+   * @returns Redacted HTTP details, or undefined for non-Axios errors.
+   */
+  private extractAxiosErrorDetails(
+    error: unknown,
+  ): Record<string, unknown> | undefined {
+    if (!this.isAxiosError(error)) {
+      return undefined;
+    }
+
+    return {
+      status: error.response?.status ?? null,
+      statusText: error.response?.statusText ?? null,
+      code: error.code ?? null,
+      method: error.config?.method?.toUpperCase() ?? null,
+      url: this.resolveAxiosRequestUrl(
+        error.config?.url,
+        error.config?.baseURL,
+      ),
+      params: this.asLoggableRecord(error.config?.params),
+      responseData: this.serializeForLog(error.response?.data),
+    };
+  }
+
+  /**
+   * Identifies Axios errors without depending on a concrete AxiosError class.
+   * @param error Unknown thrown value.
+   * @returns True when the value looks like an Axios error.
+   */
+  private isAxiosError(error: unknown): error is AxiosError {
+    return this.asRecord(error).isAxiosError === true;
+  }
+
+  /**
+   * Resolves Axios `baseURL` plus `url` into the effective request URL when possible.
+   * @param url Request URL.
+   * @param baseUrl Optional Axios base URL.
+   * @returns Effective URL suitable for logging.
+   */
+  private resolveAxiosRequestUrl(
+    url?: string,
+    baseUrl?: string,
+  ): string | null {
+    if (!url) {
+      return null;
+    }
+
+    if (!baseUrl) {
+      return url;
+    }
+
+    try {
+      return new URL(url, baseUrl).toString();
+    } catch {
+      return url;
+    }
+  }
+
+  /**
+   * Returns a shallow loggable record for params/config payloads.
+   * @param value Unknown Axios config value.
+   * @returns Record when the value is object-like, otherwise the primitive value.
+   */
+  private asLoggableRecord(
+    value: unknown,
+  ): Record<string, unknown> | string | number | boolean | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (this.isRecord(value)) {
+      return value;
+    }
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return value;
+    }
+
+    return this.serializeForLog(value) ?? null;
+  }
+
+  /**
+   * Serializes response body snippets while bounding log size.
+   * @param value Unknown response data.
+   * @returns String response preview, or undefined when not serializable.
+   */
+  private serializeForLog(value: unknown): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    try {
+      const serialized =
+        typeof value === 'string' ? value : JSON.stringify(value);
+      return serialized.length > 1000
+        ? `${serialized.slice(0, 1000)}...`
+        : serialized;
+    } catch {
+      return '[Unserializable response data]';
+    }
   }
 
   /**

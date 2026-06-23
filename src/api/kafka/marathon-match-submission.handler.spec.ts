@@ -1,5 +1,5 @@
 import { CompilationStatus } from '@prisma/client';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
@@ -175,6 +175,107 @@ describe('MarathonMatchSubmissionHandler', () => {
       undefined,
       { memberId: 'member-1' },
     );
+  });
+
+  it('logs outbound URL details when submission-api preflight returns 403', async () => {
+    const originalSubmissionApiUrl = process.env.SUBMISSION_API_URL;
+    delete process.env.SUBMISSION_API_URL;
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
+    const submissionUrl =
+      'https://api.topcoder.com/v6/submissions/submission-1';
+    const axiosError = Object.assign(
+      new Error('Request failed with status code 403'),
+      {
+        isAxiosError: true,
+        config: {
+          method: 'get',
+          url: submissionUrl,
+        },
+        response: {
+          status: 403,
+          statusText: 'Forbidden',
+          data: {
+            message: 'Forbidden',
+          },
+        },
+      },
+    );
+
+    try {
+      prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+        id: 'config-1',
+        challengeId: 'challenge-1',
+        active: true,
+        submissionApiUrl: 'https://api.topcoder.com/v6',
+        testerId: 'tester-1',
+        taskDefinitionName: 'mm-ecs-runner',
+        taskDefinitionVersion: '7',
+        tester: {
+          compilationStatus: CompilationStatus.SUCCESS,
+        },
+        phaseConfigs: [
+          {
+            id: 'phase-provisional',
+            configType: 'PROVISIONAL',
+            phaseId: 'submission-phase',
+            startSeed: BigInt(500),
+            numberOfTests: 20,
+          },
+        ],
+      });
+
+      (handler as any).getOpenPhaseResolution = jest.fn().mockResolvedValue({
+        phaseIds: ['submission-phase'],
+        phaseIdentifiers: ['submission-phase'],
+      });
+
+      m2mService.getM2MToken.mockResolvedValue('m2m-token');
+      httpService.get.mockReturnValue(throwError(() => axiosError));
+
+      await expect(
+        handler.handle({
+          submissionId: 'submission-1',
+          challengeId: 'challenge-1',
+          submissionUrl: 'https://example.com/submission.zip',
+          memberHandle: 'tester',
+          memberId: 'member-1',
+          submittedDate: '2026-03-26T01:27:22.829Z',
+        }),
+      ).rejects.toThrow('Request failed with status code 403');
+
+      expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+      expect(mockLogger.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Calling external API',
+          operation: 'submission-api.get-submission',
+          method: 'GET',
+          url: submissionUrl,
+          submissionId: 'submission-1',
+        }),
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'External API call failed',
+          operation: 'submission-api.get-submission',
+          method: 'GET',
+          url: submissionUrl,
+          submissionId: 'submission-1',
+          httpError: expect.objectContaining({
+            status: 403,
+            method: 'GET',
+            url: submissionUrl,
+            responseData: '{"message":"Forbidden"}',
+          }),
+        }),
+      );
+    } finally {
+      if (originalSubmissionApiUrl === undefined) {
+        delete process.env.SUBMISSION_API_URL;
+      } else {
+        process.env.SUBMISSION_API_URL = originalSubmissionApiUrl;
+      }
+    }
   });
 
   it('marks configured submissions failed when no open phase matches the stored phase config', async () => {
