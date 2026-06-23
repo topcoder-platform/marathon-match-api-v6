@@ -31,6 +31,10 @@ import {
   UpdateMarathonMatchConfigDto,
 } from 'src/dto/marathon-match-config.dto';
 import {
+  resolvePersistedSubmissionApiBaseUrl,
+  resolveSubmissionApiBaseUrl,
+} from 'src/shared/config/submission-api-url.config';
+import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
 } from 'src/shared/modules/global/ecs.service';
@@ -206,6 +210,10 @@ export class MarathonMatchConfigService {
         ? parsedCompileTimeout
         : 120000;
     const systemTestTimeout = this.defaultSystemTestTimeout;
+    const submissionApiUrl = resolvePersistedSubmissionApiBaseUrl(
+      undefined,
+      this.challengeApiBaseUrl,
+    );
     const taskDefinitionName =
       process.env.DEFAULT_TASK_DEFINITION_NAME?.trim() || '';
     const taskDefinitionVersion =
@@ -216,6 +224,7 @@ export class MarathonMatchConfigService {
       testTimeout,
       compileTimeout,
       systemTestTimeout,
+      submissionApiUrl,
       taskDefinitionName,
       taskDefinitionVersion,
     };
@@ -265,6 +274,10 @@ export class MarathonMatchConfigService {
         challengeId,
         phaseConfigsWithBigIntSeeds,
       );
+      const submissionApiUrl = resolvePersistedSubmissionApiBaseUrl(
+        body.submissionApiUrl,
+        this.challengeApiBaseUrl,
+      );
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
       const configId = nanoid(14);
@@ -277,7 +290,7 @@ export class MarathonMatchConfigService {
             active: body.active,
             relativeScoringEnabled: body.relativeScoringEnabled,
             scoreDirection: body.scoreDirection,
-            submissionApiUrl: body.submissionApiUrl,
+            submissionApiUrl,
             reviewScorecardId: body.reviewScorecardId,
             testerId: body.testerId,
             testTimeout: body.testTimeout,
@@ -395,6 +408,12 @@ export class MarathonMatchConfigService {
       const { example, provisional, system, ...scalarFields } = body;
       if (scalarFields.reviewScorecardId) {
         scalarFields.reviewScorecardId = scalarFields.reviewScorecardId.trim();
+      }
+      if (scalarFields.submissionApiUrl !== undefined) {
+        scalarFields.submissionApiUrl = resolvePersistedSubmissionApiBaseUrl(
+          scalarFields.submissionApiUrl,
+          this.challengeApiBaseUrl,
+        );
       }
       const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: example, configType: PhaseConfigType.EXAMPLE },
@@ -611,14 +630,11 @@ export class MarathonMatchConfigService {
         );
       }
 
-      const submissionApiBaseUrl =
-        process.env.SUBMISSION_API_URL?.trim() ||
-        config.submissionApiUrl?.trim();
-      if (!submissionApiBaseUrl) {
-        throw new Error(
-          `Submission API URL is not configured for challenge ${challengeId}.`,
-        );
-      }
+      const submissionApiBaseUrl = resolveSubmissionApiBaseUrl({
+        configuredUrl: config.submissionApiUrl,
+        fallbackApiBaseUrl: this.challengeApiBaseUrl,
+        environmentUrls: [this.challengeApiBaseUrl],
+      });
 
       const token = await this.m2mService.getM2MToken();
       if (!token) {
@@ -2355,7 +2371,11 @@ export class MarathonMatchConfigService {
       active: config.active,
       relativeScoringEnabled: config.relativeScoringEnabled,
       scoreDirection: config.scoreDirection,
-      submissionApiUrl: config.submissionApiUrl,
+      submissionApiUrl: resolveSubmissionApiBaseUrl({
+        configuredUrl: config.submissionApiUrl,
+        fallbackApiBaseUrl: this.challengeApiBaseUrl,
+        environmentUrls: [this.challengeApiBaseUrl],
+      }),
       reviewScorecardId: config.reviewScorecardId,
       testerId: config.testerId,
       testTimeout: config.testTimeout,

@@ -60,7 +60,7 @@ model marathonMatchConfig {
   active                Boolean       @default(true)
   relativeScoringEnabled Boolean      @default(true)
   scoreDirection        ScoreDirection @default(MAXIMIZE)
-  submissionApiUrl      String        @default("https://api.topcoder-dev.com/v6")
+  submissionApiUrl      String
   reviewScorecardId     String
   testerId              String        @db.VarChar(14)
   testTimeout           Int

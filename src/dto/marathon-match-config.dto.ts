@@ -170,8 +170,8 @@ export class CreateMarathonMatchConfigDto {
   @ApiProperty({
     description: 'Submission API base URL',
     required: false,
-    default: 'https://api.topcoder-dev.com/v6',
-    example: 'https://api.topcoder-dev.com/v6',
+    default: '${CHALLENGE_API_URL}/v6',
+    example: 'https://api.topcoder.com/v6',
   })
   @IsOptional()
   @IsUrl()
@@ -317,7 +317,7 @@ export class UpdateMarathonMatchConfigDto {
   @ApiProperty({
     description: 'Submission API base URL',
     required: false,
-    example: 'https://api.topcoder-dev.com/v6',
+    example: 'https://api.topcoder.com/v6',
   })
   @IsOptional()
   @IsUrl()
@@ -457,6 +457,13 @@ export class MarathonMatchDefaultsResponseDto {
 
   @ApiProperty({
     description:
+      'Default Submission API base URL used to pre-fill new configs. Must be the API base, not the /submissions collection URL.',
+    example: 'https://api.topcoder.com/v6',
+  })
+  submissionApiUrl: string;
+
+  @ApiProperty({
+    description:
       'Default ECS task definition name used to pre-fill new configs. Empty string when not configured.',
     example: 'mm-submission-runner',
   })
@@ -540,7 +547,7 @@ export class MarathonMatchConfigResponseDto {
 
   @ApiProperty({
     description: 'Submission API base URL',
-    example: 'https://api.topcoder-dev.com/v6',
+    example: 'https://api.topcoder.com/v6',
   })
   submissionApiUrl: string;
 

@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
+import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
@@ -216,14 +217,11 @@ export class MarathonMatchSubmissionHandler
         );
       }
 
-      const submissionApiBaseUrl =
-        process.env.SUBMISSION_API_URL?.trim() ||
-        config.submissionApiUrl?.trim();
-      if (!submissionApiBaseUrl) {
-        throw new Error(
-          `Submission API URL is not configured for challenge ${challengeId}.`,
-        );
-      }
+      const submissionApiBaseUrl = resolveSubmissionApiBaseUrl({
+        configuredUrl: config.submissionApiUrl,
+        fallbackApiBaseUrl: this.challengeApiBaseUrl,
+        environmentUrls: [this.challengeApiBaseUrl],
+      });
 
       const token = await this.m2mService.getM2MToken();
       if (!token) {

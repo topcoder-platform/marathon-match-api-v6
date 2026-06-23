@@ -4651,12 +4651,7 @@ public class EcsRunnerMain {
             );
             String compilationOutput = readCompilationOutput(compileLogPath);
             StringBuilder outputText = new StringBuilder();
-            long outputBytes = appendLimitedOutput(
-                outputText,
-                buildMemberVisibleCompilationOutput(compilationOutput),
-                0L,
-                "artifacts/public/output.txt"
-            );
+            long outputBytes = 0L;
             grantScorerReadExecuteAccess(compileWorkDir);
 
             MarathonController controller = new MarathonController();
@@ -4780,7 +4775,7 @@ public class EcsRunnerMain {
                 new ArrayList<Map<String, Object>>()
             );
         } catch (Exception error) {
-            writePreResultMemberOutput(outputPath, compileLogPath, error);
+            writePreResultMemberOutput(outputPath, error);
             throw error;
         } finally {
             if (!cleanupDeferred) {
@@ -4790,7 +4785,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Reads the compiler log that should be embedded in member-visible and private outputs.
+     * Reads the compiler log that should be retained in metadata and private outputs.
      *
      * @param compileLogPath Public compile log written by compiler commands.
      * @return Compiler output text, or a short no-output marker when no compiler command ran.
@@ -4812,36 +4807,14 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Builds the public {@code output.txt} compilation section shown before test cases.
-     *
-     * @param compilationOutput Compiler diagnostics captured for the submission.
-     * @return Member-visible compilation text block ending with a blank line.
-     */
-    private static String buildMemberVisibleCompilationOutput(
-        String compilationOutput
-    ) {
-        StringBuilder outputText = new StringBuilder();
-        outputText.append("Compilation Output:\n");
-        if (compilationOutput == null || compilationOutput.trim().isEmpty()) {
-            outputText.append("No compilation output was produced.");
-        } else {
-            outputText.append(compilationOutput.trim());
-        }
-        outputText.append("\n\n");
-        return outputText.toString();
-    }
-
-    /**
      * Writes a partial member-visible output file when the generic runner fails
      * before normal score output can be finalized.
      *
      * @param outputPath Public {@code output.txt} artifact path.
-     * @param compileLogPath Public compile log path to embed.
      * @param error Failure that prevented normal output generation.
      */
     private static void writePreResultMemberOutput(
         Path outputPath,
-        Path compileLogPath,
         Throwable error
     ) {
         if (outputPath == null || isNonSymlinkRegularFile(outputPath)) {
@@ -4850,16 +4823,10 @@ public class EcsRunnerMain {
 
         try {
             StringBuilder outputText = new StringBuilder();
-            long outputBytes = appendLimitedOutput(
-                outputText,
-                buildMemberVisibleCompilationOutput(readCompilationOutput(compileLogPath)),
-                0L,
-                "artifacts/public/output.txt"
-            );
             appendLimitedOutput(
                 outputText,
                 "Runner Error:\n" + safeLogValue(error == null ? null : error.getMessage()) + "\n",
-                outputBytes,
+                0L,
                 "artifacts/public/output.txt"
             );
 

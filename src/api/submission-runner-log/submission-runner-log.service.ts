@@ -10,6 +10,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
+import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
 import { UserRole } from 'src/shared/enums/userRole.enum';
 import { JwtUser } from 'src/shared/modules/global/jwt.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
@@ -332,11 +333,15 @@ export class SubmissionRunnerLogService {
       select: { submissionApiUrl: true },
     });
 
-    return (
-      config?.submissionApiUrl?.trim() ||
-      process.env.SUBMISSION_API_URL?.trim() ||
-      'https://api.topcoder-dev.com/v6'
-    );
+    return resolveSubmissionApiBaseUrl({
+      configuredUrl: config?.submissionApiUrl,
+      fallbackApiBaseUrl: process.env.CHALLENGE_API_URL,
+      environmentUrls: [
+        process.env.CHALLENGE_API_URL,
+        process.env.MARATHON_MATCH_API_URL,
+        process.env.REVIEW_API_URL,
+      ],
+    });
   }
 
   /**

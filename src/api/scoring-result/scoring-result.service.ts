@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
+import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
 import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
@@ -731,13 +732,11 @@ export class ScoringResultService {
       );
     }
 
-    const submissionApiBaseUrl =
-      process.env.SUBMISSION_API_URL?.trim() || config.submissionApiUrl?.trim();
-    if (!submissionApiBaseUrl) {
-      throw new Error(
-        `Submission API URL is not configured for challenge ${challengeId}.`,
-      );
-    }
+    const submissionApiBaseUrl = resolveSubmissionApiBaseUrl({
+      configuredUrl: config.submissionApiUrl,
+      fallbackApiBaseUrl: this.challengeApiBaseUrl,
+      environmentUrls: [this.challengeApiBaseUrl],
+    });
 
     const token = await this.m2mService.getM2MToken();
     if (!token) {
@@ -1167,7 +1166,11 @@ export class ScoringResultService {
 
     return {
       challengeId: config.challengeId,
-      submissionApiUrl: config.submissionApiUrl.trim() || undefined,
+      submissionApiUrl: resolveSubmissionApiBaseUrl({
+        configuredUrl: config.submissionApiUrl,
+        fallbackApiBaseUrl: this.challengeApiBaseUrl,
+        environmentUrls: [this.challengeApiBaseUrl],
+      }),
       enabled: relativeScoringEnabled === true,
       scoreDirection,
     };
