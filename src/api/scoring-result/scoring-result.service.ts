@@ -194,6 +194,16 @@ interface SystemScoringCompletionCandidate {
   scoringResult: CompletedPhaseScoringResult;
 }
 
+interface SubmissionPagination {
+  page?: number;
+  perPage?: number;
+  total?: number;
+  totalPages?: number;
+}
+
+const SUBMISSION_PAGE_SIZE = 100;
+const MAX_SUBMISSION_PAGES = 1000;
+
 /**
  * Applies marathon-match review summation updates based on scorer callback data.
  * Relative-score propagation is handled here to keep ECS runner logic lightweight.
@@ -1778,6 +1788,14 @@ export class ScoringResultService {
 
   /**
    * Fetches all submissions for one challenge through the submission API.
+   * The submission-api pagination contract has varied across deployments, so
+   * this follows header metadata, body metadata, and finally full-page results
+   * to avoid silently truncating relative scoring at the first 100 records.
+   * @param token M2M token for submission-api-v6.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param challengeId Challenge whose submissions should be fetched.
+   * @returns Every submission returned for the challenge across all API pages.
+   * @throws Error when pagination does not terminate within a defensive page cap.
    */
   private async fetchChallengeSubmissions(
     token: string,
@@ -1786,9 +1804,9 @@ export class ScoringResultService {
   ): Promise<Record<string, unknown>[]> {
     const submissions: Record<string, unknown>[] = [];
     let page = 1;
-    let totalPages = 1;
+    let hasNextPage = true;
 
-    do {
+    while (hasNextPage) {
       const url = `${this.buildSubmissionApiBaseUrl(
         submissionApiUrl,
       )}/submissions`;
@@ -1799,16 +1817,35 @@ export class ScoringResultService {
           },
           params: {
             challengeId,
-            perPage: 100,
+            perPage: SUBMISSION_PAGE_SIZE,
             page,
           },
         }),
       );
 
-      submissions.push(...this.extractSubmissionArray(response.data));
-      totalPages = this.parseTotalPages(response.headers);
+      const pageSubmissions = this.extractSubmissionArray(response.data);
+      submissions.push(...pageSubmissions);
+
+      const pagination = this.resolveSubmissionPagination(
+        response.data,
+        response.headers,
+        SUBMISSION_PAGE_SIZE,
+      );
+      hasNextPage = this.shouldFetchNextSubmissionPage(
+        page,
+        pageSubmissions.length,
+        submissions.length,
+        pagination,
+        SUBMISSION_PAGE_SIZE,
+      );
       page += 1;
-    } while (page <= totalPages);
+
+      if (hasNextPage && page > MAX_SUBMISSION_PAGES) {
+        throw new Error(
+          `Unable to fetch all challenge submissions for ${challengeId}: pagination exceeded ${MAX_SUBMISSION_PAGES} pages.`,
+        );
+      }
+    }
 
     return submissions;
   }
@@ -3605,24 +3642,242 @@ export class ScoringResultService {
   }
 
   /**
-   * Parses the total page count from submission-api response headers.
+   * Resolves pagination metadata from submission-api headers and response body.
+   * @param data Submission-api response body.
+   * @param headers Submission-api response headers.
+   * @param fallbackPerPage Page size requested by this service.
+   * @returns Normalized pagination metadata with total pages inferred when possible.
    */
-  private parseTotalPages(
+  private resolveSubmissionPagination(
+    data: unknown,
     headers: Record<string, unknown> | undefined,
-  ): number {
+    fallbackPerPage: number,
+  ): SubmissionPagination {
+    const headerPagination = this.extractPaginationFromHeaders(headers);
+    const bodyPagination = this.extractPaginationFromBody(data);
+    const perPage =
+      headerPagination.perPage ?? bodyPagination.perPage ?? fallbackPerPage;
+    const total = headerPagination.total ?? bodyPagination.total;
+    const totalPages =
+      headerPagination.totalPages ??
+      bodyPagination.totalPages ??
+      (total !== undefined && perPage > 0
+        ? Math.ceil(total / perPage)
+        : undefined);
+
+    return {
+      page: headerPagination.page ?? bodyPagination.page,
+      perPage,
+      total,
+      totalPages,
+    };
+  }
+
+  /**
+   * Extracts pagination values from common submission-api response headers.
+   * @param headers Response headers from Axios.
+   * @returns Pagination values found in the headers.
+   */
+  private extractPaginationFromHeaders(
+    headers: Record<string, unknown> | undefined,
+  ): SubmissionPagination {
     if (!headers) {
-      return 1;
+      return {};
     }
 
-    const totalPagesValue =
-      headers['x-total-pages'] ??
-      headers['X-Total-Pages'] ??
-      headers['x-total-page'];
-    const totalPages = Number.parseInt(
-      this.asString(totalPagesValue) ?? '1',
-      10,
-    );
-    return Number.isFinite(totalPages) && totalPages > 0 ? totalPages : 1;
+    return {
+      page: this.parsePositiveInteger(
+        this.getHeaderValue(headers, 'x-page', 'page'),
+      ),
+      perPage: this.parsePositiveInteger(
+        this.getHeaderValue(headers, 'x-per-page', 'per-page', 'perpage'),
+      ),
+      total: this.parseNonNegativeInteger(
+        this.getHeaderValue(headers, 'x-total', 'total'),
+      ),
+      totalPages: this.parsePositiveInteger(
+        this.getHeaderValue(
+          headers,
+          'x-total-pages',
+          'x-total-page',
+          'total-pages',
+          'totalpages',
+        ),
+      ),
+    };
+  }
+
+  /**
+   * Extracts pagination values from common wrapped submission-api response bodies.
+   * @param data Submission-api response body.
+   * @returns Pagination values found in body metadata.
+   */
+  private extractPaginationFromBody(data: unknown): SubmissionPagination {
+    const wrapper = this.asRecord(data);
+    const result = this.asRecord(wrapper.result);
+    const candidates = [
+      wrapper,
+      result,
+      this.asRecord(wrapper.metadata),
+      this.asRecord(wrapper.meta),
+      this.asRecord(wrapper.pagination),
+      this.asRecord(result.metadata),
+      this.asRecord(result.meta),
+      this.asRecord(result.pagination),
+    ];
+
+    return this.mergePaginationCandidates(candidates);
+  }
+
+  /**
+   * Merges pagination fields from candidate metadata records.
+   * @param candidates Ordered metadata records from headers or response body.
+   * @returns First available values for page, perPage, total, and totalPages.
+   */
+  private mergePaginationCandidates(
+    candidates: Record<string, unknown>[],
+  ): SubmissionPagination {
+    const pagination: SubmissionPagination = {};
+
+    for (const candidate of candidates) {
+      pagination.page ??= this.parsePositiveInteger(
+        this.readPaginationField(
+          candidate,
+          'page',
+          'currentPage',
+          'pageNumber',
+        ),
+      );
+      pagination.perPage ??= this.parsePositiveInteger(
+        this.readPaginationField(
+          candidate,
+          'perPage',
+          'per_page',
+          'pageSize',
+          'limit',
+          'size',
+        ),
+      );
+      pagination.total ??= this.parseNonNegativeInteger(
+        this.readPaginationField(
+          candidate,
+          'total',
+          'totalCount',
+          'totalRecords',
+          'totalItems',
+        ),
+      );
+      pagination.totalPages ??= this.parsePositiveInteger(
+        this.readPaginationField(
+          candidate,
+          'totalPages',
+          'totalPage',
+          'pageCount',
+          'pages',
+        ),
+      );
+    }
+
+    return pagination;
+  }
+
+  /**
+   * Determines whether the next submission page should be requested.
+   * @param currentPage One-based page that was just fetched.
+   * @param pageRecordCount Number of submissions extracted from that page.
+   * @param fetchedRecordCount Total submissions fetched so far.
+   * @param pagination Normalized pagination metadata.
+   * @param requestedPerPage Page size sent to submission-api-v6.
+   * @returns True when another page may contain submissions.
+   */
+  private shouldFetchNextSubmissionPage(
+    currentPage: number,
+    pageRecordCount: number,
+    fetchedRecordCount: number,
+    pagination: SubmissionPagination,
+    requestedPerPage: number,
+  ): boolean {
+    if (pagination.totalPages !== undefined) {
+      return currentPage < pagination.totalPages;
+    }
+
+    if (pagination.total !== undefined) {
+      return fetchedRecordCount < pagination.total;
+    }
+
+    return pageRecordCount >= requestedPerPage;
+  }
+
+  /**
+   * Reads a header value without depending on Axios header casing.
+   * @param headers Response headers.
+   * @param names Header names to try.
+   * @returns Header value when present.
+   */
+  private getHeaderValue(
+    headers: Record<string, unknown>,
+    ...names: string[]
+  ): unknown {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(headers, name)) {
+        return headers[name];
+      }
+
+      const lowerName = name.toLowerCase();
+      for (const [key, value] of Object.entries(headers)) {
+        if (key.toLowerCase() === lowerName) {
+          return value;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Reads a metadata field with case-insensitive key fallback.
+   * @param record Metadata record to inspect.
+   * @param names Field names to try.
+   * @returns Field value when present.
+   */
+  private readPaginationField(
+    record: Record<string, unknown>,
+    ...names: string[]
+  ): unknown {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(record, name)) {
+        return record[name];
+      }
+
+      const lowerName = name.toLowerCase();
+      for (const [key, value] of Object.entries(record)) {
+        if (key.toLowerCase() === lowerName) {
+          return value;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Parses a positive integer from API metadata.
+   * @param value Metadata value to parse.
+   * @returns Parsed positive integer, or undefined when invalid.
+   */
+  private parsePositiveInteger(value: unknown): number | undefined {
+    const parsed = Number.parseInt(this.asString(value) ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  /**
+   * Parses a non-negative integer from API metadata.
+   * @param value Metadata value to parse.
+   * @returns Parsed integer, or undefined when invalid.
+   */
+  private parseNonNegativeInteger(value: unknown): number | undefined {
+    const parsed = Number.parseInt(this.asString(value) ?? '', 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   }
 
   /**
