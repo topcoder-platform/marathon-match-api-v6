@@ -2146,6 +2146,109 @@ describe('ScoringResultService', () => {
     ]);
   });
 
+  it('fetches all challenge submission pages using total headers when totalPages is absent', async () => {
+    const { service, httpService } = createService();
+    const fetchChallengeSubmissions = (
+      service as any
+    ).fetchChallengeSubmissions.bind(service) as (
+      token: string,
+      submissionApiUrl: string,
+      challengeId: string,
+    ) => Promise<Record<string, unknown>[]>;
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `submission-${index + 1}`,
+    }));
+    const secondPage = [{ id: 'submission-101' }];
+    const pages: Record<number, Array<{ id: string }>> = {
+      1: firstPage,
+      2: secondPage,
+    };
+
+    httpService.get.mockImplementation(
+      (_url: string, options: { params: { page: number } }) =>
+        of({
+          data: {
+            data: pages[options.params.page] ?? [],
+          },
+          headers: {
+            'X-Per-Page': '100',
+            'X-Total': '101',
+          },
+        }),
+    );
+
+    const submissions = await fetchChallengeSubmissions(
+      'm2m-token',
+      'https://api.topcoder-dev.com/v6',
+      basePayload.challengeId,
+    );
+
+    expect(submissions).toHaveLength(101);
+    expect(submissions[submissions.length - 1]).toEqual({
+      id: 'submission-101',
+    });
+    expect(httpService.get).toHaveBeenCalledTimes(2);
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      1,
+      'https://api.topcoder-dev.com/v6/submissions',
+      expect.objectContaining({
+        params: expect.objectContaining({
+          page: 1,
+          perPage: 100,
+        }),
+      }),
+    );
+    expect(httpService.get).toHaveBeenNthCalledWith(
+      2,
+      'https://api.topcoder-dev.com/v6/submissions',
+      expect.objectContaining({
+        params: expect.objectContaining({
+          page: 2,
+          perPage: 100,
+        }),
+      }),
+    );
+  });
+
+  it('fetches another submission page when pagination metadata is missing and the page is full', async () => {
+    const { service, httpService } = createService();
+    const fetchChallengeSubmissions = (
+      service as any
+    ).fetchChallengeSubmissions.bind(service) as (
+      token: string,
+      submissionApiUrl: string,
+      challengeId: string,
+    ) => Promise<Record<string, unknown>[]>;
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `submission-${index + 1}`,
+    }));
+    const secondPage = [{ id: 'submission-101' }];
+    const pages: Record<number, Array<{ id: string }>> = {
+      1: firstPage,
+      2: secondPage,
+    };
+
+    httpService.get.mockImplementation(
+      (_url: string, options: { params: { page: number } }) =>
+        of({
+          data: pages[options.params.page] ?? [],
+          headers: {},
+        }),
+    );
+
+    const submissions = await fetchChallengeSubmissions(
+      'm2m-token',
+      'https://api.topcoder-dev.com/v6',
+      basePayload.challengeId,
+    );
+
+    expect(submissions).toHaveLength(101);
+    expect(submissions[submissions.length - 1]).toEqual({
+      id: 'submission-101',
+    });
+    expect(httpService.get).toHaveBeenCalledTimes(2);
+  });
+
   it('excludes no-credit and errored scores from MINIMIZE best-score baselines', () => {
     const { service } = createService();
     const computeBestScores = (service as any).computeBestScores.bind(
