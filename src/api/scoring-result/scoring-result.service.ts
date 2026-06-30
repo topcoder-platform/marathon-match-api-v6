@@ -12,6 +12,7 @@ import {
   ScoreDirection,
 } from '@prisma/client';
 import { createHash } from 'crypto';
+import { Client as PgClient } from 'pg';
 import { firstValueFrom } from 'rxjs';
 import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
 import {
@@ -1095,12 +1096,14 @@ export class ScoringResultService {
 
   /**
    * Serializes relative-score recomputation for one challenge and phase across
-   * API instances sharing the same PostgreSQL database.
+   * API instances sharing the same PostgreSQL database. Uses a session-scoped
+   * advisory lock on a dedicated PostgreSQL client so the external submission
+   * and review API calls do not run inside a Prisma interactive transaction.
    * @param challengeId Challenge whose relative scores are being recomputed.
    * @param testPhase Normalized scoring phase.
-   * @param work Async work to run while the transaction-scoped advisory lock is held.
+   * @param work Async work to run while the session-scoped advisory lock is held.
    * @returns The value returned by the locked work.
-   * @throws Error when the lock transaction or locked work fails.
+   * @throws Error when the lock client cannot connect, the lock cannot be acquired, or the locked work fails.
    */
   private async withRelativeScoringLock<T>(
     challengeId: string,
@@ -1112,12 +1115,105 @@ export class ScoringResultService {
       testPhase,
     );
 
-    return this.prisma.$transaction(async (prisma) => {
-      await prisma.$executeRaw`
-        SELECT pg_advisory_xact_lock(${classId}::integer, ${objectId}::integer)
-      `;
-      return work();
-    });
+    const client = this.createRelativeScoringLockClient();
+    let connected = false;
+    let locked = false;
+
+    try {
+      await client.connect();
+      connected = true;
+      await client.query('SELECT pg_advisory_lock($1::integer, $2::integer)', [
+        classId,
+        objectId,
+      ]);
+      locked = true;
+
+      return await work();
+    } finally {
+      if (connected) {
+        if (locked) {
+          await this.releaseRelativeScoringLock(client, classId, objectId);
+        }
+        await this.closeRelativeScoringLockClient(client);
+      }
+    }
+  }
+
+  /**
+   * Creates the dedicated PostgreSQL client used for a session-scoped advisory
+   * lock around relative scoring recomputation.
+   * @returns A new PostgreSQL client connected to `DATABASE_URL`.
+   * @throws Error when `DATABASE_URL` is not configured.
+   * Used by `withRelativeScoringLock` so Prisma interactive transaction
+   * timeouts do not limit external API work performed while the lock is held.
+   */
+  private createRelativeScoringLockClient(): PgClient {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'DATABASE_URL must be set to acquire the relative scoring advisory lock.',
+      );
+    }
+
+    return new PgClient({ connectionString });
+  }
+
+  /**
+   * Releases the session-scoped relative scoring advisory lock.
+   * @param client PostgreSQL client that acquired the lock.
+   * @param classId First signed 32-bit advisory-lock key.
+   * @param objectId Second signed 32-bit advisory-lock key.
+   * @returns Promise that resolves after unlock is attempted.
+   * Used by `withRelativeScoringLock` in a finally block; unlock failures are
+   * logged because closing the client also releases session-level locks.
+   */
+  private async releaseRelativeScoringLock(
+    client: PgClient,
+    classId: number,
+    objectId: number,
+  ): Promise<void> {
+    try {
+      const result = await client.query<{ unlocked: boolean }>(
+        'SELECT pg_advisory_unlock($1::integer, $2::integer) AS unlocked',
+        [classId, objectId],
+      );
+      if (result.rows[0]?.unlocked !== true) {
+        this.logger.warn({
+          message:
+            'PostgreSQL did not report the relative scoring advisory lock as released.',
+          classId,
+          objectId,
+        });
+      }
+    } catch (error) {
+      this.logger.error({
+        message:
+          'Failed to release relative scoring advisory lock before closing the lock client.',
+        classId,
+        objectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Closes the PostgreSQL client used for the relative scoring advisory lock.
+   * @param client PostgreSQL client to close.
+   * @returns Promise that resolves after close is attempted.
+   * Used by `withRelativeScoringLock` to release the database session even when
+   * relative scoring work or explicit unlock fails.
+   */
+  private async closeRelativeScoringLockClient(
+    client: PgClient,
+  ): Promise<void> {
+    try {
+      await client.end();
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to close relative scoring advisory lock client.',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**

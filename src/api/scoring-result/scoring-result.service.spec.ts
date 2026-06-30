@@ -2,6 +2,29 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ScoreDirection } from '@prisma/client';
 import { of, throwError } from 'rxjs';
 
+type MockPgClient = {
+  connect: jest.Mock;
+  query: jest.Mock;
+  end: jest.Mock;
+};
+
+jest.mock('pg', () => ({
+  Client: (() => {
+    const clients: MockPgClient[] = [];
+    const Client = jest.fn().mockImplementation(() => {
+      const client = {
+        connect: jest.fn().mockResolvedValue(undefined),
+        query: jest.fn().mockResolvedValue({ rows: [{ unlocked: true }] }),
+        end: jest.fn().mockResolvedValue(undefined),
+      };
+      clients.push(client);
+      return client;
+    });
+    (Client as any).clients = clients;
+    return Client;
+  })(),
+}));
+
 jest.mock('src/shared/modules/global/ecs.service', () => ({
   EcsService: class EcsService {},
 }));
@@ -10,12 +33,18 @@ jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
 
+import { Client as PgClient } from 'pg';
 import {
   ScoringResultCallbackPayload,
   ScoringResultService,
   ScoringTestStatus,
 } from './scoring-result.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
+
+const mockPgClientConstructor = PgClient as unknown as jest.Mock & {
+  clients: MockPgClient[];
+};
+const mockPgClients = mockPgClientConstructor.clients;
 
 describe('ScoringResultService', () => {
   const mockLogger = {
@@ -31,6 +60,7 @@ describe('ScoringResultService', () => {
     testPhase: 'test',
     reviewTypeId: 'review-type-1',
   };
+  const originalDatabaseUrl = process.env.DATABASE_URL;
 
   const createService = (
     scoringCompletionEmailService?: {
@@ -103,10 +133,22 @@ describe('ScoringResultService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.DATABASE_URL =
+      'postgresql://postgres:postgres@localhost:5432/test';
+    mockPgClients.length = 0;
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+      return;
+    }
+
+    process.env.DATABASE_URL = originalDatabaseUrl;
   });
 
   const flushAsyncWork = () =>
@@ -513,7 +555,7 @@ describe('ScoringResultService', () => {
         },
       },
     };
-    let transactionChain = Promise.resolve();
+    let lockChain = Promise.resolve();
     let resolveFirstWriteStarted!: () => void;
     let releaseFirstWrite!: () => void;
     const firstWriteStarted = new Promise<void>((resolve) => {
@@ -530,18 +572,22 @@ describe('ScoringResultService', () => {
       relativeScoringEnabled: true,
       scoreDirection: ScoreDirection.MAXIMIZE,
     });
-    prisma.$transaction.mockImplementation(
-      (callback: (client: typeof prisma) => Promise<unknown>) => {
-        const run = transactionChain
-          .catch(() => undefined)
-          .then(() => callback(prisma));
-        transactionChain = run.then(
-          () => undefined,
-          () => undefined,
-        );
-        return run;
-      },
-    );
+    const withRelativeScoringLockSpy = jest
+      .spyOn(service as any, 'withRelativeScoringLock')
+      .mockImplementation(
+        (
+          _challengeId: string,
+          _testPhase: string,
+          work: () => Promise<unknown>,
+        ) => {
+          const run = lockChain.catch(() => undefined).then(() => work());
+          lockChain = run.then(
+            () => undefined,
+            () => undefined,
+          );
+          return run;
+        },
+      );
     m2mService.getM2MToken.mockResolvedValue('m2m-token');
 
     const fetchChallengeSubmissionsSpy = jest
@@ -599,14 +645,15 @@ describe('ScoringResultService', () => {
       undefined,
     ]);
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
-    expect(prisma.$executeRaw.mock.calls[0][1]).toBe(
-      prisma.$executeRaw.mock.calls[1][1],
+    expect(withRelativeScoringLockSpy).toHaveBeenCalledTimes(2);
+    expect(withRelativeScoringLockSpy.mock.calls[0][0]).toBe(
+      basePayload.challengeId,
     );
-    expect(prisma.$executeRaw.mock.calls[0][2]).toBe(
-      prisma.$executeRaw.mock.calls[1][2],
+    expect(withRelativeScoringLockSpy.mock.calls[0][1]).toBe('provisional');
+    expect(withRelativeScoringLockSpy.mock.calls[1][0]).toBe(
+      basePayload.challengeId,
     );
+    expect(withRelativeScoringLockSpy.mock.calls[1][1]).toBe('provisional');
     expect(fetchChallengeSubmissionsSpy).toHaveBeenCalledTimes(2);
     expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(3);
 
@@ -624,6 +671,57 @@ describe('ScoringResultService', () => {
       (85 / 90) * 100,
       10,
     );
+  });
+
+  it('holds relative scoring locks with a dedicated PostgreSQL session instead of a Prisma transaction', async () => {
+    const { service, prisma } = createService();
+    const lockResult = await (service as any).withRelativeScoringLock(
+      basePayload.challengeId,
+      'system',
+      () => Promise.resolve('locked-work-result'),
+    );
+
+    expect(lockResult).toBe('locked-work-result');
+    expect(mockPgClientConstructor).toHaveBeenCalledWith({
+      connectionString: process.env.DATABASE_URL,
+    });
+    expect(mockPgClients).toHaveLength(1);
+
+    const lockClient = mockPgClients[0];
+    expect(lockClient.connect).toHaveBeenCalledTimes(1);
+    expect(lockClient.query).toHaveBeenCalledTimes(2);
+    expect(lockClient.query.mock.calls[0][0]).toBe(
+      'SELECT pg_advisory_lock($1::integer, $2::integer)',
+    );
+    expect(lockClient.query.mock.calls[1][0]).toBe(
+      'SELECT pg_advisory_unlock($1::integer, $2::integer) AS unlocked',
+    );
+    expect(lockClient.query.mock.calls[1][1]).toEqual(
+      lockClient.query.mock.calls[0][1],
+    );
+    expect(lockClient.end).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('closes the relative scoring lock client when locked work fails', async () => {
+    const { service } = createService();
+
+    await expect(
+      (service as any).withRelativeScoringLock(
+        basePayload.challengeId,
+        'system',
+        () => Promise.reject(new Error('relative scoring failed')),
+      ),
+    ).rejects.toThrow('relative scoring failed');
+
+    const lockClient = mockPgClients[0];
+    expect(lockClient.query.mock.calls[0][0]).toBe(
+      'SELECT pg_advisory_lock($1::integer, $2::integer)',
+    );
+    expect(lockClient.query.mock.calls[1][0]).toBe(
+      'SELECT pg_advisory_unlock($1::integer, $2::integer) AS unlocked',
+    );
+    expect(lockClient.end).toHaveBeenCalledTimes(1);
   });
 
   it('updates every matching phase review summation so stale progress rows are completed', async () => {
