@@ -765,6 +765,26 @@ export class SystemRerunResponseDto {
           example: '0123456789abcdef',
           nullable: true,
         },
+        queued: {
+          type: 'boolean',
+          description:
+            'True when dispatch was deferred because the ECS scorer task cap was full',
+          example: true,
+          nullable: true,
+        },
+        jobId: {
+          type: 'string',
+          description: 'Deferred SYSTEM dispatch pg-boss job id',
+          example: '2f2f94ca-1f47-46bb-a523-c63be2d3f3c4',
+          nullable: true,
+        },
+        message: {
+          type: 'string',
+          description: 'Additional queued-dispatch detail',
+          example:
+            'ECS scorer task concurrency limit reached (20/20). Deferring submission.',
+          nullable: true,
+        },
         error: {
           type: 'string',
           description:
@@ -780,6 +800,9 @@ export class SystemRerunResponseDto {
     submissionId: string;
     taskArn?: string;
     taskId?: string;
+    queued?: boolean;
+    jobId?: string;
+    message?: string;
     error?: string;
   }>;
 }

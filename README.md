@@ -131,6 +131,14 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 
 `launchScorerTask(...)` already disables public IP assignment for scorer tasks. It also enforces the pending/running scorer task cap before calling `RunTask`, skips duplicate active launches for the same challenge/submission/phase, and stops older active tasks for the same challenge/member when a newer submission arrives. Use dedicated scorer security groups with least-privilege egress for the trusted bootstrap/callback traffic that remains on the parent runner process.
 
+SYSTEM review dispatch uses a durable pg-boss queue when `ECS_SCORER_MAX_CONCURRENT_TASKS` is reached, so Review-phase submissions are retried until scorer capacity frees up instead of being dropped by the phase-open request. Configure that queue with:
+
+| Variable                                    | Required | Default | Used for                                                                           |
+| ------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `SYSTEM_SCORE_DISPATCH_RETRY_DELAY_SECONDS` | No       | `300`   | Fixed delay between pg-boss retries when deferred SYSTEM dispatch cannot launch yet |
+| `SYSTEM_SCORE_DISPATCH_RETRY_LIMIT`         | No       | `10000` | Retry count for deferred SYSTEM dispatch jobs                                      |
+| `SYSTEM_SCORE_DISPATCH_WORKER_CONCURRENCY`  | No       | `1`     | Number of deferred SYSTEM dispatch jobs the API worker attempts concurrently        |
+
 ### ECS runner task environment (injected at launch)
 
 These are required by `ecs-runner` and are passed in container overrides when a task is launched:
