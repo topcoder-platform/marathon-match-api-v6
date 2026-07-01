@@ -871,167 +871,210 @@
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
       "launchedBy": "internal/system-score",
       "launchedAt": "2026-07-01T09:43:02.728Z"
-    }
-  ],
-  "failed": [
+    },
     {
       "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
       "submissionId": "qQLMawdXKyZlpc",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:02.953Z"
+      "failedAt": "2026-07-01T09:43:02.953Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:34.597Z"
     },
     {
       "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
       "submissionId": "qwk7d0PBsfgp5L",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:03.205Z"
+      "failedAt": "2026-07-01T09:43:03.205Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:36.129Z"
     },
     {
       "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
       "submissionId": "RD1pH1HV57KKXm",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:03.423Z"
+      "failedAt": "2026-07-01T09:43:03.423Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:37.262Z"
     },
     {
       "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
       "submissionId": "sGOUPQDZbM3Yrm",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:03.640Z"
+      "failedAt": "2026-07-01T09:43:03.640Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:38.295Z"
     },
     {
       "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
       "submissionId": "SGSifHnjzEevod",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:03.867Z"
+      "failedAt": "2026-07-01T09:43:03.867Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:39.445Z"
     },
     {
       "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
       "submissionId": "tXLS9u-Rkpg4iM",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:04.085Z"
+      "failedAt": "2026-07-01T09:43:04.085Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:43.645Z"
     },
     {
       "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
       "submissionId": "TzsC8mbDKeL4Oi",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:04.305Z"
+      "failedAt": "2026-07-01T09:43:04.305Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:44.864Z"
     },
     {
       "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
       "submissionId": "u2Px0WPxwWYFhS",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:04.523Z"
+      "failedAt": "2026-07-01T09:43:04.523Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:45.902Z"
     },
     {
       "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
       "submissionId": "UMM1Q8ojXGTcRd",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:04.743Z"
+      "failedAt": "2026-07-01T09:43:04.743Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:33:55.424Z"
     },
     {
       "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
       "submissionId": "VO3lr2ohElhKl8",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:04.960Z"
+      "failedAt": "2026-07-01T09:43:04.960Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:43:58.953Z"
     },
     {
       "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
       "submissionId": "VupJ0I_AQrsENo",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:05.179Z"
+      "failedAt": "2026-07-01T09:43:05.179Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:54:03.145Z"
     },
     {
       "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
       "submissionId": "wa4JVG90L64Tye",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:05.416Z"
+      "failedAt": "2026-07-01T09:43:05.416Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:54:04.284Z"
     },
     {
       "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
       "submissionId": "WhDhl-vIvAyZeV",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:05.637Z"
+      "failedAt": "2026-07-01T09:43:05.637Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:04:10.133Z"
     },
     {
       "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
       "submissionId": "wmW4O1loZwm_Jf",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:05.860Z"
+      "failedAt": "2026-07-01T09:43:05.860Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:04:11.723Z"
     },
     {
       "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
       "submissionId": "wzA0EP_nDbehGe",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:06.078Z"
+      "failedAt": "2026-07-01T09:43:06.078Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:09:14.410Z"
     },
     {
       "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
       "submissionId": "xbmrVhfrNEm5MR",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:06.295Z"
+      "failedAt": "2026-07-01T09:43:06.295Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:24:19.685Z"
     },
     {
       "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
       "submissionId": "xcnR4pt5oG_qAS",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:06.512Z"
+      "failedAt": "2026-07-01T09:43:06.512Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:29:22.187Z"
     },
     {
       "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
       "submissionId": "Y1GuZxfIGEoHAz",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:06.732Z"
+      "failedAt": "2026-07-01T09:43:06.732Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:34:24.783Z"
     },
     {
       "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
       "submissionId": "z3oqSF0xWM93_M",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:06.951Z"
+      "failedAt": "2026-07-01T09:43:06.951Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:34:25.838Z"
     },
     {
       "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
       "submissionId": "Z7pDhP8hAkTAQ2",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:07.171Z"
+      "failedAt": "2026-07-01T09:43:07.171Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:54:31.798Z"
     },
     {
       "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
       "submissionId": "zBZ1l8bFCN-Dfz",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:07.389Z"
+      "failedAt": "2026-07-01T09:43:07.389Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T13:24:40.574Z"
     },
     {
       "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
       "submissionId": "ZWdgESiPntuaPH",
       "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
       "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
-      "failedAt": "2026-07-01T09:43:07.607Z"
+      "failedAt": "2026-07-01T09:43:07.607Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T13:24:42.194Z"
     }
   ],
-  "completedAt": "2026-07-01T10:47:28.386Z",
-  "resumedAt": "2026-07-01T10:47:28.385Z",
+  "failed": [],
+  "completedAt": "2026-07-01T13:24:42.194Z",
+  "resumedAt": "2026-07-01T10:48:32.572Z",
   "restoredRetryableFailureCount": 61,
-  "lastCapRetryAt": "2026-07-01T09:38:00.669Z",
+  "lastCapRetryAt": "2026-07-01T13:19:38.380Z",
   "lastCapRetryMessage": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500"
 }
