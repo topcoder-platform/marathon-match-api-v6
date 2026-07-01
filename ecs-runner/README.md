@@ -8,6 +8,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
 - C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
+- Kotlin/JVM compiler support for tester-side submission compilation (`kotlinc`)
 - Python 3.12 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
 - C# (.NET 7 / C# 11 and .NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)

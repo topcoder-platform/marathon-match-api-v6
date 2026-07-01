@@ -28,6 +28,7 @@ RUN apt-get update \
         g++-14 \
         gcc-14 \
         gzip \
+        kotlin \
         mono-devel \
         procps \
         python3 \
@@ -44,6 +45,7 @@ RUN apt-get update \
     && dotnet --info >/dev/null \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
     && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
+    && kotlinc -version >/dev/null \
     && rustc --version >/dev/null
 
 RUN groupadd --gid 10001 runner \

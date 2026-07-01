@@ -115,6 +115,7 @@ public class EcsRunnerMain {
     private static final List<String> SUPPORTED_SOURCE_EXTENSIONS = Arrays.asList(
         ".cpp",
         ".java",
+        ".kt",
         ".py",
         ".cs",
         ".cs_net10",
@@ -5133,7 +5134,8 @@ public class EcsRunnerMain {
      * Checks whether a filename has a source extension supported by the generic runner.
      *
      * @param fileName Candidate filename.
-     * @return {@code true} for C++, Java, Python, Mono C#, .NET 7/10 C#, or Rust submissions.
+     * @return {@code true} for C++, Java, Kotlin, Python, Mono C#, .NET 7/10 C#,
+     *         or Rust submissions.
      */
     private static boolean isSupportedSource(String fileName) {
         return SUPPORTED_SOURCE_EXTENSIONS.contains(extensionOf(fileName).toLowerCase(Locale.US));
@@ -5302,6 +5304,31 @@ public class EcsRunnerMain {
         if (".py".equals(extension)) {
             return new CompiledSubmission(
                 buildScorerExecutionCommand("python3 " + normalizedSource.toAbsolutePath()),
+                normalizedSource.getFileName().toString(),
+                language
+            );
+        }
+
+        if (".kt".equals(extension)) {
+            String jarPath = workDir
+                .resolve(GENERIC_SOLUTION_BASE_NAME + ".jar")
+                .toAbsolutePath()
+                .toString();
+            runCommand(
+                Arrays.asList(
+                    "kotlinc",
+                    normalizedSource.getFileName().toString(),
+                    "-include-runtime",
+                    "-d",
+                    jarPath
+                ),
+                workDir,
+                compileTimeoutMs,
+                "Kotlin compilation failed.",
+                compileLogPath
+            );
+            return new CompiledSubmission(
+                buildScorerExecutionCommand("java -Xms1G -Xmx1G -jar " + jarPath),
                 normalizedSource.getFileName().toString(),
                 language
             );
@@ -5542,6 +5569,9 @@ public class EcsRunnerMain {
         }
         if (".java".equals(extension)) {
             return "java";
+        }
+        if (".kt".equals(extension)) {
+            return "kotlin";
         }
         if (".py".equals(extension)) {
             return "python";
