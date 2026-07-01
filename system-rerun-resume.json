@@ -1,0 +1,1080 @@
+{
+  "challengeId": "48826d67-3354-4191-8c8f-5aa07c84dbdf",
+  "startedAt": "2026-07-01T07:02:52.603Z",
+  "reviewsQueued": 81,
+  "initialResponse": {
+    "challengeId": "48826d67-3354-4191-8c8f-5aa07c84dbdf",
+    "reviewsQueued": 81,
+    "results": [
+      {
+        "reviewId": "a59cf8ff-a994-41a8-be51-f7e278ff64f8",
+        "submissionId": "_9VOLnz2XYZv8J",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/46388afc02f14de48bf47c434cbc9847",
+        "taskId": "46388afc02f14de48bf47c434cbc9847"
+      },
+      {
+        "reviewId": "4f923f63-57d6-47cc-861e-38d71b564a22",
+        "submissionId": "-kJ-nOos4KQaL3",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/33dcae4839dd4596bb934f1f0e61dd9a",
+        "taskId": "33dcae4839dd4596bb934f1f0e61dd9a"
+      },
+      {
+        "reviewId": "03eaaedb-d577-498e-8957-71cc66ed15b2",
+        "submissionId": "-MXxGM58y4w9Ir",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/0730122484bd474aaf7e11e077492a52",
+        "taskId": "0730122484bd474aaf7e11e077492a52"
+      },
+      {
+        "reviewId": "de224678-76cf-439e-bae8-67827cd5889d",
+        "submissionId": "-XseogN8tWUYv9",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/dd20a31807634f96b52f40310ad97154",
+        "taskId": "dd20a31807634f96b52f40310ad97154"
+      },
+      {
+        "reviewId": "e15d4849-8187-4a2a-a954-d6cfac7a1b6f",
+        "submissionId": "09jQG5gXgrtwRy",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/3f9a529fde9f40469e6a7b6d0e7f73e7",
+        "taskId": "3f9a529fde9f40469e6a7b6d0e7f73e7"
+      },
+      {
+        "reviewId": "0d8f13a1-ac02-4f75-bd10-582293fc44b3",
+        "submissionId": "0wGavBBuHVPRAm",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/1872042409b249bebe95d5fb66023dba",
+        "taskId": "1872042409b249bebe95d5fb66023dba"
+      },
+      {
+        "reviewId": "d83f186b-37bf-4469-822b-fd15b4bf3385",
+        "submissionId": "2_gNxXA3WH111b",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/fe7c2088bdaa41d7b7cb67ee0cac379a",
+        "taskId": "fe7c2088bdaa41d7b7cb67ee0cac379a"
+      },
+      {
+        "reviewId": "90b49711-bc0e-4dc4-b9db-fc2b86c8de5d",
+        "submissionId": "2Z35j4waNot1Ol",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/55c74831e4dd4bcfa482cd28feae53b4",
+        "taskId": "55c74831e4dd4bcfa482cd28feae53b4"
+      },
+      {
+        "reviewId": "d6354bbe-c309-4932-be79-70e40e6ec2ff",
+        "submissionId": "3kONG53Rspsc2X",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/d73d86f2115e4d0885ff2935fde279f5",
+        "taskId": "d73d86f2115e4d0885ff2935fde279f5"
+      },
+      {
+        "reviewId": "37adfa56-f824-47d0-a3af-19ab4640f760",
+        "submissionId": "464rSXUx0aQzHk",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e6a0059daf2c4e249722fd7934413a91",
+        "taskId": "e6a0059daf2c4e249722fd7934413a91"
+      },
+      {
+        "reviewId": "f33e8cb0-5bca-47d3-9784-611d3e94ec38",
+        "submissionId": "4lJclQqEia-Kaq",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/39b95edd1fd340f8b01b3060c400a340",
+        "taskId": "39b95edd1fd340f8b01b3060c400a340"
+      },
+      {
+        "reviewId": "db32b7be-9243-4f25-8992-aebf5c14252c",
+        "submissionId": "5-vO22Fx78URn8",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/a41a42f839904ff39fbc0b372318f1aa",
+        "taskId": "a41a42f839904ff39fbc0b372318f1aa"
+      },
+      {
+        "reviewId": "73f16e4b-7fe7-4f69-84f3-fa06a1519612",
+        "submissionId": "54wGkqq0n7ki5v",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/6c4c832bf26248e597987783133e2ddc",
+        "taskId": "6c4c832bf26248e597987783133e2ddc"
+      },
+      {
+        "reviewId": "551be25b-c101-43e8-a6e9-c19b3ae6c018",
+        "submissionId": "67iZ6H3GQFFzjs",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/63e73cca7ca54102b3c951e0d7537aa1",
+        "taskId": "63e73cca7ca54102b3c951e0d7537aa1"
+      },
+      {
+        "reviewId": "022f2144-8b4e-4053-8f08-4adbc53f50aa",
+        "submissionId": "8yc1MuNagRXthA",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/62f307d6097d45fc8b7ca7fc78e0f16f",
+        "taskId": "62f307d6097d45fc8b7ca7fc78e0f16f"
+      },
+      {
+        "reviewId": "af418018-2916-4b3e-813d-6bc9220376ae",
+        "submissionId": "9Y5C8ERE1mhpMk",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e6ef84d11f104062b837a51d141d4893",
+        "taskId": "e6ef84d11f104062b837a51d141d4893"
+      },
+      {
+        "reviewId": "bf580df4-4801-4cd6-8e92-554bb9202c74",
+        "submissionId": "afAVzIRQAoEztm",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/4631a0fe0306499e8fd0bcd0a046d583",
+        "taskId": "4631a0fe0306499e8fd0bcd0a046d583"
+      },
+      {
+        "reviewId": "5f95dfae-5901-428c-b243-012c6d68e9df",
+        "submissionId": "AfhrQkoDWXyCfd",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/dc332a58a2934678aa4a4a0cb7405569",
+        "taskId": "dc332a58a2934678aa4a4a0cb7405569"
+      },
+      {
+        "reviewId": "1984db44-37db-48fe-8345-b484d9828d8b",
+        "submissionId": "aNmfzJwubStTRo",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/8609db15dca549be993193faaa5c7bc8",
+        "taskId": "8609db15dca549be993193faaa5c7bc8"
+      },
+      {
+        "reviewId": "b2a1ab3b-65a8-4b4d-b93c-1bc557a3722a",
+        "submissionId": "aXzej5sv5FCMYV",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/79af419186cc4d1a857ca744974086ee",
+        "taskId": "79af419186cc4d1a857ca744974086ee"
+      },
+      {
+        "reviewId": "6b1c0476-4d05-4c46-9b67-2d860de22a01",
+        "submissionId": "B-XVLtUga3AhAC",
+        "error": "Failed to launch ECS scorer task for submission B-XVLtUga3AhAC: ECS scorer task concurrency limit reached (20/20). Deferring submission B-XVLtUga3AhAC to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "d91d2270-2b62-4cef-bbe4-54010e580a27",
+        "submissionId": "b5-cpwFqfdcy8D",
+        "error": "Failed to launch ECS scorer task for submission b5-cpwFqfdcy8D: ECS scorer task concurrency limit reached (20/20). Deferring submission b5-cpwFqfdcy8D to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3135bdf6-4a85-4c2a-9b10-14e5d7a0cb94",
+        "submissionId": "b72jM5-X00DcUV",
+        "error": "Failed to launch ECS scorer task for submission b72jM5-X00DcUV: ECS scorer task concurrency limit reached (20/20). Deferring submission b72jM5-X00DcUV to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "5729a89b-296c-4db7-87ce-4c49a7bf4116",
+        "submissionId": "bg3TEq2ttZwXl-",
+        "error": "Failed to launch ECS scorer task for submission bg3TEq2ttZwXl-: ECS scorer task concurrency limit reached (20/20). Deferring submission bg3TEq2ttZwXl- to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "96d0e35a-1a3c-424e-a79b-f9033848aeeb",
+        "submissionId": "bHFFSEedqjxtzf",
+        "error": "Failed to launch ECS scorer task for submission bHFFSEedqjxtzf: ECS scorer task concurrency limit reached (20/20). Deferring submission bHFFSEedqjxtzf to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "04964112-438c-41d0-b0d1-13fc65b05df4",
+        "submissionId": "biCmIontn005Ic",
+        "error": "Failed to launch ECS scorer task for submission biCmIontn005Ic: ECS scorer task concurrency limit reached (20/20). Deferring submission biCmIontn005Ic to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "87ce278e-c6a7-471f-9b78-7a013275cff9",
+        "submissionId": "BSiwxzuF-TqeqP",
+        "error": "Failed to launch ECS scorer task for submission BSiwxzuF-TqeqP: ECS scorer task concurrency limit reached (20/20). Deferring submission BSiwxzuF-TqeqP to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f5a411b3-ce6f-4da0-b4ba-68ca9df91d43",
+        "submissionId": "BVdlowg4Lsy7As",
+        "error": "Failed to launch ECS scorer task for submission BVdlowg4Lsy7As: ECS scorer task concurrency limit reached (20/20). Deferring submission BVdlowg4Lsy7As to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "04fc1823-9c10-41cd-ba73-766dfbeaed26",
+        "submissionId": "CIGmGeqdp6Bfy3",
+        "error": "Failed to launch ECS scorer task for submission CIGmGeqdp6Bfy3: ECS scorer task concurrency limit reached (20/20). Deferring submission CIGmGeqdp6Bfy3 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "e5af0e91-9459-43fb-a2f6-7ea6a541cd89",
+        "submissionId": "FvwbmtBOkyfGdD",
+        "error": "Failed to launch ECS scorer task for submission FvwbmtBOkyfGdD: ECS scorer task concurrency limit reached (20/20). Deferring submission FvwbmtBOkyfGdD to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3ac26bfb-cc69-4530-9e78-b55ed58cee17",
+        "submissionId": "GEAksgekpuPCeO",
+        "error": "Failed to launch ECS scorer task for submission GEAksgekpuPCeO: ECS scorer task concurrency limit reached (20/20). Deferring submission GEAksgekpuPCeO to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "9fb495fd-1481-4a92-addd-af26241b7ac1",
+        "submissionId": "hAq--Rd0DCf8Gz",
+        "error": "Failed to launch ECS scorer task for submission hAq--Rd0DCf8Gz: ECS scorer task concurrency limit reached (20/20). Deferring submission hAq--Rd0DCf8Gz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f07cc05d-adde-456a-8c1a-fe5520ed961b",
+        "submissionId": "he6WzVNcc_daZR",
+        "error": "Failed to launch ECS scorer task for submission he6WzVNcc_daZR: ECS scorer task concurrency limit reached (20/20). Deferring submission he6WzVNcc_daZR to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f9b95f9c-55c4-4bc0-b585-35435aa6d728",
+        "submissionId": "IJaRGgB9EGkeNt",
+        "error": "Failed to launch ECS scorer task for submission IJaRGgB9EGkeNt: ECS scorer task concurrency limit reached (20/20). Deferring submission IJaRGgB9EGkeNt to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "4d08ddee-4fdc-4abf-b184-b24896c4b1c3",
+        "submissionId": "io4IgrmGSPD6za",
+        "error": "Failed to launch ECS scorer task for submission io4IgrmGSPD6za: ECS scorer task concurrency limit reached (20/20). Deferring submission io4IgrmGSPD6za to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f156f487-45b8-4c3d-9389-36423b0ce9f5",
+        "submissionId": "J8qjDufR44sbYM",
+        "error": "Failed to launch ECS scorer task for submission J8qjDufR44sbYM: ECS scorer task concurrency limit reached (20/20). Deferring submission J8qjDufR44sbYM to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "dab539ff-250c-44f4-9e8c-493b712d7839",
+        "submissionId": "K0UbtNIuWpH7W1",
+        "error": "Failed to launch ECS scorer task for submission K0UbtNIuWpH7W1: ECS scorer task concurrency limit reached (20/20). Deferring submission K0UbtNIuWpH7W1 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7c942dcd-dd90-46a6-855c-e2a6602bb494",
+        "submissionId": "k8yTJ5Cb7gtHrp",
+        "error": "Failed to launch ECS scorer task for submission k8yTJ5Cb7gtHrp: ECS scorer task concurrency limit reached (20/20). Deferring submission k8yTJ5Cb7gtHrp to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a2ed34d4-62ec-4acb-a28c-55211337d719",
+        "submissionId": "KDLZsRDsgzJy_F",
+        "error": "Failed to launch ECS scorer task for submission KDLZsRDsgzJy_F: ECS scorer task concurrency limit reached (20/20). Deferring submission KDLZsRDsgzJy_F to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "fcaa2874-0634-4fbc-be15-cecc9816aca2",
+        "submissionId": "KNK5qu5ny94P5_",
+        "error": "Failed to launch ECS scorer task for submission KNK5qu5ny94P5_: ECS scorer task concurrency limit reached (20/20). Deferring submission KNK5qu5ny94P5_ to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "cb1ba2e3-6e40-435f-88aa-66f18c592905",
+        "submissionId": "l15vteqGkA4Cdz",
+        "error": "Failed to launch ECS scorer task for submission l15vteqGkA4Cdz: ECS scorer task concurrency limit reached (20/20). Deferring submission l15vteqGkA4Cdz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "728495de-9456-49c7-a6f2-818dc5746105",
+        "submissionId": "l1LMW0Rq44A29J",
+        "error": "Failed to launch ECS scorer task for submission l1LMW0Rq44A29J: ECS scorer task concurrency limit reached (20/20). Deferring submission l1LMW0Rq44A29J to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "21edbf45-7d3a-4996-8479-a45b8a0c0ac7",
+        "submissionId": "l8Ogeb3iMc9PL7",
+        "error": "Failed to launch ECS scorer task for submission l8Ogeb3iMc9PL7: ECS scorer task concurrency limit reached (20/20). Deferring submission l8Ogeb3iMc9PL7 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "de51027f-10ba-46d0-8e6e-73a378722ff1",
+        "submissionId": "Lk7FBfpk2PY-QI",
+        "error": "Failed to launch ECS scorer task for submission Lk7FBfpk2PY-QI: ECS scorer task concurrency limit reached (20/20). Deferring submission Lk7FBfpk2PY-QI to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "fb77c1d1-8f34-48f5-8741-b88665f579f4",
+        "submissionId": "Ma-1c0Di2Ihu2R",
+        "error": "Failed to launch ECS scorer task for submission Ma-1c0Di2Ihu2R: ECS scorer task concurrency limit reached (20/20). Deferring submission Ma-1c0Di2Ihu2R to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "124ca3dc-60f9-40f3-815b-920f221b1224",
+        "submissionId": "mqoN5fmFUaLCrd",
+        "error": "Failed to launch ECS scorer task for submission mqoN5fmFUaLCrd: ECS scorer task concurrency limit reached (20/20). Deferring submission mqoN5fmFUaLCrd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f7049cd2-cba8-46a9-bb34-b68b3c0b3f5a",
+        "submissionId": "mSMs1PbtSb_f2u",
+        "error": "Failed to launch ECS scorer task for submission mSMs1PbtSb_f2u: ECS scorer task concurrency limit reached (20/20). Deferring submission mSMs1PbtSb_f2u to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f4851ea0-fdeb-46a0-bc7b-1bf001bd6e60",
+        "submissionId": "nOh4tvHzsasU1Y",
+        "error": "Failed to launch ECS scorer task for submission nOh4tvHzsasU1Y: ECS scorer task concurrency limit reached (20/20). Deferring submission nOh4tvHzsasU1Y to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "2c68ae39-9c8a-4f39-b56a-09ac9ae6e2ca",
+        "submissionId": "Ol1p-B6IBmh3UX",
+        "error": "Failed to launch ECS scorer task for submission Ol1p-B6IBmh3UX: ECS scorer task concurrency limit reached (20/20). Deferring submission Ol1p-B6IBmh3UX to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b36e7ce0-177d-4ae1-bb60-017a14236db5",
+        "submissionId": "OPHSZK0yICSTZA",
+        "error": "Failed to launch ECS scorer task for submission OPHSZK0yICSTZA: ECS scorer task concurrency limit reached (20/20). Deferring submission OPHSZK0yICSTZA to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "46003757-5104-4da1-8ac1-3ff6895d3a7d",
+        "submissionId": "opOZwDKuwYj7ZZ",
+        "error": "Failed to launch ECS scorer task for submission opOZwDKuwYj7ZZ: ECS scorer task concurrency limit reached (20/20). Deferring submission opOZwDKuwYj7ZZ to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "12875786-b6e2-4533-a20a-d66daf795d2d",
+        "submissionId": "oRvp_5_mUdPIm-",
+        "error": "Failed to launch ECS scorer task for submission oRvp_5_mUdPIm-: ECS scorer task concurrency limit reached (20/20). Deferring submission oRvp_5_mUdPIm- to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "0986e913-49d8-472b-900c-32f236f37253",
+        "submissionId": "OvhNb7WTRUheSO",
+        "error": "Failed to launch ECS scorer task for submission OvhNb7WTRUheSO: ECS scorer task concurrency limit reached (20/20). Deferring submission OvhNb7WTRUheSO to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "173a2093-8e9e-4cf3-b57b-db890451ef1a",
+        "submissionId": "p4fNGII3eANhbp",
+        "error": "Failed to launch ECS scorer task for submission p4fNGII3eANhbp: ECS scorer task concurrency limit reached (20/20). Deferring submission p4fNGII3eANhbp to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "9961af37-ef42-4d3d-a2ce-6f37d9fd5028",
+        "submissionId": "P6yOhg0NFHSa5v",
+        "error": "Failed to launch ECS scorer task for submission P6yOhg0NFHSa5v: ECS scorer task concurrency limit reached (20/20). Deferring submission P6yOhg0NFHSa5v to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "c2ad3c5e-0bc2-4a9b-99cd-fb214d334210",
+        "submissionId": "pjxTnWMmGFrSzN",
+        "error": "Failed to launch ECS scorer task for submission pjxTnWMmGFrSzN: ECS scorer task concurrency limit reached (20/20). Deferring submission pjxTnWMmGFrSzN to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "d7e2e809-ba6d-479a-b20b-c7b9b4a42863",
+        "submissionId": "Pv0Eu-MydzpWWA",
+        "error": "Failed to launch ECS scorer task for submission Pv0Eu-MydzpWWA: ECS scorer task concurrency limit reached (20/20). Deferring submission Pv0Eu-MydzpWWA to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b55c6d38-2d1b-4869-9dd4-7fbb67163ab1",
+        "submissionId": "Q18Zp5P1RoHtXd",
+        "error": "Failed to launch ECS scorer task for submission Q18Zp5P1RoHtXd: ECS scorer task concurrency limit reached (20/20). Deferring submission Q18Zp5P1RoHtXd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "194fc457-c1a9-41d8-b550-63c06f05071b",
+        "submissionId": "qCi-PzVugNi6JU",
+        "error": "Failed to launch ECS scorer task for submission qCi-PzVugNi6JU: ECS scorer task concurrency limit reached (20/20). Deferring submission qCi-PzVugNi6JU to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
+        "submissionId": "qQLMawdXKyZlpc",
+        "error": "Failed to launch ECS scorer task for submission qQLMawdXKyZlpc: ECS scorer task concurrency limit reached (20/20). Deferring submission qQLMawdXKyZlpc to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
+        "submissionId": "qwk7d0PBsfgp5L",
+        "error": "Failed to launch ECS scorer task for submission qwk7d0PBsfgp5L: ECS scorer task concurrency limit reached (20/20). Deferring submission qwk7d0PBsfgp5L to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
+        "submissionId": "RD1pH1HV57KKXm",
+        "error": "Failed to launch ECS scorer task for submission RD1pH1HV57KKXm: ECS scorer task concurrency limit reached (20/20). Deferring submission RD1pH1HV57KKXm to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
+        "submissionId": "sGOUPQDZbM3Yrm",
+        "error": "Failed to launch ECS scorer task for submission sGOUPQDZbM3Yrm: ECS scorer task concurrency limit reached (20/20). Deferring submission sGOUPQDZbM3Yrm to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
+        "submissionId": "SGSifHnjzEevod",
+        "error": "Failed to launch ECS scorer task for submission SGSifHnjzEevod: ECS scorer task concurrency limit reached (20/20). Deferring submission SGSifHnjzEevod to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
+        "submissionId": "tXLS9u-Rkpg4iM",
+        "error": "Failed to launch ECS scorer task for submission tXLS9u-Rkpg4iM: ECS scorer task concurrency limit reached (20/20). Deferring submission tXLS9u-Rkpg4iM to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
+        "submissionId": "TzsC8mbDKeL4Oi",
+        "error": "Failed to launch ECS scorer task for submission TzsC8mbDKeL4Oi: ECS scorer task concurrency limit reached (20/20). Deferring submission TzsC8mbDKeL4Oi to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
+        "submissionId": "u2Px0WPxwWYFhS",
+        "error": "Failed to launch ECS scorer task for submission u2Px0WPxwWYFhS: ECS scorer task concurrency limit reached (20/20). Deferring submission u2Px0WPxwWYFhS to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
+        "submissionId": "UMM1Q8ojXGTcRd",
+        "error": "Failed to launch ECS scorer task for submission UMM1Q8ojXGTcRd: ECS scorer task concurrency limit reached (20/20). Deferring submission UMM1Q8ojXGTcRd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
+        "submissionId": "VO3lr2ohElhKl8",
+        "error": "Failed to launch ECS scorer task for submission VO3lr2ohElhKl8: ECS scorer task concurrency limit reached (20/20). Deferring submission VO3lr2ohElhKl8 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
+        "submissionId": "VupJ0I_AQrsENo",
+        "error": "Failed to launch ECS scorer task for submission VupJ0I_AQrsENo: ECS scorer task concurrency limit reached (20/20). Deferring submission VupJ0I_AQrsENo to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
+        "submissionId": "wa4JVG90L64Tye",
+        "error": "Failed to launch ECS scorer task for submission wa4JVG90L64Tye: ECS scorer task concurrency limit reached (20/20). Deferring submission wa4JVG90L64Tye to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
+        "submissionId": "WhDhl-vIvAyZeV",
+        "error": "Failed to launch ECS scorer task for submission WhDhl-vIvAyZeV: ECS scorer task concurrency limit reached (20/20). Deferring submission WhDhl-vIvAyZeV to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
+        "submissionId": "wmW4O1loZwm_Jf",
+        "error": "Failed to launch ECS scorer task for submission wmW4O1loZwm_Jf: ECS scorer task concurrency limit reached (20/20). Deferring submission wmW4O1loZwm_Jf to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
+        "submissionId": "wzA0EP_nDbehGe",
+        "error": "Failed to launch ECS scorer task for submission wzA0EP_nDbehGe: ECS scorer task concurrency limit reached (20/20). Deferring submission wzA0EP_nDbehGe to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
+        "submissionId": "xbmrVhfrNEm5MR",
+        "error": "Failed to launch ECS scorer task for submission xbmrVhfrNEm5MR: ECS scorer task concurrency limit reached (20/20). Deferring submission xbmrVhfrNEm5MR to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
+        "submissionId": "xcnR4pt5oG_qAS",
+        "error": "Failed to launch ECS scorer task for submission xcnR4pt5oG_qAS: ECS scorer task concurrency limit reached (20/20). Deferring submission xcnR4pt5oG_qAS to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
+        "submissionId": "Y1GuZxfIGEoHAz",
+        "error": "Failed to launch ECS scorer task for submission Y1GuZxfIGEoHAz: ECS scorer task concurrency limit reached (20/20). Deferring submission Y1GuZxfIGEoHAz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
+        "submissionId": "z3oqSF0xWM93_M",
+        "error": "Failed to launch ECS scorer task for submission z3oqSF0xWM93_M: ECS scorer task concurrency limit reached (20/20). Deferring submission z3oqSF0xWM93_M to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
+        "submissionId": "Z7pDhP8hAkTAQ2",
+        "error": "Failed to launch ECS scorer task for submission Z7pDhP8hAkTAQ2: ECS scorer task concurrency limit reached (20/20). Deferring submission Z7pDhP8hAkTAQ2 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
+        "submissionId": "zBZ1l8bFCN-Dfz",
+        "error": "Failed to launch ECS scorer task for submission zBZ1l8bFCN-Dfz: ECS scorer task concurrency limit reached (20/20). Deferring submission zBZ1l8bFCN-Dfz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
+        "submissionId": "ZWdgESiPntuaPH",
+        "error": "Failed to launch ECS scorer task for submission ZWdgESiPntuaPH: ECS scorer task concurrency limit reached (20/20). Deferring submission ZWdgESiPntuaPH to Kafka retry/back-pressure instead of launching another task."
+      }
+    ]
+  },
+  "initialCounts": {
+    "launched": 20,
+    "retryableBacklog": 61,
+    "failed": 0
+  },
+  "pending": [],
+  "launched": [
+    {
+      "reviewId": "a59cf8ff-a994-41a8-be51-f7e278ff64f8",
+      "submissionId": "_9VOLnz2XYZv8J",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/46388afc02f14de48bf47c434cbc9847",
+      "taskId": "46388afc02f14de48bf47c434cbc9847"
+    },
+    {
+      "reviewId": "4f923f63-57d6-47cc-861e-38d71b564a22",
+      "submissionId": "-kJ-nOos4KQaL3",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/33dcae4839dd4596bb934f1f0e61dd9a",
+      "taskId": "33dcae4839dd4596bb934f1f0e61dd9a"
+    },
+    {
+      "reviewId": "03eaaedb-d577-498e-8957-71cc66ed15b2",
+      "submissionId": "-MXxGM58y4w9Ir",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/0730122484bd474aaf7e11e077492a52",
+      "taskId": "0730122484bd474aaf7e11e077492a52"
+    },
+    {
+      "reviewId": "de224678-76cf-439e-bae8-67827cd5889d",
+      "submissionId": "-XseogN8tWUYv9",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/dd20a31807634f96b52f40310ad97154",
+      "taskId": "dd20a31807634f96b52f40310ad97154"
+    },
+    {
+      "reviewId": "e15d4849-8187-4a2a-a954-d6cfac7a1b6f",
+      "submissionId": "09jQG5gXgrtwRy",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/3f9a529fde9f40469e6a7b6d0e7f73e7",
+      "taskId": "3f9a529fde9f40469e6a7b6d0e7f73e7"
+    },
+    {
+      "reviewId": "0d8f13a1-ac02-4f75-bd10-582293fc44b3",
+      "submissionId": "0wGavBBuHVPRAm",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/1872042409b249bebe95d5fb66023dba",
+      "taskId": "1872042409b249bebe95d5fb66023dba"
+    },
+    {
+      "reviewId": "d83f186b-37bf-4469-822b-fd15b4bf3385",
+      "submissionId": "2_gNxXA3WH111b",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/fe7c2088bdaa41d7b7cb67ee0cac379a",
+      "taskId": "fe7c2088bdaa41d7b7cb67ee0cac379a"
+    },
+    {
+      "reviewId": "90b49711-bc0e-4dc4-b9db-fc2b86c8de5d",
+      "submissionId": "2Z35j4waNot1Ol",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/55c74831e4dd4bcfa482cd28feae53b4",
+      "taskId": "55c74831e4dd4bcfa482cd28feae53b4"
+    },
+    {
+      "reviewId": "d6354bbe-c309-4932-be79-70e40e6ec2ff",
+      "submissionId": "3kONG53Rspsc2X",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/d73d86f2115e4d0885ff2935fde279f5",
+      "taskId": "d73d86f2115e4d0885ff2935fde279f5"
+    },
+    {
+      "reviewId": "37adfa56-f824-47d0-a3af-19ab4640f760",
+      "submissionId": "464rSXUx0aQzHk",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e6a0059daf2c4e249722fd7934413a91",
+      "taskId": "e6a0059daf2c4e249722fd7934413a91"
+    },
+    {
+      "reviewId": "f33e8cb0-5bca-47d3-9784-611d3e94ec38",
+      "submissionId": "4lJclQqEia-Kaq",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/39b95edd1fd340f8b01b3060c400a340",
+      "taskId": "39b95edd1fd340f8b01b3060c400a340"
+    },
+    {
+      "reviewId": "db32b7be-9243-4f25-8992-aebf5c14252c",
+      "submissionId": "5-vO22Fx78URn8",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/a41a42f839904ff39fbc0b372318f1aa",
+      "taskId": "a41a42f839904ff39fbc0b372318f1aa"
+    },
+    {
+      "reviewId": "73f16e4b-7fe7-4f69-84f3-fa06a1519612",
+      "submissionId": "54wGkqq0n7ki5v",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/6c4c832bf26248e597987783133e2ddc",
+      "taskId": "6c4c832bf26248e597987783133e2ddc"
+    },
+    {
+      "reviewId": "551be25b-c101-43e8-a6e9-c19b3ae6c018",
+      "submissionId": "67iZ6H3GQFFzjs",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/63e73cca7ca54102b3c951e0d7537aa1",
+      "taskId": "63e73cca7ca54102b3c951e0d7537aa1"
+    },
+    {
+      "reviewId": "022f2144-8b4e-4053-8f08-4adbc53f50aa",
+      "submissionId": "8yc1MuNagRXthA",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/62f307d6097d45fc8b7ca7fc78e0f16f",
+      "taskId": "62f307d6097d45fc8b7ca7fc78e0f16f"
+    },
+    {
+      "reviewId": "af418018-2916-4b3e-813d-6bc9220376ae",
+      "submissionId": "9Y5C8ERE1mhpMk",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e6ef84d11f104062b837a51d141d4893",
+      "taskId": "e6ef84d11f104062b837a51d141d4893"
+    },
+    {
+      "reviewId": "bf580df4-4801-4cd6-8e92-554bb9202c74",
+      "submissionId": "afAVzIRQAoEztm",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/4631a0fe0306499e8fd0bcd0a046d583",
+      "taskId": "4631a0fe0306499e8fd0bcd0a046d583"
+    },
+    {
+      "reviewId": "5f95dfae-5901-428c-b243-012c6d68e9df",
+      "submissionId": "AfhrQkoDWXyCfd",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/dc332a58a2934678aa4a4a0cb7405569",
+      "taskId": "dc332a58a2934678aa4a4a0cb7405569"
+    },
+    {
+      "reviewId": "1984db44-37db-48fe-8345-b484d9828d8b",
+      "submissionId": "aNmfzJwubStTRo",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/8609db15dca549be993193faaa5c7bc8",
+      "taskId": "8609db15dca549be993193faaa5c7bc8"
+    },
+    {
+      "reviewId": "b2a1ab3b-65a8-4b4d-b93c-1bc557a3722a",
+      "submissionId": "aXzej5sv5FCMYV",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/79af419186cc4d1a857ca744974086ee",
+      "taskId": "79af419186cc4d1a857ca744974086ee"
+    },
+    {
+      "reviewId": "6b1c0476-4d05-4c46-9b67-2d860de22a01",
+      "submissionId": "B-XVLtUga3AhAC",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:21:28.034Z"
+    },
+    {
+      "reviewId": "d91d2270-2b62-4cef-bbe4-54010e580a27",
+      "submissionId": "b5-cpwFqfdcy8D",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:21:30.808Z"
+    },
+    {
+      "reviewId": "3135bdf6-4a85-4c2a-9b10-14e5d7a0cb94",
+      "submissionId": "b72jM5-X00DcUV",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:33.134Z"
+    },
+    {
+      "reviewId": "5729a89b-296c-4db7-87ce-4c49a7bf4116",
+      "submissionId": "bg3TEq2ttZwXl-",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:34.141Z"
+    },
+    {
+      "reviewId": "96d0e35a-1a3c-424e-a79b-f9033848aeeb",
+      "submissionId": "bHFFSEedqjxtzf",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:35.297Z"
+    },
+    {
+      "reviewId": "04964112-438c-41d0-b0d1-13fc65b05df4",
+      "submissionId": "biCmIontn005Ic",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:36.548Z"
+    },
+    {
+      "reviewId": "87ce278e-c6a7-471f-9b78-7a013275cff9",
+      "submissionId": "BSiwxzuF-TqeqP",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:37.603Z"
+    },
+    {
+      "reviewId": "f5a411b3-ce6f-4da0-b4ba-68ca9df91d43",
+      "submissionId": "BVdlowg4Lsy7As",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:38.864Z"
+    },
+    {
+      "reviewId": "04fc1823-9c10-41cd-ba73-766dfbeaed26",
+      "submissionId": "CIGmGeqdp6Bfy3",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:39.957Z"
+    },
+    {
+      "reviewId": "e5af0e91-9459-43fb-a2f6-7ea6a541cd89",
+      "submissionId": "FvwbmtBOkyfGdD",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:26:41.103Z"
+    },
+    {
+      "reviewId": "3ac26bfb-cc69-4530-9e78-b55ed58cee17",
+      "submissionId": "GEAksgekpuPCeO",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:31:44.233Z"
+    },
+    {
+      "reviewId": "9fb495fd-1481-4a92-addd-af26241b7ac1",
+      "submissionId": "hAq--Rd0DCf8Gz",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:36:47.650Z"
+    },
+    {
+      "reviewId": "f07cc05d-adde-456a-8c1a-fe5520ed961b",
+      "submissionId": "he6WzVNcc_daZR",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:41:50.188Z"
+    },
+    {
+      "reviewId": "f9b95f9c-55c4-4bc0-b585-35435aa6d728",
+      "submissionId": "IJaRGgB9EGkeNt",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:46:53.869Z"
+    },
+    {
+      "reviewId": "4d08ddee-4fdc-4abf-b184-b24896c4b1c3",
+      "submissionId": "io4IgrmGSPD6za",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:46:55.421Z"
+    },
+    {
+      "reviewId": "f156f487-45b8-4c3d-9389-36423b0ce9f5",
+      "submissionId": "J8qjDufR44sbYM",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:46:57.144Z"
+    },
+    {
+      "reviewId": "dab539ff-250c-44f4-9e8c-493b712d7839",
+      "submissionId": "K0UbtNIuWpH7W1",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:46:58.256Z"
+    },
+    {
+      "reviewId": "7c942dcd-dd90-46a6-855c-e2a6602bb494",
+      "submissionId": "k8yTJ5Cb7gtHrp",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:47:00.207Z"
+    },
+    {
+      "reviewId": "a2ed34d4-62ec-4acb-a28c-55211337d719",
+      "submissionId": "KDLZsRDsgzJy_F",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:47:02.709Z"
+    },
+    {
+      "reviewId": "fcaa2874-0634-4fbc-be15-cecc9816aca2",
+      "submissionId": "KNK5qu5ny94P5_",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:52:05.647Z"
+    },
+    {
+      "reviewId": "cb1ba2e3-6e40-435f-88aa-66f18c592905",
+      "submissionId": "l15vteqGkA4Cdz",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T07:57:08.122Z"
+    },
+    {
+      "reviewId": "728495de-9456-49c7-a6f2-818dc5746105",
+      "submissionId": "l1LMW0Rq44A29J",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:02:10.778Z"
+    },
+    {
+      "reviewId": "21edbf45-7d3a-4996-8479-a45b8a0c0ac7",
+      "submissionId": "l8Ogeb3iMc9PL7",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:02:11.936Z"
+    },
+    {
+      "reviewId": "de51027f-10ba-46d0-8e6e-73a378722ff1",
+      "submissionId": "Lk7FBfpk2PY-QI",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:07:14.401Z"
+    },
+    {
+      "reviewId": "fb77c1d1-8f34-48f5-8741-b88665f579f4",
+      "submissionId": "Ma-1c0Di2Ihu2R",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:12:17.215Z"
+    },
+    {
+      "reviewId": "124ca3dc-60f9-40f3-815b-920f221b1224",
+      "submissionId": "mqoN5fmFUaLCrd",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:12:18.321Z"
+    },
+    {
+      "reviewId": "f7049cd2-cba8-46a9-bb34-b68b3c0b3f5a",
+      "submissionId": "mSMs1PbtSb_f2u",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:17:20.915Z"
+    },
+    {
+      "reviewId": "f4851ea0-fdeb-46a0-bc7b-1bf001bd6e60",
+      "submissionId": "nOh4tvHzsasU1Y",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:22:24.255Z"
+    },
+    {
+      "reviewId": "2c68ae39-9c8a-4f39-b56a-09ac9ae6e2ca",
+      "submissionId": "Ol1p-B6IBmh3UX",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:27:26.934Z"
+    },
+    {
+      "reviewId": "b36e7ce0-177d-4ae1-bb60-017a14236db5",
+      "submissionId": "OPHSZK0yICSTZA",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:32:29.513Z"
+    },
+    {
+      "reviewId": "46003757-5104-4da1-8ac1-3ff6895d3a7d",
+      "submissionId": "opOZwDKuwYj7ZZ",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:42:34.359Z"
+    },
+    {
+      "reviewId": "12875786-b6e2-4533-a20a-d66daf795d2d",
+      "submissionId": "oRvp_5_mUdPIm-",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:47:36.670Z"
+    },
+    {
+      "reviewId": "0986e913-49d8-472b-900c-32f236f37253",
+      "submissionId": "OvhNb7WTRUheSO",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:47:37.779Z"
+    },
+    {
+      "reviewId": "173a2093-8e9e-4cf3-b57b-db890451ef1a",
+      "submissionId": "p4fNGII3eANhbp",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T08:52:40.428Z"
+    },
+    {
+      "reviewId": "9961af37-ef42-4d3d-a2ce-6f37d9fd5028",
+      "submissionId": "P6yOhg0NFHSa5v",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T09:02:48.077Z"
+    },
+    {
+      "reviewId": "c2ad3c5e-0bc2-4a9b-99cd-fb214d334210",
+      "submissionId": "pjxTnWMmGFrSzN",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T09:02:49.183Z"
+    },
+    {
+      "reviewId": "d7e2e809-ba6d-479a-b20b-c7b9b4a42863",
+      "submissionId": "Pv0Eu-MydzpWWA",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T09:17:54.106Z"
+    },
+    {
+      "reviewId": "b55c6d38-2d1b-4869-9dd4-7fbb67163ab1",
+      "submissionId": "Q18Zp5P1RoHtXd",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T09:32:58.932Z"
+    },
+    {
+      "reviewId": "194fc457-c1a9-41d8-b550-63c06f05071b",
+      "submissionId": "qCi-PzVugNi6JU",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T09:43:02.728Z"
+    },
+    {
+      "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
+      "submissionId": "qQLMawdXKyZlpc",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:02.953Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:34.597Z"
+    },
+    {
+      "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
+      "submissionId": "qwk7d0PBsfgp5L",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:03.205Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:36.129Z"
+    },
+    {
+      "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
+      "submissionId": "RD1pH1HV57KKXm",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:03.423Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:37.262Z"
+    },
+    {
+      "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
+      "submissionId": "sGOUPQDZbM3Yrm",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:03.640Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:38.295Z"
+    },
+    {
+      "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
+      "submissionId": "SGSifHnjzEevod",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:03.867Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:48:39.445Z"
+    },
+    {
+      "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
+      "submissionId": "tXLS9u-Rkpg4iM",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:04.085Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:43.645Z"
+    },
+    {
+      "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
+      "submissionId": "TzsC8mbDKeL4Oi",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:04.305Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:44.864Z"
+    },
+    {
+      "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
+      "submissionId": "u2Px0WPxwWYFhS",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:04.523Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T10:58:45.902Z"
+    },
+    {
+      "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
+      "submissionId": "UMM1Q8ojXGTcRd",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:04.743Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:33:55.424Z"
+    },
+    {
+      "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
+      "submissionId": "VO3lr2ohElhKl8",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:04.960Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:43:58.953Z"
+    },
+    {
+      "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
+      "submissionId": "VupJ0I_AQrsENo",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:05.179Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:54:03.145Z"
+    },
+    {
+      "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
+      "submissionId": "wa4JVG90L64Tye",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:05.416Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T11:54:04.284Z"
+    },
+    {
+      "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
+      "submissionId": "WhDhl-vIvAyZeV",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:05.637Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:04:10.133Z"
+    },
+    {
+      "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
+      "submissionId": "wmW4O1loZwm_Jf",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:05.860Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:04:11.723Z"
+    },
+    {
+      "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
+      "submissionId": "wzA0EP_nDbehGe",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:06.078Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:09:14.410Z"
+    },
+    {
+      "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
+      "submissionId": "xbmrVhfrNEm5MR",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:06.295Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:24:19.685Z"
+    },
+    {
+      "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
+      "submissionId": "xcnR4pt5oG_qAS",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:06.512Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:29:22.187Z"
+    },
+    {
+      "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
+      "submissionId": "Y1GuZxfIGEoHAz",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:06.732Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:34:24.783Z"
+    },
+    {
+      "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
+      "submissionId": "z3oqSF0xWM93_M",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:06.951Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:34:25.838Z"
+    },
+    {
+      "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
+      "submissionId": "Z7pDhP8hAkTAQ2",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:07.171Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T12:54:31.798Z"
+    },
+    {
+      "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
+      "submissionId": "zBZ1l8bFCN-Dfz",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:07.389Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T13:24:40.574Z"
+    },
+    {
+      "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
+      "submissionId": "ZWdgESiPntuaPH",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Invalid or expired JWT! | HTTP 401",
+      "restoredFromFailedAt": "2026-07-01T07:06:21.821Z",
+      "failedAt": "2026-07-01T09:43:07.607Z",
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-01T13:24:42.194Z"
+    }
+  ],
+  "failed": [],
+  "completedAt": "2026-07-01T13:24:42.194Z",
+  "resumedAt": "2026-07-01T10:48:32.572Z",
+  "restoredRetryableFailureCount": 61,
+  "lastCapRetryAt": "2026-07-01T13:19:38.380Z",
+  "lastCapRetryMessage": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500"
+}

@@ -32,6 +32,7 @@ import {
   SystemTestTimeoutJobData,
   SystemTestTimeoutSchedulerService,
 } from './system-test-timeout-scheduler.service';
+import { SystemScoreDispatchSchedulerService } from './system-score-dispatch-scheduler.service';
 
 export interface ScoringResultCallbackPayload {
   challengeId: string;
@@ -90,9 +91,22 @@ export interface SkippedSystemScoreDispatchResult {
   submissionId: string;
 }
 
+export interface QueuedSystemScoreDispatchResult {
+  queued: true;
+  reason: string;
+  reviewId: string;
+  submissionId: string;
+  jobId?: string | null;
+}
+
 export type SystemScoreDispatchResult =
   | MarathonMatchScorerTaskLaunchResult
-  | SkippedSystemScoreDispatchResult;
+  | SkippedSystemScoreDispatchResult
+  | QueuedSystemScoreDispatchResult;
+
+export interface TriggerSystemScoreOptions {
+  enqueueOnCapacityLimit?: boolean;
+}
 
 interface ReviewSummationPayload {
   submissionId: string;
@@ -227,6 +241,8 @@ export class ScoringResultService {
     private readonly scoringCompletionEmailService?: ScoringCompletionEmailService,
     @Optional()
     private readonly systemTestTimeoutSchedulerService?: SystemTestTimeoutSchedulerService,
+    @Optional()
+    private readonly systemScoreDispatchSchedulerService?: SystemScoreDispatchSchedulerService,
   ) {}
 
   /**
@@ -694,12 +710,14 @@ export class ScoringResultService {
    * @param reviewId Review identifier created in review-api.
    * @param submissionId Submission identifier to score.
    * @param challengeId Challenge identifier used to resolve Marathon Match config.
-   * @returns ECS launch metadata, or a skipped result after writing a failed summation.
+   * @param options Dispatch behavior controls used by the deferred worker.
+   * @returns ECS launch metadata, a queued result when capacity is full, or a skipped result after writing a failed summation.
    */
   async triggerSystemScore(
     reviewId: string,
     submissionId: string,
     challengeId: string,
+    options: TriggerSystemScoreOptions = {},
   ): Promise<SystemScoreDispatchResult> {
     const config = await this.prisma.marathonMatchConfig.findUnique({
       where: { challengeId },
@@ -792,20 +810,37 @@ export class ScoringResultService {
       };
     }
 
-    const launchResult = await this.ecsService.launchScorerTask(
-      challengeId,
-      submissionId,
-      {
-        taskDefinitionName: config.taskDefinitionName,
-        taskDefinitionVersion: config.taskDefinitionVersion,
-      },
-      {
-        configType: systemPhaseConfig.configType,
-        startSeed: systemPhaseConfig.startSeed,
-        numberOfTests: systemPhaseConfig.numberOfTests,
-      },
-      reviewId,
-    );
+    let launchResult: MarathonMatchScorerTaskLaunchResult;
+    try {
+      launchResult = await this.ecsService.launchScorerTask(
+        challengeId,
+        submissionId,
+        {
+          taskDefinitionName: config.taskDefinitionName,
+          taskDefinitionVersion: config.taskDefinitionVersion,
+        },
+        {
+          configType: systemPhaseConfig.configType,
+          startSeed: systemPhaseConfig.startSeed,
+          numberOfTests: systemPhaseConfig.numberOfTests,
+        },
+        reviewId,
+      );
+    } catch (error) {
+      if (
+        options.enqueueOnCapacityLimit !== false &&
+        this.isScorerTaskCapacityLimitError(error)
+      ) {
+        return await this.enqueueSystemScoreAfterCapacityLimit({
+          challengeId,
+          error,
+          reviewId,
+          submissionId,
+        });
+      }
+
+      throw error;
+    }
     const systemTestTimeout = this.resolveSystemTestTimeout(
       config.systemTestTimeout,
     );
@@ -830,6 +865,66 @@ export class ScoringResultService {
     });
 
     return launchResult;
+  }
+
+  /**
+   * Enqueues SYSTEM scoring for retry after ECS scorer capacity becomes available.
+   * @param args Review/submission context and original launch error.
+   * @returns Queued dispatch result returned to the caller.
+   * @throws Error when the deferred dispatch scheduler is unavailable or cannot persist the job.
+   */
+  private async enqueueSystemScoreAfterCapacityLimit(args: {
+    challengeId: string;
+    submissionId: string;
+    reviewId: string;
+    error: unknown;
+  }): Promise<QueuedSystemScoreDispatchResult> {
+    if (!this.systemScoreDispatchSchedulerService) {
+      throw args.error instanceof Error
+        ? args.error
+        : new Error(String(args.error));
+    }
+
+    const reason =
+      args.error instanceof Error ? args.error.message : String(args.error);
+    const jobId =
+      await this.systemScoreDispatchSchedulerService.enqueueSystemScoreDispatch(
+        {
+          challengeId: args.challengeId,
+          submissionId: args.submissionId,
+          reviewId: args.reviewId,
+          queuedAt: new Date().toISOString(),
+          reason,
+        },
+      );
+
+    this.logger.log({
+      message:
+        'Queued Marathon Match SYSTEM score dispatch because ECS scorer capacity is full.',
+      challengeId: args.challengeId,
+      submissionId: args.submissionId,
+      reviewId: args.reviewId,
+      jobId,
+      reason,
+    });
+
+    return {
+      queued: true,
+      reason,
+      reviewId: args.reviewId,
+      submissionId: args.submissionId,
+      jobId,
+    };
+  }
+
+  /**
+   * Detects the ECS scorer cap exception raised before RunTask.
+   * @param error Error thrown by EcsService.
+   * @returns True when dispatch should be persisted for later retry.
+   */
+  private isScorerTaskCapacityLimitError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('ECS scorer task concurrency limit reached');
   }
 
   /**

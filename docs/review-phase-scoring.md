@@ -70,6 +70,12 @@ While SYSTEM tests are running, the ECS runner updates the phase review summatio
 
 Each dispatched SYSTEM task also schedules a pg-boss timeout check using the config's `systemTestTimeout` value. The default is 24 hours (`86400000` ms). When the delayed check runs, the API describes the ECS task and checks the SYSTEM summation; if the task is still active and the summation is not complete, it stops the ECS task, writes a failed SYSTEM summation with score `-1`, and includes `metadata.timed_out = true`.
 
+## ECS capacity back-pressure
+
+Before each scorer launch, `EcsService.launchScorerTask(...)` enforces `ECS_SCORER_MAX_CONCURRENT_TASKS` across pending/running scorer tasks. During Review/SYSTEM dispatch, `ScoringResultService.triggerSystemScore(...)` catches that capacity-limit error and writes the review/submission/challenge tuple to the `system-score-dispatch` pg-boss queue. The HTTP request still returns accepted to autopilot, and `SystemScoreDispatchWorkerService` retries the queued dispatch until ECS capacity is available.
+
+The queue is keyed by challenge ID, review ID, and submission ID so repeated phase-open recovery does not create duplicate queued work for the same SYSTEM review. Retry behavior is controlled by `SYSTEM_SCORE_DISPATCH_RETRY_DELAY_SECONDS` (default `300`), `SYSTEM_SCORE_DISPATCH_RETRY_LIMIT` (default `10000`), and `SYSTEM_SCORE_DISPATCH_WORKER_CONCURRENCY` (default `1`).
+
 ## Relative scoring at completion
 
 If `relativeScoringEnabled = true`, `ScoringResultService` persists normalized aggregate scores to Review API before challenge finalization. `ChallengeCompletionService.finalizeChallenge(...)` consumes those persisted review summaries; it does not recompute relative scoring itself.
@@ -92,3 +98,4 @@ Primary places to inspect this flow:
 
 - `dbLogger.logAction('marathonMatch.handleReviewPhaseOpened', ...)` entries in autopilot logging
 - CloudWatch logs for the ECS scorer tasks launched for SYSTEM scoring
+- marathon-match-api-v6 logs from `SystemScoreDispatchSchedulerService` and `SystemScoreDispatchWorkerService` when SYSTEM dispatch is deferred by ECS capacity

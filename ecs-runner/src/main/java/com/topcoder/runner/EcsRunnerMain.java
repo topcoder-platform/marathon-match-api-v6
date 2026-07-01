@@ -4558,7 +4558,9 @@ public class EcsRunnerMain {
      * <p>The method creates artifact directories, selects a supported submission source file,
      * compiles it when needed, writes compilation diagnostics to artifacts, runs the configured
      * tester for every seed in the phase range, and returns the aggregate score plus per-test
-     * metadata used by relative scoring and internal diagnostics.
+     * metadata used by relative scoring and internal diagnostics. The generic path does not
+     * synthesize a legacy {@code currentReview} callback because the API can persist the same
+     * result from top-level metadata without duplicating large per-test score arrays.
      *
      * @param testerClassName Fully qualified Marathon tester class name.
      * @param submissionPath Extracted submission directory.
@@ -4763,17 +4765,7 @@ public class EcsRunnerMain {
             metadata.put("aggregateMode", "average");
             metadata.put("testScores", testScores);
 
-            Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
-            currentReview.put("score", averageScore);
-            currentReview.put("aggregateScore", averageScore);
-            currentReview.put("metadata", metadata);
-
-            return new TesterExecutionResult(
-                averageScore,
-                metadata,
-                currentReview,
-                new ArrayList<Map<String, Object>>()
-            );
+            return buildGenericTesterExecutionResult(averageScore, metadata);
         } catch (Exception error) {
             writePreResultMemberOutput(outputPath, error);
             throw error;
@@ -4957,17 +4949,28 @@ public class EcsRunnerMain {
         );
         metadata.put("numberOfTests", 0);
 
-        Map<String, Object> currentReview = new LinkedHashMap<String, Object>();
-        currentReview.put("score", -1.0);
-        currentReview.put("aggregateScore", -1.0);
-        currentReview.put("metadata", metadata);
+        return buildGenericTesterExecutionResult(-1.0, metadata);
+    }
 
-        return new TesterExecutionResult(
-            -1.0,
-            metadata,
-            currentReview,
-            new ArrayList<Map<String, Object>>()
-        );
+    /**
+     * Builds the generic MarathonController execution result used by the final
+     * scoring callback.
+     *
+     * <p>Generic runs already send aggregate score and scorer metadata as top-level
+     * callback fields. Leaving {@code currentReview} empty keeps the API on the
+     * direct summation path and avoids posting duplicate per-test score metadata
+     * for large system runs.
+     *
+     * @param score Aggregate score produced by the generic runner.
+     * @param metadata Scorer metadata, including per-test score entries when available.
+     * @return Tester execution result for callback creation and internal diagnostics.
+     * @throws IllegalArgumentException When {@code score} is not finite.
+     */
+    private static TesterExecutionResult buildGenericTesterExecutionResult(
+        double score,
+        Map<String, Object> metadata
+    ) {
+        return new TesterExecutionResult(score, metadata);
     }
 
     /**

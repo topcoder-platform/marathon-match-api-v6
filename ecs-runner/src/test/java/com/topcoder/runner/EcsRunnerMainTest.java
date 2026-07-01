@@ -287,6 +287,35 @@ public class EcsRunnerMainTest {
     }
 
     @Test
+    public void buildGenericTesterExecutionResultOmitsSyntheticReviewPayload()
+        throws Exception {
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("testScores", new ArrayList<Map<String, Object>>());
+
+        Method builder = EcsRunnerMain.class.getDeclaredMethod(
+            "buildGenericTesterExecutionResult",
+            double.class,
+            Map.class
+        );
+        builder.setAccessible(true);
+        Object testerExecution = builder.invoke(null, 98.5, metadata);
+
+        Method toSerializableMap = getTesterExecutionResultClass()
+            .getDeclaredMethod("toSerializableMap");
+        toSerializableMap.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) toSerializableMap.invoke(
+            testerExecution
+        );
+
+        assertEquals(98.5, ((Number) payload.get("score")).doubleValue(), 0.0);
+        assertEquals(metadata, payload.get("metadata"));
+        assertTrue(((Map<?, ?>) payload.get("currentReview")).isEmpty());
+        assertTrue(((List<?>) payload.get("impactedReviews")).isEmpty());
+    }
+
+    @Test
     public void createDirectoryZipIncludesPerSeedStdoutAndStderrArtifacts()
         throws Exception {
         Path artifactsDir = createArtifactsDir();

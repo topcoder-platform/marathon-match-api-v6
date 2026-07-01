@@ -70,6 +70,9 @@ describe('ScoringResultService', () => {
     systemTestTimeoutSchedulerService?: {
       scheduleSystemTestTimeout?: jest.Mock;
     },
+    systemScoreDispatchSchedulerService?: {
+      enqueueSystemScoreDispatch?: jest.Mock;
+    },
   ) => {
     const httpService = {
       get: jest.fn(),
@@ -120,6 +123,7 @@ describe('ScoringResultService', () => {
       ecsService as never,
       scoringCompletionEmailService as never,
       systemTestTimeoutSchedulerService as never,
+      systemScoreDispatchSchedulerService as never,
     );
 
     return {
@@ -1982,6 +1986,86 @@ describe('ScoringResultService', () => {
       }),
       3600000,
     );
+  });
+
+  it('queues system scoring when ECS scorer capacity is full', async () => {
+    const systemTestTimeoutSchedulerService = {
+      scheduleSystemTestTimeout: jest.fn().mockResolvedValue(undefined),
+    };
+    const systemScoreDispatchSchedulerService = {
+      enqueueSystemScoreDispatch: jest.fn().mockResolvedValue('job-1'),
+    };
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService(
+        undefined,
+        systemTestTimeoutSchedulerService,
+        systemScoreDispatchSchedulerService,
+      );
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      active: true,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      reviewScorecardId: 'scorecard-1',
+      systemTestTimeout: 3600000,
+      tester: {
+        id: 'tester-1',
+        compilationStatus: 'SUCCESS',
+      },
+      phaseConfigs: [
+        {
+          configType: 'SYSTEM',
+          startSeed: BigInt(100),
+          numberOfTests: 20,
+        },
+      ],
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          id: basePayload.submissionId,
+          virusScan: true,
+        },
+      }),
+    );
+    ecsService.launchScorerTask.mockRejectedValue(
+      new Error(
+        'Failed to launch ECS scorer task for submission submission-1: ECS scorer task concurrency limit reached (20/20).',
+      ),
+    );
+
+    await expect(
+      service.triggerSystemScore(
+        'review-1',
+        basePayload.submissionId,
+        basePayload.challengeId,
+      ),
+    ).resolves.toEqual({
+      queued: true,
+      reason:
+        'Failed to launch ECS scorer task for submission submission-1: ECS scorer task concurrency limit reached (20/20).',
+      reviewId: 'review-1',
+      submissionId: basePayload.submissionId,
+      jobId: 'job-1',
+    });
+
+    expect(
+      systemScoreDispatchSchedulerService.enqueueSystemScoreDispatch,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: basePayload.challengeId,
+        submissionId: basePayload.submissionId,
+        reviewId: 'review-1',
+        reason:
+          'Failed to launch ECS scorer task for submission submission-1: ECS scorer task concurrency limit reached (20/20).',
+      }),
+    );
+    expect(
+      systemTestTimeoutSchedulerService.scheduleSystemTestTimeout,
+    ).not.toHaveBeenCalled();
   });
 
   it('marks system scoring failed without launching when submission has not passed virus scan', async () => {

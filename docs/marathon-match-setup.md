@@ -166,7 +166,7 @@ To restart Review/System tests, call:
 
 `POST /v6/marathon-match/challenge/:challengeId/rerun/system`
 
-The SYSTEM rerun endpoint reuses existing non-cancelled Review API review records that match the challenge's configured Marathon Match scorecard and dispatches each one through SYSTEM scoring with its existing `reviewId`.
+The SYSTEM rerun endpoint reuses existing non-cancelled Review API review records that match the challenge's configured Marathon Match scorecard and dispatches each one through SYSTEM scoring with its existing `reviewId`. If `ECS_SCORER_MAX_CONCURRENT_TASKS` is already reached, the dispatch is queued in pg-boss and retried by the `system-score-dispatch` worker until scorer capacity is available.
 
 Reruns can be requested by admins, M2M tokens with `update:marathon-match`, or the `Copilot` resource assigned to the challenge.
 

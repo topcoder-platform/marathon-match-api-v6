@@ -44,6 +44,7 @@ import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
 import {
+  QueuedSystemScoreDispatchResult,
   ScoringResultService,
   SkippedSystemScoreDispatchResult,
   SystemScoreDispatchResult,
@@ -1255,6 +1256,16 @@ export class MarathonMatchConfigService {
               };
             }
 
+            if (this.isQueuedSystemScoreDispatchResult(launchResult.value)) {
+              return {
+                reviewId,
+                submissionId,
+                queued: true,
+                jobId: launchResult.value.jobId ?? undefined,
+                message: launchResult.value.reason,
+              };
+            }
+
             return {
               reviewId,
               submissionId,
@@ -1816,6 +1827,17 @@ export class MarathonMatchConfigService {
     result: SystemScoreDispatchResult,
   ): result is SkippedSystemScoreDispatchResult {
     return 'skipped' in result && result.skipped === true;
+  }
+
+  /**
+   * Checks whether a SYSTEM dispatch result was deferred to the pg-boss queue.
+   * @param result SYSTEM dispatch result returned by ScoringResultService.
+   * @returns True when the result represents queued dispatch work.
+   */
+  private isQueuedSystemScoreDispatchResult(
+    result: SystemScoreDispatchResult,
+  ): result is QueuedSystemScoreDispatchResult {
+    return 'queued' in result && result.queued === true;
   }
 
   /**

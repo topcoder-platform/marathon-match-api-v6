@@ -1,0 +1,892 @@
+{
+  "challengeId": "48826d67-3354-4191-8c8f-5aa07c84dbdf",
+  "startedAt": "2026-07-01T06:59:37.123Z",
+  "reviewsQueued": 81,
+  "initialResponse": {
+    "challengeId": "48826d67-3354-4191-8c8f-5aa07c84dbdf",
+    "reviewsQueued": 81,
+    "results": [
+      {
+        "reviewId": "a59cf8ff-a994-41a8-be51-f7e278ff64f8",
+        "submissionId": "_9VOLnz2XYZv8J",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/79fef93bb08a4621bee241add80a4e84",
+        "taskId": "79fef93bb08a4621bee241add80a4e84"
+      },
+      {
+        "reviewId": "4f923f63-57d6-47cc-861e-38d71b564a22",
+        "submissionId": "-kJ-nOos4KQaL3",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/56dcd794a09a4a2680eadc07a5585d90",
+        "taskId": "56dcd794a09a4a2680eadc07a5585d90"
+      },
+      {
+        "reviewId": "03eaaedb-d577-498e-8957-71cc66ed15b2",
+        "submissionId": "-MXxGM58y4w9Ir",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/1db6b4eb7ebc4d79a8dde6259791f5c8",
+        "taskId": "1db6b4eb7ebc4d79a8dde6259791f5c8"
+      },
+      {
+        "reviewId": "de224678-76cf-439e-bae8-67827cd5889d",
+        "submissionId": "-XseogN8tWUYv9",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/f757cd3e398149f48a4e0d78a9d9cdf7",
+        "taskId": "f757cd3e398149f48a4e0d78a9d9cdf7"
+      },
+      {
+        "reviewId": "e15d4849-8187-4a2a-a954-d6cfac7a1b6f",
+        "submissionId": "09jQG5gXgrtwRy",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/647dba399ce443e99919910fc4e2cef0",
+        "taskId": "647dba399ce443e99919910fc4e2cef0"
+      },
+      {
+        "reviewId": "0d8f13a1-ac02-4f75-bd10-582293fc44b3",
+        "submissionId": "0wGavBBuHVPRAm",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/38194f32f93248a3aaa1a4ac6311aeed",
+        "taskId": "38194f32f93248a3aaa1a4ac6311aeed"
+      },
+      {
+        "reviewId": "d83f186b-37bf-4469-822b-fd15b4bf3385",
+        "submissionId": "2_gNxXA3WH111b",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/c99a6b4da56a417992a96ff8b692d859",
+        "taskId": "c99a6b4da56a417992a96ff8b692d859"
+      },
+      {
+        "reviewId": "90b49711-bc0e-4dc4-b9db-fc2b86c8de5d",
+        "submissionId": "2Z35j4waNot1Ol",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/a5104e057df445d7a18a8c34d790b4a7",
+        "taskId": "a5104e057df445d7a18a8c34d790b4a7"
+      },
+      {
+        "reviewId": "d6354bbe-c309-4932-be79-70e40e6ec2ff",
+        "submissionId": "3kONG53Rspsc2X",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/12e63d1c475f41beb541b0e3fd2682fb",
+        "taskId": "12e63d1c475f41beb541b0e3fd2682fb"
+      },
+      {
+        "reviewId": "37adfa56-f824-47d0-a3af-19ab4640f760",
+        "submissionId": "464rSXUx0aQzHk",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/2c854c40631946709dfb71ee896cb075",
+        "taskId": "2c854c40631946709dfb71ee896cb075"
+      },
+      {
+        "reviewId": "f33e8cb0-5bca-47d3-9784-611d3e94ec38",
+        "submissionId": "4lJclQqEia-Kaq",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/d4cab742ec484dee9d29d9c5330e2182",
+        "taskId": "d4cab742ec484dee9d29d9c5330e2182"
+      },
+      {
+        "reviewId": "db32b7be-9243-4f25-8992-aebf5c14252c",
+        "submissionId": "5-vO22Fx78URn8",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/645b98038f8542a4884a0e81ece7533b",
+        "taskId": "645b98038f8542a4884a0e81ece7533b"
+      },
+      {
+        "reviewId": "73f16e4b-7fe7-4f69-84f3-fa06a1519612",
+        "submissionId": "54wGkqq0n7ki5v",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/6a24170e537b486c873046f50e703ffc",
+        "taskId": "6a24170e537b486c873046f50e703ffc"
+      },
+      {
+        "reviewId": "551be25b-c101-43e8-a6e9-c19b3ae6c018",
+        "submissionId": "67iZ6H3GQFFzjs",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/3ea9641a17cc4eaea3d52f4403c3cf2d",
+        "taskId": "3ea9641a17cc4eaea3d52f4403c3cf2d"
+      },
+      {
+        "reviewId": "022f2144-8b4e-4053-8f08-4adbc53f50aa",
+        "submissionId": "8yc1MuNagRXthA",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e0d80a1838504dc0a58315c486b784ff",
+        "taskId": "e0d80a1838504dc0a58315c486b784ff"
+      },
+      {
+        "reviewId": "af418018-2916-4b3e-813d-6bc9220376ae",
+        "submissionId": "9Y5C8ERE1mhpMk",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/b8c1c15010df4616b6d117fe2241ff02",
+        "taskId": "b8c1c15010df4616b6d117fe2241ff02"
+      },
+      {
+        "reviewId": "bf580df4-4801-4cd6-8e92-554bb9202c74",
+        "submissionId": "afAVzIRQAoEztm",
+        "error": "Failed to launch ECS scorer task for submission afAVzIRQAoEztm: ECS scorer task concurrency limit reached (20/20). Deferring submission afAVzIRQAoEztm to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "5f95dfae-5901-428c-b243-012c6d68e9df",
+        "submissionId": "AfhrQkoDWXyCfd",
+        "error": "Failed to launch ECS scorer task for submission AfhrQkoDWXyCfd: ECS scorer task concurrency limit reached (20/20). Deferring submission AfhrQkoDWXyCfd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "1984db44-37db-48fe-8345-b484d9828d8b",
+        "submissionId": "aNmfzJwubStTRo",
+        "error": "Failed to launch ECS scorer task for submission aNmfzJwubStTRo: ECS scorer task concurrency limit reached (20/20). Deferring submission aNmfzJwubStTRo to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b2a1ab3b-65a8-4b4d-b93c-1bc557a3722a",
+        "submissionId": "aXzej5sv5FCMYV",
+        "error": "Failed to launch ECS scorer task for submission aXzej5sv5FCMYV: ECS scorer task concurrency limit reached (20/20). Deferring submission aXzej5sv5FCMYV to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "6b1c0476-4d05-4c46-9b67-2d860de22a01",
+        "submissionId": "B-XVLtUga3AhAC",
+        "error": "Failed to launch ECS scorer task for submission B-XVLtUga3AhAC: ECS scorer task concurrency limit reached (20/20). Deferring submission B-XVLtUga3AhAC to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "d91d2270-2b62-4cef-bbe4-54010e580a27",
+        "submissionId": "b5-cpwFqfdcy8D",
+        "error": "Failed to launch ECS scorer task for submission b5-cpwFqfdcy8D: ECS scorer task concurrency limit reached (20/20). Deferring submission b5-cpwFqfdcy8D to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3135bdf6-4a85-4c2a-9b10-14e5d7a0cb94",
+        "submissionId": "b72jM5-X00DcUV",
+        "error": "Failed to launch ECS scorer task for submission b72jM5-X00DcUV: ECS scorer task concurrency limit reached (20/20). Deferring submission b72jM5-X00DcUV to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "5729a89b-296c-4db7-87ce-4c49a7bf4116",
+        "submissionId": "bg3TEq2ttZwXl-",
+        "error": "Failed to launch ECS scorer task for submission bg3TEq2ttZwXl-: ECS scorer task concurrency limit reached (20/20). Deferring submission bg3TEq2ttZwXl- to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "96d0e35a-1a3c-424e-a79b-f9033848aeeb",
+        "submissionId": "bHFFSEedqjxtzf",
+        "error": "Failed to launch ECS scorer task for submission bHFFSEedqjxtzf: ECS scorer task concurrency limit reached (20/20). Deferring submission bHFFSEedqjxtzf to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "04964112-438c-41d0-b0d1-13fc65b05df4",
+        "submissionId": "biCmIontn005Ic",
+        "error": "Failed to launch ECS scorer task for submission biCmIontn005Ic: ECS scorer task concurrency limit reached (20/20). Deferring submission biCmIontn005Ic to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "87ce278e-c6a7-471f-9b78-7a013275cff9",
+        "submissionId": "BSiwxzuF-TqeqP",
+        "error": "Failed to launch ECS scorer task for submission BSiwxzuF-TqeqP: ECS scorer task concurrency limit reached (20/20). Deferring submission BSiwxzuF-TqeqP to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f5a411b3-ce6f-4da0-b4ba-68ca9df91d43",
+        "submissionId": "BVdlowg4Lsy7As",
+        "error": "Failed to launch ECS scorer task for submission BVdlowg4Lsy7As: ECS scorer task concurrency limit reached (20/20). Deferring submission BVdlowg4Lsy7As to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "04fc1823-9c10-41cd-ba73-766dfbeaed26",
+        "submissionId": "CIGmGeqdp6Bfy3",
+        "error": "Failed to launch ECS scorer task for submission CIGmGeqdp6Bfy3: ECS scorer task concurrency limit reached (20/20). Deferring submission CIGmGeqdp6Bfy3 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "e5af0e91-9459-43fb-a2f6-7ea6a541cd89",
+        "submissionId": "FvwbmtBOkyfGdD",
+        "error": "Failed to launch ECS scorer task for submission FvwbmtBOkyfGdD: ECS scorer task concurrency limit reached (20/20). Deferring submission FvwbmtBOkyfGdD to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3ac26bfb-cc69-4530-9e78-b55ed58cee17",
+        "submissionId": "GEAksgekpuPCeO",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/04f63206b59b4d44a9f2c6a062a68792",
+        "taskId": "04f63206b59b4d44a9f2c6a062a68792"
+      },
+      {
+        "reviewId": "9fb495fd-1481-4a92-addd-af26241b7ac1",
+        "submissionId": "hAq--Rd0DCf8Gz",
+        "error": "Failed to launch ECS scorer task for submission hAq--Rd0DCf8Gz: ECS scorer task concurrency limit reached (20/20). Deferring submission hAq--Rd0DCf8Gz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f07cc05d-adde-456a-8c1a-fe5520ed961b",
+        "submissionId": "he6WzVNcc_daZR",
+        "error": "Failed to launch ECS scorer task for submission he6WzVNcc_daZR: ECS scorer task concurrency limit reached (20/20). Deferring submission he6WzVNcc_daZR to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f9b95f9c-55c4-4bc0-b585-35435aa6d728",
+        "submissionId": "IJaRGgB9EGkeNt",
+        "error": "Failed to launch ECS scorer task for submission IJaRGgB9EGkeNt: ECS scorer task concurrency limit reached (20/20). Deferring submission IJaRGgB9EGkeNt to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "4d08ddee-4fdc-4abf-b184-b24896c4b1c3",
+        "submissionId": "io4IgrmGSPD6za",
+        "error": "Failed to launch ECS scorer task for submission io4IgrmGSPD6za: ECS scorer task concurrency limit reached (20/20). Deferring submission io4IgrmGSPD6za to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f156f487-45b8-4c3d-9389-36423b0ce9f5",
+        "submissionId": "J8qjDufR44sbYM",
+        "error": "Failed to launch ECS scorer task for submission J8qjDufR44sbYM: ECS scorer task concurrency limit reached (20/20). Deferring submission J8qjDufR44sbYM to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "dab539ff-250c-44f4-9e8c-493b712d7839",
+        "submissionId": "K0UbtNIuWpH7W1",
+        "error": "Failed to launch ECS scorer task for submission K0UbtNIuWpH7W1: ECS scorer task concurrency limit reached (20/20). Deferring submission K0UbtNIuWpH7W1 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7c942dcd-dd90-46a6-855c-e2a6602bb494",
+        "submissionId": "k8yTJ5Cb7gtHrp",
+        "error": "Failed to launch ECS scorer task for submission k8yTJ5Cb7gtHrp: ECS scorer task concurrency limit reached (20/20). Deferring submission k8yTJ5Cb7gtHrp to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a2ed34d4-62ec-4acb-a28c-55211337d719",
+        "submissionId": "KDLZsRDsgzJy_F",
+        "error": "Failed to launch ECS scorer task for submission KDLZsRDsgzJy_F: ECS scorer task concurrency limit reached (20/20). Deferring submission KDLZsRDsgzJy_F to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "fcaa2874-0634-4fbc-be15-cecc9816aca2",
+        "submissionId": "KNK5qu5ny94P5_",
+        "error": "Failed to launch ECS scorer task for submission KNK5qu5ny94P5_: ECS scorer task concurrency limit reached (20/20). Deferring submission KNK5qu5ny94P5_ to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "cb1ba2e3-6e40-435f-88aa-66f18c592905",
+        "submissionId": "l15vteqGkA4Cdz",
+        "error": "Failed to launch ECS scorer task for submission l15vteqGkA4Cdz: ECS scorer task concurrency limit reached (20/20). Deferring submission l15vteqGkA4Cdz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "728495de-9456-49c7-a6f2-818dc5746105",
+        "submissionId": "l1LMW0Rq44A29J",
+        "error": "Failed to launch ECS scorer task for submission l1LMW0Rq44A29J: ECS scorer task concurrency limit reached (20/20). Deferring submission l1LMW0Rq44A29J to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "21edbf45-7d3a-4996-8479-a45b8a0c0ac7",
+        "submissionId": "l8Ogeb3iMc9PL7",
+        "error": "Failed to launch ECS scorer task for submission l8Ogeb3iMc9PL7: ECS scorer task concurrency limit reached (20/20). Deferring submission l8Ogeb3iMc9PL7 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "de51027f-10ba-46d0-8e6e-73a378722ff1",
+        "submissionId": "Lk7FBfpk2PY-QI",
+        "error": "Failed to launch ECS scorer task for submission Lk7FBfpk2PY-QI: ECS scorer task concurrency limit reached (20/20). Deferring submission Lk7FBfpk2PY-QI to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "fb77c1d1-8f34-48f5-8741-b88665f579f4",
+        "submissionId": "Ma-1c0Di2Ihu2R",
+        "error": "Failed to launch ECS scorer task for submission Ma-1c0Di2Ihu2R: ECS scorer task concurrency limit reached (20/20). Deferring submission Ma-1c0Di2Ihu2R to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "124ca3dc-60f9-40f3-815b-920f221b1224",
+        "submissionId": "mqoN5fmFUaLCrd",
+        "error": "Failed to launch ECS scorer task for submission mqoN5fmFUaLCrd: ECS scorer task concurrency limit reached (20/20). Deferring submission mqoN5fmFUaLCrd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f7049cd2-cba8-46a9-bb34-b68b3c0b3f5a",
+        "submissionId": "mSMs1PbtSb_f2u",
+        "error": "Failed to launch ECS scorer task for submission mSMs1PbtSb_f2u: ECS scorer task concurrency limit reached (20/20). Deferring submission mSMs1PbtSb_f2u to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f4851ea0-fdeb-46a0-bc7b-1bf001bd6e60",
+        "submissionId": "nOh4tvHzsasU1Y",
+        "error": "Failed to launch ECS scorer task for submission nOh4tvHzsasU1Y: ECS scorer task concurrency limit reached (20/20). Deferring submission nOh4tvHzsasU1Y to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "2c68ae39-9c8a-4f39-b56a-09ac9ae6e2ca",
+        "submissionId": "Ol1p-B6IBmh3UX",
+        "error": "Failed to launch ECS scorer task for submission Ol1p-B6IBmh3UX: ECS scorer task concurrency limit reached (20/20). Deferring submission Ol1p-B6IBmh3UX to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b36e7ce0-177d-4ae1-bb60-017a14236db5",
+        "submissionId": "OPHSZK0yICSTZA",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/c80de6f06f764e37a5757d37327b30fe",
+        "taskId": "c80de6f06f764e37a5757d37327b30fe"
+      },
+      {
+        "reviewId": "46003757-5104-4da1-8ac1-3ff6895d3a7d",
+        "submissionId": "opOZwDKuwYj7ZZ",
+        "error": "Failed to launch ECS scorer task for submission opOZwDKuwYj7ZZ: ECS scorer task concurrency limit reached (20/20). Deferring submission opOZwDKuwYj7ZZ to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "12875786-b6e2-4533-a20a-d66daf795d2d",
+        "submissionId": "oRvp_5_mUdPIm-",
+        "error": "Failed to launch ECS scorer task for submission oRvp_5_mUdPIm-: ECS scorer task concurrency limit reached (20/20). Deferring submission oRvp_5_mUdPIm- to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "0986e913-49d8-472b-900c-32f236f37253",
+        "submissionId": "OvhNb7WTRUheSO",
+        "error": "Failed to launch ECS scorer task for submission OvhNb7WTRUheSO: ECS scorer task concurrency limit reached (20/20). Deferring submission OvhNb7WTRUheSO to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "173a2093-8e9e-4cf3-b57b-db890451ef1a",
+        "submissionId": "p4fNGII3eANhbp",
+        "error": "Failed to launch ECS scorer task for submission p4fNGII3eANhbp: ECS scorer task concurrency limit reached (20/20). Deferring submission p4fNGII3eANhbp to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "9961af37-ef42-4d3d-a2ce-6f37d9fd5028",
+        "submissionId": "P6yOhg0NFHSa5v",
+        "error": "Failed to launch ECS scorer task for submission P6yOhg0NFHSa5v: ECS scorer task concurrency limit reached (20/20). Deferring submission P6yOhg0NFHSa5v to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "c2ad3c5e-0bc2-4a9b-99cd-fb214d334210",
+        "submissionId": "pjxTnWMmGFrSzN",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/4ce989c827114eaa8ba16f6788fcbcf5",
+        "taskId": "4ce989c827114eaa8ba16f6788fcbcf5"
+      },
+      {
+        "reviewId": "d7e2e809-ba6d-479a-b20b-c7b9b4a42863",
+        "submissionId": "Pv0Eu-MydzpWWA",
+        "error": "Failed to launch ECS scorer task for submission Pv0Eu-MydzpWWA: ECS scorer task concurrency limit reached (20/20). Deferring submission Pv0Eu-MydzpWWA to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "b55c6d38-2d1b-4869-9dd4-7fbb67163ab1",
+        "submissionId": "Q18Zp5P1RoHtXd",
+        "error": "Failed to launch ECS scorer task for submission Q18Zp5P1RoHtXd: ECS scorer task concurrency limit reached (20/20). Deferring submission Q18Zp5P1RoHtXd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "194fc457-c1a9-41d8-b550-63c06f05071b",
+        "submissionId": "qCi-PzVugNi6JU",
+        "error": "Failed to launch ECS scorer task for submission qCi-PzVugNi6JU: ECS scorer task concurrency limit reached (20/20). Deferring submission qCi-PzVugNi6JU to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
+        "submissionId": "qQLMawdXKyZlpc",
+        "error": "Failed to launch ECS scorer task for submission qQLMawdXKyZlpc: ECS scorer task concurrency limit reached (20/20). Deferring submission qQLMawdXKyZlpc to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
+        "submissionId": "qwk7d0PBsfgp5L",
+        "error": "Failed to launch ECS scorer task for submission qwk7d0PBsfgp5L: ECS scorer task concurrency limit reached (20/20). Deferring submission qwk7d0PBsfgp5L to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
+        "submissionId": "RD1pH1HV57KKXm",
+        "error": "Failed to launch ECS scorer task for submission RD1pH1HV57KKXm: ECS scorer task concurrency limit reached (20/20). Deferring submission RD1pH1HV57KKXm to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
+        "submissionId": "sGOUPQDZbM3Yrm",
+        "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/392afc12391044b9b0e460daa006c2cf",
+        "taskId": "392afc12391044b9b0e460daa006c2cf"
+      },
+      {
+        "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
+        "submissionId": "SGSifHnjzEevod",
+        "error": "Failed to launch ECS scorer task for submission SGSifHnjzEevod: ECS scorer task concurrency limit reached (20/20). Deferring submission SGSifHnjzEevod to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
+        "submissionId": "tXLS9u-Rkpg4iM",
+        "error": "Failed to launch ECS scorer task for submission tXLS9u-Rkpg4iM: ECS scorer task concurrency limit reached (20/20). Deferring submission tXLS9u-Rkpg4iM to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
+        "submissionId": "TzsC8mbDKeL4Oi",
+        "error": "Failed to launch ECS scorer task for submission TzsC8mbDKeL4Oi: ECS scorer task concurrency limit reached (20/20). Deferring submission TzsC8mbDKeL4Oi to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
+        "submissionId": "u2Px0WPxwWYFhS",
+        "error": "Failed to launch ECS scorer task for submission u2Px0WPxwWYFhS: ECS scorer task concurrency limit reached (20/20). Deferring submission u2Px0WPxwWYFhS to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
+        "submissionId": "UMM1Q8ojXGTcRd",
+        "error": "Failed to launch ECS scorer task for submission UMM1Q8ojXGTcRd: ECS scorer task concurrency limit reached (20/20). Deferring submission UMM1Q8ojXGTcRd to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
+        "submissionId": "VO3lr2ohElhKl8",
+        "error": "Failed to launch ECS scorer task for submission VO3lr2ohElhKl8: ECS scorer task concurrency limit reached (20/20). Deferring submission VO3lr2ohElhKl8 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
+        "submissionId": "VupJ0I_AQrsENo",
+        "error": "Failed to launch ECS scorer task for submission VupJ0I_AQrsENo: ECS scorer task concurrency limit reached (20/20). Deferring submission VupJ0I_AQrsENo to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
+        "submissionId": "wa4JVG90L64Tye",
+        "error": "Failed to launch ECS scorer task for submission wa4JVG90L64Tye: ECS scorer task concurrency limit reached (20/20). Deferring submission wa4JVG90L64Tye to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
+        "submissionId": "WhDhl-vIvAyZeV",
+        "error": "Failed to launch ECS scorer task for submission WhDhl-vIvAyZeV: ECS scorer task concurrency limit reached (20/20). Deferring submission WhDhl-vIvAyZeV to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
+        "submissionId": "wmW4O1loZwm_Jf",
+        "error": "Failed to launch ECS scorer task for submission wmW4O1loZwm_Jf: ECS scorer task concurrency limit reached (20/20). Deferring submission wmW4O1loZwm_Jf to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
+        "submissionId": "wzA0EP_nDbehGe",
+        "error": "Failed to launch ECS scorer task for submission wzA0EP_nDbehGe: ECS scorer task concurrency limit reached (20/20). Deferring submission wzA0EP_nDbehGe to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
+        "submissionId": "xbmrVhfrNEm5MR",
+        "error": "Failed to launch ECS scorer task for submission xbmrVhfrNEm5MR: ECS scorer task concurrency limit reached (20/20). Deferring submission xbmrVhfrNEm5MR to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
+        "submissionId": "xcnR4pt5oG_qAS",
+        "error": "Failed to launch ECS scorer task for submission xcnR4pt5oG_qAS: ECS scorer task concurrency limit reached (20/20). Deferring submission xcnR4pt5oG_qAS to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
+        "submissionId": "Y1GuZxfIGEoHAz",
+        "error": "Failed to launch ECS scorer task for submission Y1GuZxfIGEoHAz: ECS scorer task concurrency limit reached (20/20). Deferring submission Y1GuZxfIGEoHAz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
+        "submissionId": "z3oqSF0xWM93_M",
+        "error": "Failed to launch ECS scorer task for submission z3oqSF0xWM93_M: ECS scorer task concurrency limit reached (20/20). Deferring submission z3oqSF0xWM93_M to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
+        "submissionId": "Z7pDhP8hAkTAQ2",
+        "error": "Failed to launch ECS scorer task for submission Z7pDhP8hAkTAQ2: ECS scorer task concurrency limit reached (20/20). Deferring submission Z7pDhP8hAkTAQ2 to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
+        "submissionId": "zBZ1l8bFCN-Dfz",
+        "error": "Failed to launch ECS scorer task for submission zBZ1l8bFCN-Dfz: ECS scorer task concurrency limit reached (20/20). Deferring submission zBZ1l8bFCN-Dfz to Kafka retry/back-pressure instead of launching another task."
+      },
+      {
+        "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
+        "submissionId": "ZWdgESiPntuaPH",
+        "error": "Failed to launch ECS scorer task for submission ZWdgESiPntuaPH: ECS scorer task concurrency limit reached (20/20). Deferring submission ZWdgESiPntuaPH to Kafka retry/back-pressure instead of launching another task."
+      }
+    ]
+  },
+  "initialCounts": {
+    "launched": 20,
+    "retryableBacklog": 61,
+    "failed": 0
+  },
+  "pending": [
+    {
+      "reviewId": "7c942dcd-dd90-46a6-855c-e2a6602bb494",
+      "submissionId": "k8yTJ5Cb7gtHrp",
+      "error": "Failed to launch ECS scorer task for submission k8yTJ5Cb7gtHrp: ECS scorer task concurrency limit reached (20/20). Deferring submission k8yTJ5Cb7gtHrp to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "a2ed34d4-62ec-4acb-a28c-55211337d719",
+      "submissionId": "KDLZsRDsgzJy_F",
+      "error": "Failed to launch ECS scorer task for submission KDLZsRDsgzJy_F: ECS scorer task concurrency limit reached (20/20). Deferring submission KDLZsRDsgzJy_F to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "fcaa2874-0634-4fbc-be15-cecc9816aca2",
+      "submissionId": "KNK5qu5ny94P5_",
+      "error": "Failed to launch ECS scorer task for submission KNK5qu5ny94P5_: ECS scorer task concurrency limit reached (20/20). Deferring submission KNK5qu5ny94P5_ to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "cb1ba2e3-6e40-435f-88aa-66f18c592905",
+      "submissionId": "l15vteqGkA4Cdz",
+      "error": "Failed to launch ECS scorer task for submission l15vteqGkA4Cdz: ECS scorer task concurrency limit reached (20/20). Deferring submission l15vteqGkA4Cdz to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "728495de-9456-49c7-a6f2-818dc5746105",
+      "submissionId": "l1LMW0Rq44A29J",
+      "error": "Failed to launch ECS scorer task for submission l1LMW0Rq44A29J: ECS scorer task concurrency limit reached (20/20). Deferring submission l1LMW0Rq44A29J to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "21edbf45-7d3a-4996-8479-a45b8a0c0ac7",
+      "submissionId": "l8Ogeb3iMc9PL7",
+      "error": "Failed to launch ECS scorer task for submission l8Ogeb3iMc9PL7: ECS scorer task concurrency limit reached (20/20). Deferring submission l8Ogeb3iMc9PL7 to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "de51027f-10ba-46d0-8e6e-73a378722ff1",
+      "submissionId": "Lk7FBfpk2PY-QI",
+      "error": "Failed to launch ECS scorer task for submission Lk7FBfpk2PY-QI: ECS scorer task concurrency limit reached (20/20). Deferring submission Lk7FBfpk2PY-QI to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "fb77c1d1-8f34-48f5-8741-b88665f579f4",
+      "submissionId": "Ma-1c0Di2Ihu2R",
+      "error": "Failed to launch ECS scorer task for submission Ma-1c0Di2Ihu2R: ECS scorer task concurrency limit reached (20/20). Deferring submission Ma-1c0Di2Ihu2R to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "124ca3dc-60f9-40f3-815b-920f221b1224",
+      "submissionId": "mqoN5fmFUaLCrd",
+      "error": "Failed to launch ECS scorer task for submission mqoN5fmFUaLCrd: ECS scorer task concurrency limit reached (20/20). Deferring submission mqoN5fmFUaLCrd to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "f7049cd2-cba8-46a9-bb34-b68b3c0b3f5a",
+      "submissionId": "mSMs1PbtSb_f2u",
+      "error": "Failed to launch ECS scorer task for submission mSMs1PbtSb_f2u: ECS scorer task concurrency limit reached (20/20). Deferring submission mSMs1PbtSb_f2u to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "f4851ea0-fdeb-46a0-bc7b-1bf001bd6e60",
+      "submissionId": "nOh4tvHzsasU1Y",
+      "error": "Failed to launch ECS scorer task for submission nOh4tvHzsasU1Y: ECS scorer task concurrency limit reached (20/20). Deferring submission nOh4tvHzsasU1Y to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "2c68ae39-9c8a-4f39-b56a-09ac9ae6e2ca",
+      "submissionId": "Ol1p-B6IBmh3UX",
+      "error": "Failed to launch ECS scorer task for submission Ol1p-B6IBmh3UX: ECS scorer task concurrency limit reached (20/20). Deferring submission Ol1p-B6IBmh3UX to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "46003757-5104-4da1-8ac1-3ff6895d3a7d",
+      "submissionId": "opOZwDKuwYj7ZZ",
+      "error": "Failed to launch ECS scorer task for submission opOZwDKuwYj7ZZ: ECS scorer task concurrency limit reached (20/20). Deferring submission opOZwDKuwYj7ZZ to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "12875786-b6e2-4533-a20a-d66daf795d2d",
+      "submissionId": "oRvp_5_mUdPIm-",
+      "error": "Failed to launch ECS scorer task for submission oRvp_5_mUdPIm-: ECS scorer task concurrency limit reached (20/20). Deferring submission oRvp_5_mUdPIm- to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "0986e913-49d8-472b-900c-32f236f37253",
+      "submissionId": "OvhNb7WTRUheSO",
+      "error": "Failed to launch ECS scorer task for submission OvhNb7WTRUheSO: ECS scorer task concurrency limit reached (20/20). Deferring submission OvhNb7WTRUheSO to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "173a2093-8e9e-4cf3-b57b-db890451ef1a",
+      "submissionId": "p4fNGII3eANhbp",
+      "error": "Failed to launch ECS scorer task for submission p4fNGII3eANhbp: ECS scorer task concurrency limit reached (20/20). Deferring submission p4fNGII3eANhbp to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "9961af37-ef42-4d3d-a2ce-6f37d9fd5028",
+      "submissionId": "P6yOhg0NFHSa5v",
+      "error": "Failed to launch ECS scorer task for submission P6yOhg0NFHSa5v: ECS scorer task concurrency limit reached (20/20). Deferring submission P6yOhg0NFHSa5v to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "d7e2e809-ba6d-479a-b20b-c7b9b4a42863",
+      "submissionId": "Pv0Eu-MydzpWWA",
+      "error": "Failed to launch ECS scorer task for submission Pv0Eu-MydzpWWA: ECS scorer task concurrency limit reached (20/20). Deferring submission Pv0Eu-MydzpWWA to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "b55c6d38-2d1b-4869-9dd4-7fbb67163ab1",
+      "submissionId": "Q18Zp5P1RoHtXd",
+      "error": "Failed to launch ECS scorer task for submission Q18Zp5P1RoHtXd: ECS scorer task concurrency limit reached (20/20). Deferring submission Q18Zp5P1RoHtXd to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "194fc457-c1a9-41d8-b550-63c06f05071b",
+      "submissionId": "qCi-PzVugNi6JU",
+      "error": "Failed to launch ECS scorer task for submission qCi-PzVugNi6JU: ECS scorer task concurrency limit reached (20/20). Deferring submission qCi-PzVugNi6JU to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
+      "submissionId": "qQLMawdXKyZlpc",
+      "error": "Failed to launch ECS scorer task for submission qQLMawdXKyZlpc: ECS scorer task concurrency limit reached (20/20). Deferring submission qQLMawdXKyZlpc to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
+      "submissionId": "qwk7d0PBsfgp5L",
+      "error": "Failed to launch ECS scorer task for submission qwk7d0PBsfgp5L: ECS scorer task concurrency limit reached (20/20). Deferring submission qwk7d0PBsfgp5L to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
+      "submissionId": "RD1pH1HV57KKXm",
+      "error": "Failed to launch ECS scorer task for submission RD1pH1HV57KKXm: ECS scorer task concurrency limit reached (20/20). Deferring submission RD1pH1HV57KKXm to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
+      "submissionId": "SGSifHnjzEevod",
+      "error": "Failed to launch ECS scorer task for submission SGSifHnjzEevod: ECS scorer task concurrency limit reached (20/20). Deferring submission SGSifHnjzEevod to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
+      "submissionId": "tXLS9u-Rkpg4iM",
+      "error": "Failed to launch ECS scorer task for submission tXLS9u-Rkpg4iM: ECS scorer task concurrency limit reached (20/20). Deferring submission tXLS9u-Rkpg4iM to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
+      "submissionId": "TzsC8mbDKeL4Oi",
+      "error": "Failed to launch ECS scorer task for submission TzsC8mbDKeL4Oi: ECS scorer task concurrency limit reached (20/20). Deferring submission TzsC8mbDKeL4Oi to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
+      "submissionId": "u2Px0WPxwWYFhS",
+      "error": "Failed to launch ECS scorer task for submission u2Px0WPxwWYFhS: ECS scorer task concurrency limit reached (20/20). Deferring submission u2Px0WPxwWYFhS to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
+      "submissionId": "UMM1Q8ojXGTcRd",
+      "error": "Failed to launch ECS scorer task for submission UMM1Q8ojXGTcRd: ECS scorer task concurrency limit reached (20/20). Deferring submission UMM1Q8ojXGTcRd to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
+      "submissionId": "VO3lr2ohElhKl8",
+      "error": "Failed to launch ECS scorer task for submission VO3lr2ohElhKl8: ECS scorer task concurrency limit reached (20/20). Deferring submission VO3lr2ohElhKl8 to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
+      "submissionId": "VupJ0I_AQrsENo",
+      "error": "Failed to launch ECS scorer task for submission VupJ0I_AQrsENo: ECS scorer task concurrency limit reached (20/20). Deferring submission VupJ0I_AQrsENo to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
+      "submissionId": "wa4JVG90L64Tye",
+      "error": "Failed to launch ECS scorer task for submission wa4JVG90L64Tye: ECS scorer task concurrency limit reached (20/20). Deferring submission wa4JVG90L64Tye to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
+      "submissionId": "WhDhl-vIvAyZeV",
+      "error": "Failed to launch ECS scorer task for submission WhDhl-vIvAyZeV: ECS scorer task concurrency limit reached (20/20). Deferring submission WhDhl-vIvAyZeV to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
+      "submissionId": "wmW4O1loZwm_Jf",
+      "error": "Failed to launch ECS scorer task for submission wmW4O1loZwm_Jf: ECS scorer task concurrency limit reached (20/20). Deferring submission wmW4O1loZwm_Jf to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
+      "submissionId": "wzA0EP_nDbehGe",
+      "error": "Failed to launch ECS scorer task for submission wzA0EP_nDbehGe: ECS scorer task concurrency limit reached (20/20). Deferring submission wzA0EP_nDbehGe to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
+      "submissionId": "xbmrVhfrNEm5MR",
+      "error": "Failed to launch ECS scorer task for submission xbmrVhfrNEm5MR: ECS scorer task concurrency limit reached (20/20). Deferring submission xbmrVhfrNEm5MR to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
+      "submissionId": "xcnR4pt5oG_qAS",
+      "error": "Failed to launch ECS scorer task for submission xcnR4pt5oG_qAS: ECS scorer task concurrency limit reached (20/20). Deferring submission xcnR4pt5oG_qAS to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
+      "submissionId": "Y1GuZxfIGEoHAz",
+      "error": "Failed to launch ECS scorer task for submission Y1GuZxfIGEoHAz: ECS scorer task concurrency limit reached (20/20). Deferring submission Y1GuZxfIGEoHAz to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
+      "submissionId": "z3oqSF0xWM93_M",
+      "error": "Failed to launch ECS scorer task for submission z3oqSF0xWM93_M: ECS scorer task concurrency limit reached (20/20). Deferring submission z3oqSF0xWM93_M to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
+      "submissionId": "Z7pDhP8hAkTAQ2",
+      "error": "Failed to launch ECS scorer task for submission Z7pDhP8hAkTAQ2: ECS scorer task concurrency limit reached (20/20). Deferring submission Z7pDhP8hAkTAQ2 to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
+      "submissionId": "zBZ1l8bFCN-Dfz",
+      "error": "Failed to launch ECS scorer task for submission zBZ1l8bFCN-Dfz: ECS scorer task concurrency limit reached (20/20). Deferring submission zBZ1l8bFCN-Dfz to Kafka retry/back-pressure instead of launching another task."
+    },
+    {
+      "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
+      "submissionId": "ZWdgESiPntuaPH",
+      "error": "Failed to launch ECS scorer task for submission ZWdgESiPntuaPH: ECS scorer task concurrency limit reached (20/20). Deferring submission ZWdgESiPntuaPH to Kafka retry/back-pressure instead of launching another task."
+    }
+  ],
+  "launched": [
+    {
+      "reviewId": "a59cf8ff-a994-41a8-be51-f7e278ff64f8",
+      "submissionId": "_9VOLnz2XYZv8J",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/79fef93bb08a4621bee241add80a4e84",
+      "taskId": "79fef93bb08a4621bee241add80a4e84"
+    },
+    {
+      "reviewId": "4f923f63-57d6-47cc-861e-38d71b564a22",
+      "submissionId": "-kJ-nOos4KQaL3",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/56dcd794a09a4a2680eadc07a5585d90",
+      "taskId": "56dcd794a09a4a2680eadc07a5585d90"
+    },
+    {
+      "reviewId": "03eaaedb-d577-498e-8957-71cc66ed15b2",
+      "submissionId": "-MXxGM58y4w9Ir",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/1db6b4eb7ebc4d79a8dde6259791f5c8",
+      "taskId": "1db6b4eb7ebc4d79a8dde6259791f5c8"
+    },
+    {
+      "reviewId": "de224678-76cf-439e-bae8-67827cd5889d",
+      "submissionId": "-XseogN8tWUYv9",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/f757cd3e398149f48a4e0d78a9d9cdf7",
+      "taskId": "f757cd3e398149f48a4e0d78a9d9cdf7"
+    },
+    {
+      "reviewId": "e15d4849-8187-4a2a-a954-d6cfac7a1b6f",
+      "submissionId": "09jQG5gXgrtwRy",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/647dba399ce443e99919910fc4e2cef0",
+      "taskId": "647dba399ce443e99919910fc4e2cef0"
+    },
+    {
+      "reviewId": "0d8f13a1-ac02-4f75-bd10-582293fc44b3",
+      "submissionId": "0wGavBBuHVPRAm",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/38194f32f93248a3aaa1a4ac6311aeed",
+      "taskId": "38194f32f93248a3aaa1a4ac6311aeed"
+    },
+    {
+      "reviewId": "d83f186b-37bf-4469-822b-fd15b4bf3385",
+      "submissionId": "2_gNxXA3WH111b",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/c99a6b4da56a417992a96ff8b692d859",
+      "taskId": "c99a6b4da56a417992a96ff8b692d859"
+    },
+    {
+      "reviewId": "90b49711-bc0e-4dc4-b9db-fc2b86c8de5d",
+      "submissionId": "2Z35j4waNot1Ol",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/a5104e057df445d7a18a8c34d790b4a7",
+      "taskId": "a5104e057df445d7a18a8c34d790b4a7"
+    },
+    {
+      "reviewId": "d6354bbe-c309-4932-be79-70e40e6ec2ff",
+      "submissionId": "3kONG53Rspsc2X",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/12e63d1c475f41beb541b0e3fd2682fb",
+      "taskId": "12e63d1c475f41beb541b0e3fd2682fb"
+    },
+    {
+      "reviewId": "37adfa56-f824-47d0-a3af-19ab4640f760",
+      "submissionId": "464rSXUx0aQzHk",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/2c854c40631946709dfb71ee896cb075",
+      "taskId": "2c854c40631946709dfb71ee896cb075"
+    },
+    {
+      "reviewId": "f33e8cb0-5bca-47d3-9784-611d3e94ec38",
+      "submissionId": "4lJclQqEia-Kaq",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/d4cab742ec484dee9d29d9c5330e2182",
+      "taskId": "d4cab742ec484dee9d29d9c5330e2182"
+    },
+    {
+      "reviewId": "db32b7be-9243-4f25-8992-aebf5c14252c",
+      "submissionId": "5-vO22Fx78URn8",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/645b98038f8542a4884a0e81ece7533b",
+      "taskId": "645b98038f8542a4884a0e81ece7533b"
+    },
+    {
+      "reviewId": "73f16e4b-7fe7-4f69-84f3-fa06a1519612",
+      "submissionId": "54wGkqq0n7ki5v",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/6a24170e537b486c873046f50e703ffc",
+      "taskId": "6a24170e537b486c873046f50e703ffc"
+    },
+    {
+      "reviewId": "551be25b-c101-43e8-a6e9-c19b3ae6c018",
+      "submissionId": "67iZ6H3GQFFzjs",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/3ea9641a17cc4eaea3d52f4403c3cf2d",
+      "taskId": "3ea9641a17cc4eaea3d52f4403c3cf2d"
+    },
+    {
+      "reviewId": "022f2144-8b4e-4053-8f08-4adbc53f50aa",
+      "submissionId": "8yc1MuNagRXthA",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/e0d80a1838504dc0a58315c486b784ff",
+      "taskId": "e0d80a1838504dc0a58315c486b784ff"
+    },
+    {
+      "reviewId": "af418018-2916-4b3e-813d-6bc9220376ae",
+      "submissionId": "9Y5C8ERE1mhpMk",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/b8c1c15010df4616b6d117fe2241ff02",
+      "taskId": "b8c1c15010df4616b6d117fe2241ff02"
+    },
+    {
+      "reviewId": "3ac26bfb-cc69-4530-9e78-b55ed58cee17",
+      "submissionId": "GEAksgekpuPCeO",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/04f63206b59b4d44a9f2c6a062a68792",
+      "taskId": "04f63206b59b4d44a9f2c6a062a68792"
+    },
+    {
+      "reviewId": "b36e7ce0-177d-4ae1-bb60-017a14236db5",
+      "submissionId": "OPHSZK0yICSTZA",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/c80de6f06f764e37a5757d37327b30fe",
+      "taskId": "c80de6f06f764e37a5757d37327b30fe"
+    },
+    {
+      "reviewId": "c2ad3c5e-0bc2-4a9b-99cd-fb214d334210",
+      "submissionId": "pjxTnWMmGFrSzN",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/4ce989c827114eaa8ba16f6788fcbcf5",
+      "taskId": "4ce989c827114eaa8ba16f6788fcbcf5"
+    },
+    {
+      "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
+      "submissionId": "sGOUPQDZbM3Yrm",
+      "taskArn": "arn:aws:ecs:us-east-1:409275337247:task/mm-scorer-serverless/392afc12391044b9b0e460daa006c2cf",
+      "taskId": "392afc12391044b9b0e460daa006c2cf"
+    }
+  ],
+  "failed": [
+    {
+      "reviewId": "bf580df4-4801-4cd6-8e92-554bb9202c74",
+      "submissionId": "afAVzIRQAoEztm",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:37.634Z"
+    },
+    {
+      "reviewId": "5f95dfae-5901-428c-b243-012c6d68e9df",
+      "submissionId": "AfhrQkoDWXyCfd",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:38.111Z"
+    },
+    {
+      "reviewId": "1984db44-37db-48fe-8345-b484d9828d8b",
+      "submissionId": "aNmfzJwubStTRo",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:38.603Z"
+    },
+    {
+      "reviewId": "b2a1ab3b-65a8-4b4d-b93c-1bc557a3722a",
+      "submissionId": "aXzej5sv5FCMYV",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:39.098Z"
+    },
+    {
+      "reviewId": "6b1c0476-4d05-4c46-9b67-2d860de22a01",
+      "submissionId": "B-XVLtUga3AhAC",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:39.574Z"
+    },
+    {
+      "reviewId": "d91d2270-2b62-4cef-bbe4-54010e580a27",
+      "submissionId": "b5-cpwFqfdcy8D",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:40.054Z"
+    },
+    {
+      "reviewId": "3135bdf6-4a85-4c2a-9b10-14e5d7a0cb94",
+      "submissionId": "b72jM5-X00DcUV",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:40.539Z"
+    },
+    {
+      "reviewId": "5729a89b-296c-4db7-87ce-4c49a7bf4116",
+      "submissionId": "bg3TEq2ttZwXl-",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:41.058Z"
+    },
+    {
+      "reviewId": "96d0e35a-1a3c-424e-a79b-f9033848aeeb",
+      "submissionId": "bHFFSEedqjxtzf",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:41.536Z"
+    },
+    {
+      "reviewId": "04964112-438c-41d0-b0d1-13fc65b05df4",
+      "submissionId": "biCmIontn005Ic",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:42.009Z"
+    },
+    {
+      "reviewId": "87ce278e-c6a7-471f-9b78-7a013275cff9",
+      "submissionId": "BSiwxzuF-TqeqP",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:43.381Z"
+    },
+    {
+      "reviewId": "f5a411b3-ce6f-4da0-b4ba-68ca9df91d43",
+      "submissionId": "BVdlowg4Lsy7As",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:43.848Z"
+    },
+    {
+      "reviewId": "04fc1823-9c10-41cd-ba73-766dfbeaed26",
+      "submissionId": "CIGmGeqdp6Bfy3",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:44.348Z"
+    },
+    {
+      "reviewId": "e5af0e91-9459-43fb-a2f6-7ea6a541cd89",
+      "submissionId": "FvwbmtBOkyfGdD",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:45.072Z"
+    },
+    {
+      "reviewId": "9fb495fd-1481-4a92-addd-af26241b7ac1",
+      "submissionId": "hAq--Rd0DCf8Gz",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:45.814Z"
+    },
+    {
+      "reviewId": "f07cc05d-adde-456a-8c1a-fe5520ed961b",
+      "submissionId": "he6WzVNcc_daZR",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:46.307Z"
+    },
+    {
+      "reviewId": "f9b95f9c-55c4-4bc0-b585-35435aa6d728",
+      "submissionId": "IJaRGgB9EGkeNt",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:46.788Z"
+    },
+    {
+      "reviewId": "4d08ddee-4fdc-4abf-b184-b24896c4b1c3",
+      "submissionId": "io4IgrmGSPD6za",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:47.252Z"
+    },
+    {
+      "reviewId": "f156f487-45b8-4c3d-9389-36423b0ce9f5",
+      "submissionId": "J8qjDufR44sbYM",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:48.323Z"
+    },
+    {
+      "reviewId": "dab539ff-250c-44f4-9e8c-493b712d7839",
+      "submissionId": "K0UbtNIuWpH7W1",
+      "error": "Request failed: POST https://api.topcoder.com/v6/marathon-match/internal/system-score | Internal server error | HTTP 500",
+      "failedAt": "2026-07-01T06:59:49.002Z"
+    }
+  ]
+}
