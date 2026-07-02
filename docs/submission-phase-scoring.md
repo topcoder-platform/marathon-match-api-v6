@@ -60,7 +60,7 @@ sequenceDiagram
           F->>MM: POST /internal/scoring-results
           MM->>SRS: processScoringResult(payload)
           SRS->>RA: Create or update review summations
-          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
+          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService persists the raw result and queues latest-submission recomputation.
           F-->>ECS: Task exits
         end
         H-->>C: Success
@@ -112,7 +112,7 @@ Relative scoring applies when:
 - `relativeScoringEnabled = true` on the Marathon Match config
 - `testScores` are present in the scorer metadata
 
-In that case, `ScoringResultService` recalculates the latest-submission review scores relative to the current best result before writing review summations, so the persisted aggregate score stays normalized against the live field. Recalculated impacted submissions keep their existing `reviewedDate` so relative-score updates do not move historical review timestamps.
+In that case, `ScoringResultService` writes the raw completed summation first, then queues a pg-boss relative scoring recomputation. The worker recalculates latest-submission review scores relative to the current best result, updates the persisted aggregate scores, and keeps existing `reviewedDate` values so relative-score updates do not move historical review timestamps.
 
 ## Tester-change rerun
 

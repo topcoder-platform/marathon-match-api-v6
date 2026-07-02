@@ -73,6 +73,9 @@ describe('ScoringResultService', () => {
     systemScoreDispatchSchedulerService?: {
       enqueueSystemScoreDispatch?: jest.Mock;
     },
+    relativeScoringRecomputeSchedulerService?: {
+      enqueueRelativeScoringRecompute?: jest.Mock;
+    },
   ) => {
     const httpService = {
       get: jest.fn(),
@@ -124,6 +127,7 @@ describe('ScoringResultService', () => {
       scoringCompletionEmailService as never,
       systemTestTimeoutSchedulerService as never,
       systemScoreDispatchSchedulerService as never,
+      relativeScoringRecomputeSchedulerService as never,
     );
 
     return {
@@ -533,6 +537,205 @@ describe('ScoringResultService', () => {
         challengeId: zeroScorePayload.challengeId,
         scorecardId: undefined,
         submissionId: zeroScorePayload.submissionId,
+      },
+    );
+  });
+
+  it('queues relative scoring recomputation after writing the raw callback result', async () => {
+    const relativeScoringRecomputeSchedulerService = {
+      enqueueRelativeScoringRecompute: jest.fn().mockResolvedValue('job-1'),
+    };
+    const { service, m2mService, prisma } = createService(
+      undefined,
+      undefined,
+      undefined,
+      relativeScoringRecomputeSchedulerService,
+    );
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      reviewId: 'review-1',
+      score: 85,
+      scorecardId: 'scorecard-1',
+      testPhase: 'system',
+      metadata: {
+        testScores: [{ testcase: '753388858', score: 85 }],
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    const processRelativeScoringSpy = jest.spyOn(
+      service as any,
+      'processRelativeScoring',
+    );
+
+    await expect(service.processScoringResult(systemPayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(upsertReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 85,
+        isFinal: true,
+        submissionId: basePayload.submissionId,
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+          testType: 'system',
+        }),
+      }),
+    );
+    expect(completeSystemReviewIfNeededSpy).not.toHaveBeenCalled();
+    expect(processRelativeScoringSpy).not.toHaveBeenCalled();
+    expect(
+      relativeScoringRecomputeSchedulerService.enqueueRelativeScoringRecompute,
+    ).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      submissionId: basePayload.submissionId,
+      reviewId: 'review-1',
+      testPhase: 'system',
+      reviewTypeId: basePayload.reviewTypeId,
+      scorecardId: 'scorecard-1',
+      queuedAt: expect.any(String),
+      reason: 'scoring-result-callback',
+    });
+  });
+
+  it('recomputes queued relative scoring under the challenge phase lock', async () => {
+    const { service, m2mService, prisma } = createService();
+    const reviewFor = (submissionId: string, rawScore: number) => ({
+      id: `summation-${submissionId}`,
+      aggregateScore: rawScore,
+      isFinal: true,
+      reviewedDate: `2026-05-01T00:00:0${rawScore}.000Z`,
+      scorecardId: 'scorecard-1',
+      metadata: {
+        testType: 'system',
+        testScores: [{ testcase: '753388858', score: rawScore }],
+      },
+    });
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const withRelativeScoringLockSpy = jest
+      .spyOn(service as any, 'withRelativeScoringLock')
+      .mockImplementation(
+        async (
+          _challengeId: string,
+          _testPhase: string,
+          work: () => Promise<unknown>,
+        ) => work(),
+      );
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-a',
+        memberId: 'member-a',
+        submittedDate: '2026-05-01T00:00:00.000Z',
+        reviewSummation: [reviewFor('submission-a', 90)],
+      },
+      {
+        id: 'submission-b',
+        memberId: 'member-b',
+        submittedDate: '2026-05-01T00:00:01.000Z',
+        reviewSummation: [reviewFor('submission-b', 45)],
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'notifyScoringCompletionEmailIfReady')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.recomputeQueuedRelativeScoring({
+        challengeId: basePayload.challengeId,
+        submissionId: 'submission-a',
+        reviewId: 'review-a',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        queuedAt: '2026-05-01T00:00:10.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(withRelativeScoringLockSpy).toHaveBeenCalledWith(
+      basePayload.challengeId,
+      'system',
+      expect.any(Function),
+    );
+    expect(upsertReviewSummationSpy).toHaveBeenCalledTimes(2);
+    expect(upsertReviewSummationSpy).toHaveBeenNthCalledWith(
+      1,
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 100,
+        submissionId: 'submission-a',
+      }),
+      'summation-submission-a',
+    );
+    expect(upsertReviewSummationSpy).toHaveBeenNthCalledWith(
+      2,
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 50,
+        submissionId: 'submission-b',
+      }),
+      'summation-submission-b',
+    );
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'review-a',
+      100,
+      'system',
+      {
+        challengeId: basePayload.challengeId,
+        scorecardId: 'scorecard-1',
+        submissionId: 'submission-a',
+      },
+    );
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      undefined,
+      50,
+      'system',
+      {
+        challengeId: basePayload.challengeId,
+        scorecardId: 'scorecard-1',
+        submissionId: 'submission-b',
       },
     );
   });

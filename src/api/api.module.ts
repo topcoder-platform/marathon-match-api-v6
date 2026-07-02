@@ -8,6 +8,8 @@ import { SubmissionRunnerLogAccessGuard } from 'src/shared/guards/submission-run
 import { HealthCheckController } from './health-check/healthCheck.controller';
 import { MarathonMatchConfigController } from './marathon-match-config/marathon-match-config.controller';
 import { MarathonMatchConfigService } from './marathon-match-config/marathon-match-config.service';
+import { RelativeScoringRecomputeSchedulerService } from './scoring-result/relative-scoring-recompute-scheduler.service';
+import { RelativeScoringRecomputeWorkerService } from './scoring-result/relative-scoring-recompute-worker.service';
 import { ScoringResultController } from './scoring-result/scoring-result.controller';
 import { ScoringCompletionEmailService } from './scoring-result/scoring-completion-email.service';
 import { ScoringResultService } from './scoring-result/scoring-result.service';
@@ -42,6 +44,8 @@ import { TesterService } from './tester/tester.service';
     CompilationWorkerService,
     MarathonMatchConfigService,
     ScoringCompletionEmailService,
+    RelativeScoringRecomputeSchedulerService,
+    RelativeScoringRecomputeWorkerService,
     ScoringResultService,
     SystemScoreDispatchSchedulerService,
     SystemScoreDispatchWorkerService,
