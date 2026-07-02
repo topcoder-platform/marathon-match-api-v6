@@ -26,6 +26,7 @@ sequenceDiagram
   participant MMSS as marathon-match-api-v6<br/>POST /internal/system-score
   participant ECS as AWS ECS Fargate Task
   participant SRS as marathon-match-api-v6<br/>ScoringResultService
+  participant RSW as pg-boss<br/>relative-scoring-recompute worker
   participant SCH as autopilot-v6<br/>SchedulerService
   participant CC as autopilot-v6<br/>ChallengeCompletionService
   participant CHA as challenge-api-v6
@@ -46,8 +47,13 @@ sequenceDiagram
     ECS->>SRS: POST /internal/scoring-progress {progress, status, ...}
     ECS->>SRS: POST /internal/scoring-results {score, reviewId, ...}
     SRS->>RA: upsert reviewSummation(s)
-    Note over SRS,RA: If relative scoring is enabled, normalized aggregate scores are\ncomputed here and persisted before finalization.
-    SRS->>RA: PATCH review -> status COMPLETED
+    alt Relative scoring enabled
+      SRS->>RSW: queue relative-scoring-recompute
+      RSW->>RA: update normalized reviewSummation(s)
+      RSW->>RA: PATCH review -> status COMPLETED
+    else Direct scoring
+      SRS->>RA: PATCH review -> status COMPLETED
+    end
   end
   SCH->>CC: attemptChallengeFinalization(challengeId)
   CC->>RA: finalizeSummations(challengeId)
@@ -64,7 +70,7 @@ sequenceDiagram
 
 ## Review completion
 
-After `ScoringResultService` writes the SYSTEM review summation, `completeSystemReviewIfNeeded` patches the originating review to `COMPLETED` and writes the final score back to Review API.
+For direct SYSTEM scoring, `ScoringResultService` patches the originating review to `COMPLETED` after writing the summation. For relative scoring, the `relative-scoring-recompute` worker patches matching reviews after normalized aggregate scores are persisted.
 
 While SYSTEM tests are running, the ECS runner updates the phase review summation metadata with `testProcess` (`provisional` or `system`), `testProgress` (`0` to `1`), and `testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`). These fields are returned by Review API under `reviewSummation.metadata` when metadata is requested. In-progress summations keep a neutral placeholder score and should be displayed as unavailable from `testStatus`; explicit failed progress uses the failed-score sentinel. Completed scoring can report `testStatus = SUCCESS` with nonzero `testProgressDetails.failedTests` when individual testcases timed out or crashed.
 
@@ -78,7 +84,9 @@ The queue is keyed by challenge ID, review ID, and submission ID so repeated pha
 
 ## Relative scoring at completion
 
-If `relativeScoringEnabled = true`, `ScoringResultService` persists normalized aggregate scores to Review API before challenge finalization. `ChallengeCompletionService.finalizeChallenge(...)` consumes those persisted review summaries; it does not recompute relative scoring itself.
+If `relativeScoringEnabled = true`, `ScoringResultService` persists the raw completed summation and queues a pg-boss `relative-scoring-recompute` job. The worker recalculates normalized aggregate scores under a challenge/phase PostgreSQL advisory lock, updates Review API, and then completes matching SYSTEM reviews with the recomputed scores. `ChallengeCompletionService.finalizeChallenge(...)` consumes those persisted review summaries; it does not recompute relative scoring itself.
+
+The recompute queue debounces SYSTEM bursts by challenge and phase so simultaneous scorer callbacks do not all run the expensive fan-out. Retry behavior is controlled by `RELATIVE_SCORING_RECOMPUTE_RETRY_DELAY_SECONDS` (default `60`), `RELATIVE_SCORING_RECOMPUTE_RETRY_LIMIT` (default `1000`), `RELATIVE_SCORING_RECOMPUTE_DEBOUNCE_SECONDS` (default `15`), `RELATIVE_SCORING_RECOMPUTE_START_DELAY_SECONDS` (default `10`), and `RELATIVE_SCORING_RECOMPUTE_WORKER_CONCURRENCY` (default `1`).
 
 ## Challenge finalization retries
 

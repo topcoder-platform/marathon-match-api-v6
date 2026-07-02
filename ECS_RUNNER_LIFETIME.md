@@ -194,6 +194,8 @@ For `PROVISIONAL` and `SYSTEM`, the runner posts progress to `POST /v6/marathon-
 - `testStatus`: `IN PROGRESS`, `SUCCESS`, or `FAILED`
 - `timed_out: true` for SYSTEM timeout failures
 
+The initial progress callback is posted when scoring starts. Routine per-test `IN PROGRESS` callbacks are throttled to at most once every 5 seconds, while completion and failure progress can still be posted immediately.
+
 Treat `IN PROGRESS` summations as unavailable, even when they carry a placeholder score.
 Completed scoring may report `SUCCESS` with nonzero `failedTests` when individual testcases timed out or crashed; `FAILED` is reserved for explicit scorer or skipped-scoring failures.
 

@@ -383,7 +383,7 @@ sequenceDiagram
           F->>MM: POST /internal/scoring-results
           MM->>SRS: processScoringResult(payload)
           SRS->>RA: POST/PUT review summations
-          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService recomputes latest-submission aggregates before persisting them.
+          Note over SRS,RA: When relative scoring is enabled and testScores metadata is present,\nScoringResultService persists the raw result and queues latest-submission recomputation.
           F-->>ECS: Task exits
         end
         H-->>C: Success

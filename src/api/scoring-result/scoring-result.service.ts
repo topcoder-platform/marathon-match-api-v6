@@ -33,6 +33,10 @@ import {
   SystemTestTimeoutSchedulerService,
 } from './system-test-timeout-scheduler.service';
 import { SystemScoreDispatchSchedulerService } from './system-score-dispatch-scheduler.service';
+import {
+  RelativeScoringRecomputeJobData,
+  RelativeScoringRecomputeSchedulerService,
+} from './relative-scoring-recompute-scheduler.service';
 
 export interface ScoringResultCallbackPayload {
   challengeId: string;
@@ -221,7 +225,8 @@ const MAX_SUBMISSION_PAGES = 1000;
 
 /**
  * Applies marathon-match review summation updates based on scorer callback data.
- * Relative-score propagation is handled here to keep ECS runner logic lightweight.
+ * Relative-score propagation is queued when possible so ECS scorer callbacks do
+ * not wait for challenge-wide recomputation.
  */
 @Injectable()
 export class ScoringResultService {
@@ -243,11 +248,16 @@ export class ScoringResultService {
     private readonly systemTestTimeoutSchedulerService?: SystemTestTimeoutSchedulerService,
     @Optional()
     private readonly systemScoreDispatchSchedulerService?: SystemScoreDispatchSchedulerService,
+    @Optional()
+    private readonly relativeScoringRecomputeSchedulerService?: RelativeScoringRecomputeSchedulerService,
   ) {}
 
   /**
    * Processes one scorer callback payload after verifying the challenge config exists,
-   * then writes terminal summations before completing any SYSTEM review.
+   * then writes the raw terminal summation. When relative scoring is enabled,
+   * the normal API module queues challenge-wide recomputation before completing
+   * SYSTEM reviews; if the queue is unavailable, the method falls back to the
+   * legacy inline recompute path.
    */
   async processScoringResult(
     payload: ScoringResultCallbackPayload,
@@ -291,6 +301,91 @@ export class ScoringResultService {
       config,
     );
     if (relativeScoringSettings.enabled) {
+      if (
+        this.relativeScoringRecomputeSchedulerService &&
+        this.canQueueRelativeScoringRecompute(
+          payload,
+          normalizedPhase,
+          fallbackMetadata,
+          fallbackScorecardId,
+          relativeScoringSettings,
+        )
+      ) {
+        const directAggregateScore =
+          await this.persistScoringResultWithoutRelativeScoring({
+            token,
+            payload,
+            normalizedPhase,
+            fallbackMetadata,
+            fallbackScorecardId,
+            config,
+            completeSystemReview: false,
+            notifyCompletion: false,
+          });
+
+        try {
+          await this.relativeScoringRecomputeSchedulerService.enqueueRelativeScoringRecompute(
+            {
+              challengeId: payload.challengeId,
+              submissionId: payload.submissionId,
+              reviewId: payload.reviewId,
+              testPhase: normalizedPhase,
+              reviewTypeId: payload.reviewTypeId,
+              scorecardId: fallbackScorecardId ?? payload.scorecardId,
+              queuedAt: new Date().toISOString(),
+              reason: 'scoring-result-callback',
+            },
+          );
+          return;
+        } catch (error) {
+          this.logger.error({
+            message:
+              'Failed to enqueue relative scoring recomputation. Falling back to inline recompute.',
+            challengeId: payload.challengeId,
+            submissionId: payload.submissionId,
+            testPhase: normalizedPhase,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
+          const currentRelativeScore = await this.processRelativeScoring(
+            token,
+            payload,
+            normalizedPhase,
+            fallbackMetadata,
+            fallbackScorecardId,
+            relativeScoringSettings,
+          );
+          if (currentRelativeScore !== undefined) {
+            await this.notifyScoringCompletionEmailIfReady(
+              token,
+              payload,
+              normalizedPhase,
+              config,
+            );
+            return;
+          }
+
+          await this.completeSystemReviewIfNeeded(
+            token,
+            payload.reviewId,
+            directAggregateScore,
+            normalizedPhase,
+            {
+              challengeId: payload.challengeId,
+              scorecardId: fallbackScorecardId,
+              submissionId: payload.submissionId,
+            },
+          );
+          await this.notifyScoringCompletionEmailIfReady(
+            token,
+            payload,
+            normalizedPhase,
+            config,
+          );
+          return;
+        }
+      }
+
       const currentRelativeScore = await this.processRelativeScoring(
         token,
         payload,
@@ -310,17 +405,51 @@ export class ScoringResultService {
       }
     }
 
+    await this.persistScoringResultWithoutRelativeScoring({
+      token,
+      payload,
+      normalizedPhase,
+      fallbackMetadata,
+      fallbackScorecardId,
+      config,
+      completeSystemReview: true,
+      notifyCompletion: true,
+    });
+  }
+
+  /**
+   * Persists the scorer result exactly as received, without relative score
+   * fan-out. This is used for non-relative scoring, for async relative scoring's
+   * raw result write, and as the fallback when queueing recomputation fails.
+   * @param args Callback persistence context, normalized metadata, and side-effect controls.
+   * @returns Aggregate score written for the callback submission.
+   * @throws Error when review-api persistence, review completion, or notification evaluation fails.
+   */
+  private async persistScoringResultWithoutRelativeScoring(args: {
+    token: string;
+    payload: ScoringResultCallbackPayload;
+    normalizedPhase: string;
+    fallbackMetadata: Record<string, unknown>;
+    fallbackScorecardId?: string;
+    config: ScoringResultConfigSummary;
+    completeSystemReview: boolean;
+    notifyCompletion: boolean;
+  }): Promise<number> {
+    const {
+      token,
+      payload,
+      normalizedPhase,
+      fallbackMetadata,
+      fallbackScorecardId,
+      config,
+    } = args;
+    let aggregateScore: number;
+
     if (
       payload.currentReview &&
       Object.keys(payload.currentReview).length > 0
     ) {
-      const currentReviewScore = this.resolveReviewScore(
-        this.asRecord(payload.currentReview),
-        normalizedPhase,
-        payload.score,
-      );
-
-      await this.upsertFromLegacyReviewPayload(token, {
+      aggregateScore = await this.upsertFromLegacyReviewPayload(token, {
         legacyReview: payload.currentReview,
         fallbackSubmissionId: payload.submissionId,
         fallbackScore: payload.score,
@@ -339,11 +468,24 @@ export class ScoringResultService {
           testPhase: normalizedPhase,
         });
       }
+    } else {
+      const reviewPayload = this.buildSummationPayload({
+        submissionId: payload.submissionId,
+        score: payload.score,
+        scorecardId: fallbackScorecardId,
+        metadata: fallbackMetadata,
+        testPhase: normalizedPhase,
+      });
 
+      await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+      aggregateScore = reviewPayload.aggregateScore;
+    }
+
+    if (args.completeSystemReview) {
       await this.completeSystemReviewIfNeeded(
         token,
         payload.reviewId,
-        currentReviewScore,
+        aggregateScore,
         normalizedPhase,
         {
           challengeId: payload.challengeId,
@@ -351,42 +493,18 @@ export class ScoringResultService {
           submissionId: payload.submissionId,
         },
       );
+    }
 
+    if (args.notifyCompletion) {
       await this.notifyScoringCompletionEmailIfReady(
         token,
         payload,
         normalizedPhase,
         config,
       );
-      return;
     }
 
-    const reviewPayload = this.buildSummationPayload({
-      submissionId: payload.submissionId,
-      score: payload.score,
-      scorecardId: fallbackScorecardId,
-      metadata: fallbackMetadata,
-      testPhase: normalizedPhase,
-    });
-
-    await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
-    await this.completeSystemReviewIfNeeded(
-      token,
-      payload.reviewId,
-      reviewPayload.aggregateScore,
-      normalizedPhase,
-      {
-        challengeId: payload.challengeId,
-        scorecardId: fallbackScorecardId,
-        submissionId: payload.submissionId,
-      },
-    );
-    await this.notifyScoringCompletionEmailIfReady(
-      token,
-      payload,
-      normalizedPhase,
-      config,
-    );
+    return aggregateScore;
   }
 
   /**
@@ -1009,6 +1127,167 @@ export class ScoringResultService {
   }
 
   /**
+   * Recomputes relative scores from already persisted raw review summations.
+   * Queue workers call this after scorer callbacks have written their final
+   * per-test metadata, allowing the expensive latest-submission fan-out to run
+   * outside the scorer callback request.
+   * @param data Queue payload identifying the challenge, phase, and callback submission.
+   * @returns Promise that resolves after relative summations, SYSTEM review completion, and notification checks finish.
+   * @throws Error when config/auth lookup fails or no persisted recomputable summations are available yet.
+   */
+  async recomputeQueuedRelativeScoring(
+    data: RelativeScoringRecomputeJobData,
+  ): Promise<void> {
+    const challengeId = data.challengeId?.trim();
+    const submissionId = data.submissionId?.trim();
+    const reviewTypeId = data.reviewTypeId?.trim();
+    const testPhase = this.normalizeTestPhase(data.testPhase);
+
+    if (!challengeId || !submissionId || !reviewTypeId) {
+      throw new Error(
+        'Relative scoring recompute jobs require challengeId, submissionId, and reviewTypeId.',
+      );
+    }
+
+    const config = await this.requireScoringResultConfig(challengeId);
+    const token = await this.m2mService.getM2MToken();
+
+    if (!token) {
+      throw new Error(
+        'Unable to get M2M token for relative scoring recomputation.',
+      );
+    }
+
+    const fallbackMetadata = this.normalizeMetadata(
+      {},
+      testPhase,
+      reviewTypeId,
+    );
+    const settings = this.resolveRelativeScoringSettings(
+      {
+        challengeId,
+        submissionId,
+        score: 0,
+        testPhase,
+        reviewTypeId,
+        reviewId: data.reviewId,
+        scorecardId: data.scorecardId,
+      },
+      fallbackMetadata,
+      config,
+    );
+
+    if (!settings.enabled) {
+      this.logger.warn({
+        message:
+          'Skipping queued relative scoring recomputation because relative scoring is disabled.',
+        challengeId,
+        submissionId,
+        testPhase,
+      });
+      return;
+    }
+
+    if (!settings.challengeId || !settings.submissionApiUrl) {
+      throw new Error(
+        `Relative scoring recomputation for ${challengeId}/${testPhase} is missing challenge or submission API context.`,
+      );
+    }
+
+    const fallbackScorecardId = await this.resolveScorecardId(
+      token,
+      data.scorecardId,
+    );
+    const lockedSettings: Required<RelativeScoringSettings> = {
+      ...settings,
+      challengeId: settings.challengeId,
+      submissionApiUrl: settings.submissionApiUrl,
+    };
+
+    const relativeReviewPayloads = await this.withRelativeScoringLock(
+      challengeId,
+      testPhase,
+      async () =>
+        this.recomputePersistedRelativeScoring(
+          token,
+          testPhase,
+          reviewTypeId,
+          fallbackScorecardId,
+          lockedSettings,
+        ),
+    );
+
+    if (relativeReviewPayloads.length === 0) {
+      throw new Error(
+        `No persisted ${testPhase} review summations are ready for relative scoring recomputation on challenge ${challengeId}.`,
+      );
+    }
+
+    if (testPhase === 'system') {
+      await this.completeRecomputedSystemReviews(
+        token,
+        data,
+        relativeReviewPayloads,
+        fallbackScorecardId,
+      );
+    }
+
+    await this.notifyScoringCompletionEmailIfReady(
+      token,
+      {
+        challengeId,
+        submissionId,
+        score: 0,
+        testPhase,
+        reviewTypeId,
+        reviewId: data.reviewId,
+        scorecardId: data.scorecardId,
+      },
+      testPhase,
+      config,
+    );
+  }
+
+  /**
+   * Checks whether a callback has enough context to defer relative scoring.
+   * @param payload Original scorer callback payload.
+   * @param testPhase Normalized scoring phase.
+   * @param fallbackMetadata Metadata built from the callback body.
+   * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
+   * @param settings Relative scoring configuration for the challenge.
+   * @returns True when the raw callback can be persisted now and recomputed asynchronously.
+   */
+  private canQueueRelativeScoringRecompute(
+    payload: ScoringResultCallbackPayload,
+    testPhase: string,
+    fallbackMetadata: Record<string, unknown>,
+    fallbackScorecardId: string | undefined,
+    settings: RelativeScoringSettings,
+  ): boolean {
+    if (!settings.challengeId || !settings.submissionApiUrl) {
+      this.logger.warn({
+        message:
+          'Relative scoring is enabled but challenge context is incomplete. Falling back to inline relative scoring.',
+        challengeId: settings.challengeId ?? null,
+        submissionApiUrl: settings.submissionApiUrl ?? null,
+        submissionId: payload.submissionId,
+        testPhase,
+      });
+      return false;
+    }
+
+    const currentReview = this.buildCurrentRelativeReviewRecord({
+      payload,
+      fallbackMetadata,
+      fallbackScorecardId,
+      existingReviewObject: null,
+      testPhase,
+    });
+
+    return Boolean(currentReview && currentReview.rawTestScores.length > 0);
+  }
+
+  /**
    * Recomputes relative scores for the latest submission from each member while
    * holding a challenge/phase advisory lock for the read-compute-write cycle.
    * Writes recomputed summations before completing the current SYSTEM review.
@@ -1052,6 +1331,120 @@ export class ScoringResultService {
         lockedSettings,
       ),
     );
+  }
+
+  /**
+   * Recomputes relative scoring from persisted raw review summations after the
+   * caller has acquired the challenge/phase lock.
+   * @param token M2M token for submission-api and review-api requests.
+   * @param testPhase Normalized scoring phase.
+   * @param reviewTypeId Review type identifier to preserve in normalized metadata.
+   * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
+   * @param settings Relative scoring configuration for the challenge.
+   * @returns Recomputed relative review payloads that were written.
+   * @throws Error when submission-api or review-api calls fail.
+   */
+  private async recomputePersistedRelativeScoring(
+    token: string,
+    testPhase: string,
+    reviewTypeId: string,
+    fallbackScorecardId: string | undefined,
+    settings: Required<RelativeScoringSettings>,
+  ): Promise<RelativeReviewPayload[]> {
+    const submissions = await this.fetchChallengeSubmissions(
+      token,
+      settings.submissionApiUrl,
+      settings.challengeId,
+    );
+    const reviewRecords = this.selectLatestRelativeReviewRecords(
+      submissions,
+      testPhase,
+      reviewTypeId,
+      '',
+      undefined,
+    );
+
+    if (reviewRecords.length === 0) {
+      this.logger.warn({
+        message:
+          'Relative scoring recomputation found no persisted latest review summations with usable testScores.',
+        challengeId: settings.challengeId,
+        testPhase,
+      });
+      return [];
+    }
+
+    const bestScores = this.computeBestScores(
+      reviewRecords,
+      settings.scoreDirection,
+    );
+    const relativeReviewPayloads =
+      this.sortRelativeReviewPayloadsForLeaderboard(
+        reviewRecords.map((reviewRecord) =>
+          this.buildRelativeReviewPayload(
+            reviewRecord,
+            bestScores,
+            settings.scoreDirection,
+            fallbackScorecardId,
+            testPhase,
+            true,
+          ),
+        ),
+      );
+
+    for (const reviewPayload of relativeReviewPayloads) {
+      const reviewId = this.asString(reviewPayload.reviewObject.id);
+      if (!reviewId) {
+        this.logger.warn({
+          message:
+            'Relative scoring recomputation is updating by submission/phase because reviewSummation id is missing.',
+          submissionId: reviewPayload.payload.submissionId,
+          testPhase,
+        });
+      }
+
+      await this.upsertReviewSummation(
+        token,
+        testPhase,
+        reviewPayload.payload,
+        reviewId,
+      );
+    }
+
+    return relativeReviewPayloads;
+  }
+
+  /**
+   * Completes SYSTEM review-api records after asynchronous relative-score writes
+   * finish, using recomputed aggregate scores rather than the raw callback score.
+   * @param token M2M token for review-api.
+   * @param jobData Queue job context that may include the callback review ID.
+   * @param relativeReviewPayloads Recomputed review summation payloads.
+   * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
+   * @returns Promise that resolves after matching SYSTEM reviews are completed.
+   */
+  private async completeRecomputedSystemReviews(
+    token: string,
+    jobData: RelativeScoringRecomputeJobData,
+    relativeReviewPayloads: RelativeReviewPayload[],
+    fallbackScorecardId?: string,
+  ): Promise<void> {
+    const callbackSubmissionId = jobData.submissionId.trim();
+
+    for (const reviewPayload of relativeReviewPayloads) {
+      const submissionId = reviewPayload.payload.submissionId;
+      await this.completeSystemReviewIfNeeded(
+        token,
+        submissionId === callbackSubmissionId ? jobData.reviewId : undefined,
+        reviewPayload.payload.aggregateScore,
+        'system',
+        {
+          challengeId: jobData.challengeId,
+          scorecardId: reviewPayload.payload.scorecardId ?? fallbackScorecardId,
+          submissionId,
+        },
+      );
+    }
   }
 
   /**

@@ -102,6 +102,8 @@ public class EcsRunnerMain {
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
     private static final String TEST_STATUS_SUCCESS = "SUCCESS";
     private static final String TEST_STATUS_FAILED = "FAILED";
+    private static final long SCORING_PROGRESS_CALLBACK_INTERVAL_NANOS =
+        TimeUnit.SECONDS.toNanos(5);
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
@@ -368,12 +370,13 @@ public class EcsRunnerMain {
                 );
                 logScorerConfig(scorerConfig);
                 scorecardId = scorerConfig.getScoreCardId();
+                ProgressCallbackThrottle progressCallbackThrottle =
+                    new ProgressCallbackThrottle(
+                        SCORING_PROGRESS_CALLBACK_INTERVAL_NANOS
+                    );
 
                 if (isProgressTrackedPhase(testPhase)) {
-                    postScoringProgressSafely(
-                        httpClient,
-                        marathonMatchBaseUrl,
-                        accessTokenProvider,
+                    ScoringProgressRequest initialProgressRequest =
                         new ScoringProgressRequest(
                             challengeId,
                             submissionId,
@@ -389,7 +392,25 @@ public class EcsRunnerMain {
                             0,
                             "Scoring task started",
                             buildProgressMetadata(testPhase, reviewTypeId)
+                        );
+                    if (
+                        postScoringProgressSafely(
+                            httpClient,
+                            marathonMatchBaseUrl,
+                            accessTokenProvider,
+                            initialProgressRequest
                         )
+                    ) {
+                        progressCallbackThrottle.markPosted(System.nanoTime());
+                    }
+
+                    logInfo(
+                        "api.progress",
+                        "Intermediate scorer progress callbacks are throttled to at most once every "
+                            + TimeUnit.NANOSECONDS.toSeconds(
+                                SCORING_PROGRESS_CALLBACK_INTERVAL_NANOS
+                            )
+                            + " seconds."
                     );
                 }
 
@@ -417,7 +438,8 @@ public class EcsRunnerMain {
                         reviewTypeId,
                         reviewId,
                         validationRunId,
-                        scorecardId
+                        scorecardId,
+                        progressCallbackThrottle
                     );
                 } finally {
                     killLingeringIsolatedProcesses();
@@ -702,7 +724,8 @@ public class EcsRunnerMain {
         String reviewTypeId,
         String reviewId,
         String validationRunId,
-        String scorecardId
+        String scorecardId,
+        ProgressCallbackThrottle progressCallbackThrottle
     ) throws Exception {
         Path scorerConfigPath = null;
         try {
@@ -758,10 +781,7 @@ public class EcsRunnerMain {
                         IsolatedProgressUpdate progressUpdate =
                             parseIsolatedProgressUpdate(line);
                         if (progressUpdate != null && isProgressTrackedPhase(testPhase)) {
-                            postScoringProgressSafely(
-                                httpClient,
-                                marathonMatchBaseUrl,
-                                accessTokenProvider,
+                            ScoringProgressRequest progressRequest =
                                 new ScoringProgressRequest(
                                     challengeId,
                                     submissionId,
@@ -777,7 +797,13 @@ public class EcsRunnerMain {
                                     progressUpdate.getFailedTests(),
                                     progressUpdate.getMessage(),
                                     buildProgressMetadata(testPhase, reviewTypeId)
-                                )
+                                );
+                            postScoringProgressWhenDue(
+                                httpClient,
+                                marathonMatchBaseUrl,
+                                accessTokenProvider,
+                                progressCallbackThrottle,
+                                progressRequest
                             );
                         }
                     } else {
@@ -2540,14 +2566,60 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Posts intermediate scoring progress when the throttle allows another callback.
+     * The latest progress is always remembered so failure progress can preserve the
+     * most recent test counts, even when this method skips an API call.
+     *
+     * @param httpClient Trusted parent HTTP client.
+     * @param marathonMatchBaseUrl Marathon Match API base URL.
+     * @param accessTokenProvider Refresh-capable bearer token provider.
+     * @param progressCallbackThrottle Per-run callback cadence guard.
+     * @param progressRequest Progress payload to persist in review summation metadata.
+     */
+    private static void postScoringProgressWhenDue(
+        CloseableHttpClient httpClient,
+        String marathonMatchBaseUrl,
+        AccessTokenProvider accessTokenProvider,
+        ProgressCallbackThrottle progressCallbackThrottle,
+        ScoringProgressRequest progressRequest
+    ) {
+        rememberScoringProgress(progressRequest);
+        long nowNanos = System.nanoTime();
+        if (
+            progressCallbackThrottle != null
+                && !progressCallbackThrottle.shouldPost(progressRequest, nowNanos)
+        ) {
+            return;
+        }
+        if (progressCallbackThrottle != null) {
+            progressCallbackThrottle.markPosted(nowNanos);
+        }
+
+        try {
+            postScoringProgress(
+                httpClient,
+                marathonMatchBaseUrl,
+                accessTokenProvider,
+                progressRequest
+            );
+        } catch (Exception error) {
+            logWarn(
+                "api.progress",
+                "Unable to post scoring progress: " + error.getMessage()
+            );
+        }
+    }
+
+    /**
      * Posts a scoring progress payload to marathon-match API without failing the runner.
      *
      * @param httpClient Trusted parent HTTP client.
      * @param marathonMatchBaseUrl Marathon Match API base URL.
      * @param accessTokenProvider Refresh-capable bearer token provider.
      * @param progressRequest Progress payload to persist in review summation metadata.
+     * @return True when the API accepted the progress update; false when posting failed.
      */
-    private static void postScoringProgressSafely(
+    private static boolean postScoringProgressSafely(
         CloseableHttpClient httpClient,
         String marathonMatchBaseUrl,
         AccessTokenProvider accessTokenProvider,
@@ -2562,11 +2634,13 @@ public class EcsRunnerMain {
                 accessTokenProvider,
                 progressRequest
             );
+            return true;
         } catch (Exception error) {
             logWarn(
                 "api.progress",
                 "Unable to post scoring progress: " + error.getMessage()
             );
+            return false;
         }
     }
 
@@ -6359,6 +6433,54 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Guards intermediate scoring progress callbacks for one runner execution.
+     * Start, completion, and terminal updates can be posted immediately, while
+     * routine in-progress updates are limited to the configured cadence.
+     */
+    private static class ProgressCallbackThrottle {
+        private final long minimumIntervalNanos;
+        private long lastPostedAtNanos = Long.MIN_VALUE;
+
+        /**
+         * Creates a progress callback cadence guard.
+         * @param minimumIntervalNanos Minimum nanoseconds between routine progress callbacks.
+         */
+        ProgressCallbackThrottle(long minimumIntervalNanos) {
+            this.minimumIntervalNanos = Math.max(0L, minimumIntervalNanos);
+        }
+
+        /**
+         * Checks whether the supplied progress update should be posted now.
+         * Completion and terminal updates bypass the interval so the API sees
+         * the final runner state without waiting for another timer tick.
+         *
+         * @param progressRequest Progress update under consideration.
+         * @param nowNanos Current monotonic timestamp from {@link System#nanoTime()}.
+         * @return True when the update should be posted to the API.
+         */
+        boolean shouldPost(ScoringProgressRequest progressRequest, long nowNanos) {
+            if (lastPostedAtNanos == Long.MIN_VALUE) {
+                return true;
+            }
+            if (
+                progressRequest.isComplete()
+                    || progressRequest.hasTerminalStatus()
+            ) {
+                return true;
+            }
+            return nowNanos - lastPostedAtNanos >= minimumIntervalNanos;
+        }
+
+        /**
+         * Records that a progress callback was attempted at the given time.
+         * @param postedAtNanos Monotonic timestamp from {@link System#nanoTime()}.
+         */
+        void markPosted(long postedAtNanos) {
+            lastPostedAtNanos = postedAtNanos;
+        }
+    }
+
+    /**
      * Request body for intermediate scorer progress updates.
      */
     private static class ScoringProgressRequest {
@@ -6442,6 +6564,14 @@ public class EcsRunnerMain {
             return progress;
         }
 
+        /**
+         * Gets the normalized runner progress status.
+         * @return Progress status sent to review summation metadata.
+         */
+        String getStatus() {
+            return status;
+        }
+
         int getCompletedTests() {
             return completedTests;
         }
@@ -6452,6 +6582,22 @@ public class EcsRunnerMain {
 
         int getFailedTests() {
             return failedTests;
+        }
+
+        /**
+         * Checks whether this update represents all configured tests completing.
+         * @return True when the progress value is complete or completed count reaches total count.
+         */
+        boolean isComplete() {
+            return progress >= 1.0 || (totalTests > 0 && completedTests >= totalTests);
+        }
+
+        /**
+         * Checks whether this update carries a terminal runner status.
+         * @return True for explicit success or failed progress statuses.
+         */
+        boolean hasTerminalStatus() {
+            return TEST_STATUS_SUCCESS.equals(status) || TEST_STATUS_FAILED.equals(status);
         }
     }
 
