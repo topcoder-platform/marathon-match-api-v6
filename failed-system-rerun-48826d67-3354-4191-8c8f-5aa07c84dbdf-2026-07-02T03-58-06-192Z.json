@@ -1,0 +1,1522 @@
+{
+  "challengeId": "48826d67-3354-4191-8c8f-5aa07c84dbdf",
+  "startedAt": "2026-07-02T03:58:34.423Z",
+  "scorecardIds": [
+    "CJTkQXGNEJgwyP"
+  ],
+  "selection": {
+    "totalReviewsFetched": 81,
+    "systemCandidates": 81,
+    "selected": 41,
+    "skipped": 40
+  },
+  "dispatchLimitPerRun": 20,
+  "pending": [
+    {
+      "reviewId": "124ca3dc-60f9-40f3-815b-920f221b1224",
+      "reviewStatus": "PENDING",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "mqoN5fmFUaLCrd",
+      "reason": "review status is PENDING",
+      "summation": {
+        "id": "8cfdd40f-bce4-47cf-8a44-4de33264dd12",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:54.387Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.4306,
+        "completedTests": 2153,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "b36e7ce0-177d-4ae1-bb60-017a14236db5",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "OPHSZK0yICSTZA",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "757cdaa2-3d84-487a-a16f-e12f902c7de0",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:41:12.882Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "12875786-b6e2-4533-a20a-d66daf795d2d",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "oRvp_5_mUdPIm-",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "35bf7eb2-0437-47d7-9dca-81309a5c69dc",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:14:43.080Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "0986e913-49d8-472b-900c-32f236f37253",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "OvhNb7WTRUheSO",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "fb194f15-5112-49d6-89b4-cd4be0ed070f",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:55.487Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.759,
+        "completedTests": 3795,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "173a2093-8e9e-4cf3-b57b-db890451ef1a",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "p4fNGII3eANhbp",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "99807b81-d2f7-4777-9887-28322c1e83c2",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:17:52.498Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "c2ad3c5e-0bc2-4a9b-99cd-fb214d334210",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "pjxTnWMmGFrSzN",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "ea6f314a-d8e7-49e5-8877-38c67139aedf",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:41:31.886Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "b55c6d38-2d1b-4869-9dd4-7fbb67163ab1",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Q18Zp5P1RoHtXd",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "d75393ad-59e8-4161-90ab-b0a952a80499",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:26:25.029Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 4847
+      }
+    },
+    {
+      "reviewId": "194fc457-c1a9-41d8-b550-63c06f05071b",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "qCi-PzVugNi6JU",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "f2260c27-7618-4775-8129-819def4ae45e",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:53:44.038Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 30
+      }
+    },
+    {
+      "reviewId": "a0a1e6d1-2f91-4397-946b-b4a41929f703",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "qwk7d0PBsfgp5L",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "24c5cdc5-8d9c-4c2d-a0b8-2293dd66fa32",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:57.172Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.676,
+        "completedTests": 3380,
+        "totalTests": 5000,
+        "failedTests": 10
+      }
+    },
+    {
+      "reviewId": "54aab364-88a7-4cc0-a52e-4c28949395ed",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "sGOUPQDZbM3Yrm",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "09bbf03f-8a6f-4f4e-b204-91edca8c4b2c",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T02:21:29.097Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 97
+      }
+    },
+    {
+      "reviewId": "8da1b643-0f3d-4547-90bd-0acea2dfd66e",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "tXLS9u-Rkpg4iM",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "c6b31081-ef66-46a9-9ba2-5754a9e7728a",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:54.802Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.7298,
+        "completedTests": 3649,
+        "totalTests": 5000,
+        "failedTests": 135
+      }
+    },
+    {
+      "reviewId": "a906e1f3-fac1-429a-82dd-b50242165a54",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "UMM1Q8ojXGTcRd",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "9e1a4ccd-cf64-4563-b880-cfb454c607d8",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:58:11.486Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "03a3a1a4-c01f-4f9f-b821-8ef556828768",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "VO3lr2ohElhKl8",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "fe645a4a-d493-431d-b3e2-523153759a2f",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:20:12.897Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "42b19da5-5d38-4e3c-94e2-1f779ee52ec7",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "wa4JVG90L64Tye",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "8ca0c929-c6d5-43fd-b05f-def325ab38e4",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:53:26.592Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "2b82a770-b672-4ccb-a156-1167089b71ce",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "WhDhl-vIvAyZeV",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "51d91a89-0177-47bb-ac93-32630074f942",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:20:50.161Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "7f15d379-e2f9-4cf5-85a5-6b422c0f3c24",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "wmW4O1loZwm_Jf",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "aa495bc1-d800-4d62-9a1c-c8ad24ad3203",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:55.076Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.4086,
+        "completedTests": 2043,
+        "totalTests": 5000,
+        "failedTests": 637
+      }
+    },
+    {
+      "reviewId": "40af2f96-eb7c-4e71-87c8-e53e52028abe",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "xbmrVhfrNEm5MR",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "7eaa57df-0f4a-4b1a-8c69-18cfc0882aa4",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:25:57.483Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 6
+      }
+    },
+    {
+      "reviewId": "ee0c33e5-9765-4864-a2fa-dd45ee0a012c",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "xcnR4pt5oG_qAS",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "75a6c6f6-a5ba-4981-8f55-f44d662ca221",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T01:15:21.469Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "c1198585-0de7-436f-9dfb-8b9a6e9bb27a",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Y1GuZxfIGEoHAz",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "8d33d952-f31f-4341-8e04-c6a3f80c9fa3",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:35:17.499Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "bd3c7697-4613-4846-a7f4-e0e049139d5c",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "z3oqSF0xWM93_M",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "6a67b748-3cfb-4ac9-8179-0283003f551f",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T01:58:02.104Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    },
+    {
+      "reviewId": "3028ff05-e8e5-4b73-8920-d443fc9bf123",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "zBZ1l8bFCN-Dfz",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "78105aa3-b91d-4f59-a13c-2d87e4f178f3",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:38:53.056Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      }
+    }
+  ],
+  "launched": [
+    {
+      "reviewId": "4f923f63-57d6-47cc-861e-38d71b564a22",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "-kJ-nOos4KQaL3",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "75dd418a-501b-405a-bbfe-a93801f249f1",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T02:16:19.656Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:35.978Z"
+    },
+    {
+      "reviewId": "de224678-76cf-439e-bae8-67827cd5889d",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "-XseogN8tWUYv9",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "c8b11c89-0580-4168-b213-e1b79573aba8",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:57.594Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.6844,
+        "completedTests": 3422,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:37.117Z"
+    },
+    {
+      "reviewId": "0d8f13a1-ac02-4f75-bd10-582293fc44b3",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "0wGavBBuHVPRAm",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "792a9cb4-31ab-469c-9c96-d33aca65134d",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:55:55.986Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:38.101Z"
+    },
+    {
+      "reviewId": "d6354bbe-c309-4932-be79-70e40e6ec2ff",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "3kONG53Rspsc2X",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "51629a6b-ddfb-4b88-b7d1-e111d6eea748",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:58:50.840Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:39.050Z"
+    },
+    {
+      "reviewId": "37adfa56-f824-47d0-a3af-19ab4640f760",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "464rSXUx0aQzHk",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "6a08f129-19ab-47fc-8c03-61e95cf2bd72",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:08:27.678Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:40.067Z"
+    },
+    {
+      "reviewId": "f33e8cb0-5bca-47d3-9784-611d3e94ec38",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "4lJclQqEia-Kaq",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "da8b2ebc-bb00-4375-8d25-98709913cca0",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:51.311Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.6138,
+        "completedTests": 3069,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:41.102Z"
+    },
+    {
+      "reviewId": "551be25b-c101-43e8-a6e9-c19b3ae6c018",
+      "reviewStatus": "PENDING",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "67iZ6H3GQFFzjs",
+      "reason": "review status is PENDING",
+      "summation": {
+        "id": "55241646-969e-4b75-a29b-0e6875aebe1b",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:53.063Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.6268,
+        "completedTests": 3134,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:42.182Z"
+    },
+    {
+      "reviewId": "5f95dfae-5901-428c-b243-012c6d68e9df",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "AfhrQkoDWXyCfd",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "488c6deb-1df2-479f-a9e6-750e58042360",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:56.164Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.446,
+        "completedTests": 2230,
+        "totalTests": 5000,
+        "failedTests": 2230
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:43.179Z"
+    },
+    {
+      "reviewId": "6b1c0476-4d05-4c46-9b67-2d860de22a01",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "B-XVLtUga3AhAC",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "33f9df93-3a25-4acb-91f3-0152847a8766",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T23:03:28.063Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 2064
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:44.313Z"
+    },
+    {
+      "reviewId": "3135bdf6-4a85-4c2a-9b10-14e5d7a0cb94",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "b72jM5-X00DcUV",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "8d1e4531-cb7a-44c1-aaa7-62d66a6eaadd",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:58:37.150Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:45.399Z"
+    },
+    {
+      "reviewId": "e5af0e91-9459-43fb-a2f6-7ea6a541cd89",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "FvwbmtBOkyfGdD",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "2a560851-b060-4b44-93d1-63ca0ed32dd3",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:57:32.142Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:46.427Z"
+    },
+    {
+      "reviewId": "3ac26bfb-cc69-4530-9e78-b55ed58cee17",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "GEAksgekpuPCeO",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "cae93cc2-794d-4740-99f9-a0645fbf8c7c",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:56.481Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.5698,
+        "completedTests": 2849,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:47.746Z"
+    },
+    {
+      "reviewId": "9fb495fd-1481-4a92-addd-af26241b7ac1",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "hAq--Rd0DCf8Gz",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "b16a986c-14c8-4706-8103-87afd7d9537f",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:35:17.779Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:48.919Z"
+    },
+    {
+      "reviewId": "f9b95f9c-55c4-4bc0-b585-35435aa6d728",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "IJaRGgB9EGkeNt",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "c62d4e9b-c5c2-437f-b3aa-76a63db90c1b",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:30:46.288Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:50.002Z"
+    },
+    {
+      "reviewId": "dab539ff-250c-44f4-9e8c-493b712d7839",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "K0UbtNIuWpH7W1",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "a1fa0200-34be-4c8e-b0dd-0532c90ea0ff",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:01:30.453Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:51.337Z"
+    },
+    {
+      "reviewId": "7c942dcd-dd90-46a6-855c-e2a6602bb494",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "k8yTJ5Cb7gtHrp",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "d22cd532-fd3c-4486-8429-499ccf2c36ac",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:58.749Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.639,
+        "completedTests": 3195,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:52.850Z"
+    },
+    {
+      "reviewId": "a2ed34d4-62ec-4acb-a28c-55211337d719",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "KDLZsRDsgzJy_F",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "cdf1269d-656b-4cdf-b06f-f153b8b81cc2",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:50:32.003Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:54.156Z"
+    },
+    {
+      "reviewId": "cb1ba2e3-6e40-435f-88aa-66f18c592905",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "l15vteqGkA4Cdz",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "0c165f78-7231-4ff6-bed8-a9dfc9666a52",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:06:22.707Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:55.445Z"
+    },
+    {
+      "reviewId": "21edbf45-7d3a-4996-8479-a45b8a0c0ac7",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "l8Ogeb3iMc9PL7",
+      "reason": "SYSTEM summation testStatus is FAILED",
+      "summation": {
+        "id": "c74c248b-f0b8-4bd7-9423-5026bbacc5ee",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:06:32.524Z",
+        "testStatus": "FAILED",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:56.899Z"
+    },
+    {
+      "reviewId": "fb77c1d1-8f34-48f5-8741-b88665f579f4",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Ma-1c0Di2Ihu2R",
+      "reason": "SYSTEM summation is still in progress or incomplete",
+      "summation": {
+        "id": "07d3f031-58c1-4ff8-a3f3-1878d702dcb8",
+        "aggregateScore": 0,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T03:41:55.600Z",
+        "testStatus": "IN PROGRESS",
+        "testProgress": 0.985,
+        "completedTests": 4925,
+        "totalTests": 5000,
+        "failedTests": 0
+      },
+      "launchedBy": "internal/system-score",
+      "launchedAt": "2026-07-02T03:58:58.325Z"
+    }
+  ],
+  "failed": [],
+  "skipped": [
+    {
+      "reviewId": "a59cf8ff-a994-41a8-be51-f7e278ff64f8",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "_9VOLnz2XYZv8J",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "0ace8b00-a787-482d-932c-20d686c32b4c",
+        "aggregateScore": 59.18719310552694,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:20:41.215Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "03eaaedb-d577-498e-8957-71cc66ed15b2",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "-MXxGM58y4w9Ir",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "aa4a8af8-4c92-4dcd-9a98-2ae0f94a0673",
+        "aggregateScore": 88.47123533075361,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:23:50.794Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "e15d4849-8187-4a2a-a954-d6cfac7a1b6f",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "09jQG5gXgrtwRy",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "4a41b1f4-bf1f-4b7c-9589-d62d79698d7f",
+        "aggregateScore": 79.91000568476132,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:24:27.113Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "d83f186b-37bf-4469-822b-fd15b4bf3385",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "2_gNxXA3WH111b",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "294d0447-6837-4711-8a1f-678eecc6ac28",
+        "aggregateScore": 55.98218989583756,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:20:12.922Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "90b49711-bc0e-4dc4-b9db-fc2b86c8de5d",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "2Z35j4waNot1Ol",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "3e5f5244-49b9-46ab-bff5-12fd6133dd03",
+        "aggregateScore": 90.97125413339344,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T12:24:12.813Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "db32b7be-9243-4f25-8992-aebf5c14252c",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "5-vO22Fx78URn8",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "bbd79d74-d8e1-4379-b6f4-d55e1ada475d",
+        "aggregateScore": 62.32184529773054,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:22:15.031Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "73f16e4b-7fe7-4f69-84f3-fa06a1519612",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "54wGkqq0n7ki5v",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "5e4f49ad-1129-4e0b-aacb-17047abd0c0e",
+        "aggregateScore": 64.47133329622592,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:23:20.029Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "022f2144-8b4e-4053-8f08-4adbc53f50aa",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "8yc1MuNagRXthA",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "b3e198b4-be8b-433c-b617-bff4b91c4f51",
+        "aggregateScore": 50.28433065586175,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:21:51.293Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "af418018-2916-4b3e-813d-6bc9220376ae",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "9Y5C8ERE1mhpMk",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "308387bd-f2c6-452c-86e2-ddc9ddc4ea94",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:22:50.412Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 5000
+      }
+    },
+    {
+      "reviewId": "bf580df4-4801-4cd6-8e92-554bb9202c74",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "afAVzIRQAoEztm",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "d56c0535-748b-4252-a695-c15a7cb1b6cb",
+        "aggregateScore": 63.12422173257682,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:21:07.792Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 103
+      }
+    },
+    {
+      "reviewId": "1984db44-37db-48fe-8345-b484d9828d8b",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "aNmfzJwubStTRo",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "ed8e4b71-3313-42b3-bf73-e5cd40644e53",
+        "aggregateScore": 81.51568922798096,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:21:32.505Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 13
+      }
+    },
+    {
+      "reviewId": "b2a1ab3b-65a8-4b4d-b93c-1bc557a3722a",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "aXzej5sv5FCMYV",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "910b4318-8829-41ad-9a26-416c82976893",
+        "aggregateScore": 72.0421931438694,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:11:32.281Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "d91d2270-2b62-4cef-bbe4-54010e580a27",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "b5-cpwFqfdcy8D",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "7ea86ef8-8a6b-4e7f-ac1b-276d78d9c903",
+        "aggregateScore": 81.9971983453871,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:35:53.382Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "5729a89b-296c-4db7-87ce-4c49a7bf4116",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "bg3TEq2ttZwXl-",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "86096385-571e-48c3-898f-b7d65b081126",
+        "aggregateScore": 79.4027471468822,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:43:27.228Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "96d0e35a-1a3c-424e-a79b-f9033848aeeb",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "bHFFSEedqjxtzf",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "10512d23-57f2-482a-96fe-550c9c8c4cbd",
+        "aggregateScore": 72.88961159464256,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:44:25.819Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "04964112-438c-41d0-b0d1-13fc65b05df4",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "biCmIontn005Ic",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "06addd16-116a-4a48-bbe1-aa0c5731dab8",
+        "aggregateScore": 52.13569878611308,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:46:55.140Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "87ce278e-c6a7-471f-9b78-7a013275cff9",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "BSiwxzuF-TqeqP",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "66a0afda-351e-49d7-b164-e540ba9893ba",
+        "aggregateScore": 80.59909465083204,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:45:21.925Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "f5a411b3-ce6f-4da0-b4ba-68ca9df91d43",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "BVdlowg4Lsy7As",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "e01d0704-e732-4252-9bbb-f89805425d66",
+        "aggregateScore": 34.32452876049432,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T21:38:27.387Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "04fc1823-9c10-41cd-ba73-766dfbeaed26",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "CIGmGeqdp6Bfy3",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "dbe458df-eea3-4489-9937-4c446a5794bb",
+        "aggregateScore": 70.48154078719571,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:02:05.616Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "f07cc05d-adde-456a-8c1a-fe5520ed961b",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "he6WzVNcc_daZR",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "3f4bebac-cb17-4bc3-9fcc-797574cb82db",
+        "aggregateScore": 77.45736598845677,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:12:37.381Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "4d08ddee-4fdc-4abf-b184-b24896c4b1c3",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "io4IgrmGSPD6za",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "3af028cf-b4df-4053-b6cd-f3aa1aee1074",
+        "aggregateScore": 93.05240943266419,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:50:27.933Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "f156f487-45b8-4c3d-9389-36423b0ce9f5",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "J8qjDufR44sbYM",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "2ef77db9-a4e9-4e88-8cad-ccc9b09290ec",
+        "aggregateScore": 50.28433065586175,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T07:58:50.302Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "fcaa2874-0634-4fbc-be15-cecc9816aca2",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "KNK5qu5ny94P5_",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "7d33e1be-fefc-4911-995c-c487752d96f5",
+        "aggregateScore": 64.09512990064242,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T00:01:16.784Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 9
+      }
+    },
+    {
+      "reviewId": "728495de-9456-49c7-a6f2-818dc5746105",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "l1LMW0Rq44A29J",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "77212b32-356b-49b6-b0f7-d8dd7396fd6c",
+        "aggregateScore": 66.07250096694385,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:14:31.195Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "de51027f-10ba-46d0-8e6e-73a378722ff1",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Lk7FBfpk2PY-QI",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "72bb152a-2f19-4a60-98f8-f1078e417675",
+        "aggregateScore": 61.56430879969304,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T22:10:26.493Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "f7049cd2-cba8-46a9-bb34-b68b3c0b3f5a",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "mSMs1PbtSb_f2u",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "9c5f4271-99cf-42e3-b032-061049aa395c",
+        "aggregateScore": -1,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:26:41.805Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 5000
+      }
+    },
+    {
+      "reviewId": "f4851ea0-fdeb-46a0-bc7b-1bf001bd6e60",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "nOh4tvHzsasU1Y",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "f8715512-a030-4bf8-bac1-73f999e2b68b",
+        "aggregateScore": 80.92993142318265,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:44:31.515Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "2c68ae39-9c8a-4f39-b56a-09ac9ae6e2ca",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Ol1p-B6IBmh3UX",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "422ab016-161e-435b-b949-17b982087604",
+        "aggregateScore": 79.55255675932608,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T08:40:31.722Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "46003757-5104-4da1-8ac1-3ff6895d3a7d",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "opOZwDKuwYj7ZZ",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "76f01364-d88e-4b4c-9a02-e21739dbb5e7",
+        "aggregateScore": 84.94695311933977,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T11:28:39.214Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 4
+      }
+    },
+    {
+      "reviewId": "9961af37-ef42-4d3d-a2ce-6f37d9fd5028",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "P6yOhg0NFHSa5v",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "12be960b-f79a-4ac4-b58f-70035af03d07",
+        "aggregateScore": 50.28433065586175,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T09:14:52.198Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "d7e2e809-ba6d-479a-b20b-c7b9b4a42863",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Pv0Eu-MydzpWWA",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "da6606a7-d0d4-41ba-8223-bcf6fbfc6847",
+        "aggregateScore": 44.83877590210531,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T09:27:31.127Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1219
+      }
+    },
+    {
+      "reviewId": "991025f2-992c-465f-abf7-55c006c0b560",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "qQLMawdXKyZlpc",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "c33c6ca5-63db-4c1e-af4c-a10dce48d1a6",
+        "aggregateScore": 88.87361614275042,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T17:46:27.595Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "f6e0421c-d6da-4f22-9906-05a0a5ad1705",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "RD1pH1HV57KKXm",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "d0e852fc-3067-45b9-828d-db49d3c63d87",
+        "aggregateScore": 59.98038533458181,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T10:56:48.217Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "b2ff4db7-1ade-40da-8916-3a85fe937073",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "SGSifHnjzEevod",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "198e744d-de6e-4fe6-9ff4-bec6acf401b0",
+        "aggregateScore": 70.57035009529352,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T10:57:43.528Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "3c8bdf06-f661-4216-a1d8-b638c4b07b1e",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "TzsC8mbDKeL4Oi",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "2425697e-f1e7-4484-984e-eb4034260456",
+        "aggregateScore": 73.68413919333085,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T12:03:16.908Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 66
+      }
+    },
+    {
+      "reviewId": "abc80e60-1dc5-451f-b25b-12dabce80c98",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "u2Px0WPxwWYFhS",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "bfb4a09c-7a78-487b-a186-6ff58a11deb4",
+        "aggregateScore": 52.25800899976567,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T11:48:52.911Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 1026
+      }
+    },
+    {
+      "reviewId": "72dd501e-4787-4c42-8870-897c428334b5",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "VupJ0I_AQrsENo",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "219b4d83-87ca-4a87-9016-3fd2496e225c",
+        "aggregateScore": 50.28433065586175,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T12:01:39.007Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "e56237db-2798-47da-91d5-ae22ee9a1b20",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "wzA0EP_nDbehGe",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "518aec31-fec2-42ad-9c12-77026ca44308",
+        "aggregateScore": 86.88257667730001,
+        "isFinal": true,
+        "reviewedDate": "2026-07-02T02:15:04.989Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    },
+    {
+      "reviewId": "7cb1c8a3-c75b-4d22-9474-e581a3174d0b",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "Z7pDhP8hAkTAQ2",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "55114704-ade4-4d11-8815-5ee6ee0a69ac",
+        "aggregateScore": 59.65234643312044,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T13:34:51.610Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 189
+      }
+    },
+    {
+      "reviewId": "8a01cca4-e908-4820-89dd-f173389cd0ca",
+      "reviewStatus": "COMPLETED",
+      "scorecardId": "CJTkQXGNEJgwyP",
+      "submissionId": "ZWdgESiPntuaPH",
+      "reason": "completed review with successful SYSTEM summation",
+      "summation": {
+        "id": "b2ce4f67-1137-4d83-982c-11579d9bda78",
+        "aggregateScore": 75.80772458155829,
+        "isFinal": true,
+        "reviewedDate": "2026-07-01T13:34:00.314Z",
+        "testStatus": "SUCCESS",
+        "testProgress": 1,
+        "completedTests": 5000,
+        "totalTests": 5000,
+        "failedTests": 0
+      }
+    }
+  ],
+  "lastDispatchRunAcceptedCount": 20,
+  "pausedAt": "2026-07-02T03:58:58.326Z",
+  "pauseReason": "Reached max dispatches for this run: 20."
+}

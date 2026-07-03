@@ -84,7 +84,7 @@ The queue is keyed by challenge ID, review ID, and submission ID so repeated pha
 
 ## Relative scoring at completion
 
-If `relativeScoringEnabled = true`, `ScoringResultService` persists the raw completed summation and queues a pg-boss `relative-scoring-recompute` job. The worker recalculates normalized aggregate scores under a challenge/phase PostgreSQL advisory lock, updates Review API, and then completes matching SYSTEM reviews with the recomputed scores. `ChallengeCompletionService.finalizeChallenge(...)` consumes those persisted review summaries; it does not recompute relative scoring itself.
+If `relativeScoringEnabled = true`, `ScoringResultService` persists the raw callback result as a pending, non-passing placeholder and queues a pg-boss `relative-scoring-recompute` job. The worker recalculates normalized aggregate scores under a challenge/phase PostgreSQL advisory lock, updates Review API, and then completes matching SYSTEM reviews with the recomputed scores. `ChallengeCompletionService.finalizeChallenge(...)` consumes those persisted review summaries; it does not recompute relative scoring itself.
 
 The recompute queue debounces SYSTEM bursts by challenge and phase so simultaneous scorer callbacks do not all run the expensive fan-out. Retry behavior is controlled by `RELATIVE_SCORING_RECOMPUTE_RETRY_DELAY_SECONDS` (default `60`), `RELATIVE_SCORING_RECOMPUTE_RETRY_LIMIT` (default `1000`), `RELATIVE_SCORING_RECOMPUTE_DEBOUNCE_SECONDS` (default `15`), `RELATIVE_SCORING_RECOMPUTE_START_DELAY_SECONDS` (default `10`), and `RELATIVE_SCORING_RECOMPUTE_WORKER_CONCURRENCY` (default `1`).
 

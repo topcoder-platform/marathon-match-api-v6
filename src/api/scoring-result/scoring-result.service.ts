@@ -321,6 +321,7 @@ export class ScoringResultService {
             config,
             completeSystemReview: false,
             notifyCompletion: false,
+            deferRelativeScoring: true,
           });
 
         try {
@@ -420,7 +421,8 @@ export class ScoringResultService {
   /**
    * Persists the scorer result exactly as received, without relative score
    * fan-out. This is used for non-relative scoring, for async relative scoring's
-   * raw result write, and as the fallback when queueing recomputation fails.
+   * pending raw-result placeholder, and as the fallback when queueing
+   * recomputation fails.
    * @param args Callback persistence context, normalized metadata, and side-effect controls.
    * @returns Aggregate score written for the callback submission.
    * @throws Error when review-api persistence, review completion, or notification evaluation fails.
@@ -434,6 +436,7 @@ export class ScoringResultService {
     config: ScoringResultConfigSummary;
     completeSystemReview: boolean;
     notifyCompletion: boolean;
+    deferRelativeScoring?: boolean;
   }): Promise<number> {
     const {
       token,
@@ -456,6 +459,7 @@ export class ScoringResultService {
         fallbackScorecardId,
         fallbackMetadata,
         testPhase: normalizedPhase,
+        deferRelativeScoring: args.deferRelativeScoring,
       });
 
       for (const impactedReview of payload.impactedReviews ?? []) {
@@ -466,14 +470,21 @@ export class ScoringResultService {
           fallbackScorecardId,
           fallbackMetadata,
           testPhase: normalizedPhase,
+          deferRelativeScoring: args.deferRelativeScoring,
         });
       }
     } else {
+      const metadata = args.deferRelativeScoring
+        ? this.withPendingRelativeScoringMetadata(fallbackMetadata)
+        : fallbackMetadata;
+      const score = args.deferRelativeScoring
+        ? this.progressPlaceholderScore(ScoringTestStatus.InProgress)
+        : payload.score;
       const reviewPayload = this.buildSummationPayload({
         submissionId: payload.submissionId,
-        score: payload.score,
+        score,
         scorecardId: fallbackScorecardId,
-        metadata: fallbackMetadata,
+        metadata,
         testPhase: normalizedPhase,
       });
 
@@ -2757,6 +2768,8 @@ export class ScoringResultService {
     let failedTests = 0;
     let aggregateScore = 0;
     const relativeScores: Array<Record<string, unknown>> = [];
+    const baseMetadata = { ...reviewRecord.metadata };
+    delete baseMetadata.relativeScoringPending;
 
     for (const rawTestScore of reviewRecord.rawTestScores) {
       totalTests += 1;
@@ -2791,7 +2804,7 @@ export class ScoringResultService {
 
     const metadata = this.withTestProgressMetadata(
       {
-        ...reviewRecord.metadata,
+        ...baseMetadata,
         relativeScoringEnabled: true,
         scoreDirection,
         relativeScores,
@@ -3073,6 +3086,7 @@ export class ScoringResultService {
       fallbackScorecardId?: string;
       fallbackMetadata: Record<string, unknown>;
       testPhase: string;
+      deferRelativeScoring?: boolean;
     },
   ): Promise<number> {
     const reviewObject = this.asRecord(args.legacyReview);
@@ -3098,7 +3112,7 @@ export class ScoringResultService {
       args.testPhase,
       args.fallbackScore,
     );
-    const metadata = this.withFinalTestProgressMetadata(
+    let metadata = this.withFinalTestProgressMetadata(
       this.normalizeMetadata(
         this.asRecord(reviewObject.metadata),
         args.testPhase,
@@ -3107,10 +3121,16 @@ export class ScoringResultService {
       ),
       score,
     );
+    const summationScore = args.deferRelativeScoring
+      ? this.progressPlaceholderScore(ScoringTestStatus.InProgress)
+      : score;
+    if (args.deferRelativeScoring) {
+      metadata = this.withPendingRelativeScoringMetadata(metadata);
+    }
 
     const reviewPayload = this.buildSummationPayload({
       submissionId,
-      score,
+      score: summationScore,
       scorecardId,
       metadata,
       reviewObject,
@@ -3323,6 +3343,38 @@ export class ScoringResultService {
       status,
       totalTests: totalTests ?? completedTests,
     });
+  }
+
+  /**
+   * Keeps raw test-score metadata available for asynchronous relative
+   * recomputation while preventing the interim summation from being treated as a
+   * completed final score.
+   * @param metadata Normalized final callback metadata containing raw test scores.
+   * @returns Metadata marked as pending relative-score recomputation.
+   * Used only for the raw placeholder written before the recompute worker stores
+   * normalized relative scores.
+   */
+  private withPendingRelativeScoringMetadata(
+    metadata: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const totalTests = this.resolveTotalTests(metadata);
+    const completedTestScores = this.countCompletedTestScores(metadata);
+    const completedTests = totalTests ?? completedTestScores;
+    const failedTests = this.countFailedTestScores(metadata);
+
+    return this.withTestProgressMetadata(
+      {
+        ...metadata,
+        relativeScoringPending: true,
+      },
+      {
+        completedTests,
+        failedTests,
+        progress: 1,
+        status: ScoringTestStatus.InProgress,
+        totalTests: totalTests ?? completedTests,
+      },
+    );
   }
 
   /**

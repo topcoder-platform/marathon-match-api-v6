@@ -541,7 +541,7 @@ describe('ScoringResultService', () => {
     );
   });
 
-  it('queues relative scoring recomputation after writing the raw callback result', async () => {
+  it('queues relative scoring recomputation after writing a pending raw callback result', async () => {
     const relativeScoringRecomputeSchedulerService = {
       enqueueRelativeScoringRecompute: jest.fn().mockResolvedValue('job-1'),
     };
@@ -593,12 +593,100 @@ describe('ScoringResultService', () => {
       'm2m-token',
       'system',
       expect.objectContaining({
-        aggregateScore: 85,
+        aggregateScore: 0,
         isFinal: true,
+        isPassing: false,
         submissionId: basePayload.submissionId,
         metadata: expect.objectContaining({
+          relativeScoringPending: true,
           testProgress: 1,
-          testStatus: ScoringTestStatus.Success,
+          testStatus: ScoringTestStatus.InProgress,
+          testType: 'system',
+        }),
+      }),
+    );
+    expect(completeSystemReviewIfNeededSpy).not.toHaveBeenCalled();
+    expect(processRelativeScoringSpy).not.toHaveBeenCalled();
+    expect(
+      relativeScoringRecomputeSchedulerService.enqueueRelativeScoringRecompute,
+    ).toHaveBeenCalledWith({
+      challengeId: basePayload.challengeId,
+      submissionId: basePayload.submissionId,
+      reviewId: 'review-1',
+      testPhase: 'system',
+      reviewTypeId: basePayload.reviewTypeId,
+      scorecardId: 'scorecard-1',
+      queuedAt: expect.any(String),
+      reason: 'scoring-result-callback',
+    });
+  });
+
+  it('queues relative scoring recomputation after writing a pending legacy review payload', async () => {
+    const relativeScoringRecomputeSchedulerService = {
+      enqueueRelativeScoringRecompute: jest.fn().mockResolvedValue('job-1'),
+    };
+    const { service, m2mService, prisma } = createService(
+      undefined,
+      undefined,
+      undefined,
+      relativeScoringRecomputeSchedulerService,
+    );
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      reviewId: 'review-1',
+      score: 201.9165991002245,
+      scorecardId: 'scorecard-1',
+      testPhase: 'system',
+      currentReview: {
+        id: 'summation-1',
+        aggregateScore: 201.9165991002245,
+        metadata: {
+          numberOfTests: 5000,
+          testScores: [{ testcase: '1', score: 201.9165991002245 }],
+          testType: 'system',
+        },
+      },
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MINIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    const processRelativeScoringSpy = jest.spyOn(
+      service as any,
+      'processRelativeScoring',
+    );
+
+    await expect(service.processScoringResult(systemPayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(updateReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'summation-1',
+      expect.objectContaining({
+        aggregateScore: 0,
+        isFinal: true,
+        isPassing: false,
+        submissionId: basePayload.submissionId,
+        metadata: expect.objectContaining({
+          relativeScoringPending: true,
+          testProgress: 1,
+          testStatus: ScoringTestStatus.InProgress,
           testType: 'system',
         }),
       }),
@@ -1977,7 +2065,12 @@ describe('ScoringResultService', () => {
       fallbackScorecardId: string | undefined,
       testPhase: string,
       preserveReviewedDate: boolean,
-    ) => { payload: { reviewedDate: string } };
+    ) => {
+      payload: {
+        metadata?: Record<string, unknown>;
+        reviewedDate: string;
+      };
+    };
     const reviewedDate = '2026-05-28T15:21:12.605Z';
 
     const result = buildRelativeReviewPayload(
@@ -1989,6 +2082,7 @@ describe('ScoringResultService', () => {
           reviewedDate,
         },
         metadata: {
+          relativeScoringPending: true,
           testScores: [{ testcase: '753388858', score: 10 }],
           testType: 'provisional',
         },
@@ -2002,6 +2096,9 @@ describe('ScoringResultService', () => {
     );
 
     expect(result.payload.reviewedDate).toBe(reviewedDate);
+    expect(result.payload.metadata).not.toHaveProperty(
+      'relativeScoringPending',
+    );
   });
 
   it('keeps relative scoring status successful when all individual tests fail', () => {
