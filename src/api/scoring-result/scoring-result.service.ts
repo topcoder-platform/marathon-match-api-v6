@@ -152,6 +152,7 @@ interface ScoringResultConfigSummary {
   submissionApiUrl: string;
   relativeScoringEnabled: boolean;
   scoreDirection: ScoreDirection;
+  reviewScorecardId?: string | null;
 }
 
 interface RelativeTestScoreEntry {
@@ -292,7 +293,7 @@ export class ScoringResultService {
     );
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      payload.scorecardId,
+      this.coalesceString(payload.scorecardId, config.reviewScorecardId),
     );
 
     const relativeScoringSettings = this.resolveRelativeScoringSettings(
@@ -527,7 +528,7 @@ export class ScoringResultService {
     payload: ScoringProgressCallbackPayload,
   ): Promise<void> {
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
-    await this.requireScoringResultConfig(payload.challengeId);
+    const config = await this.requireScoringResultConfig(payload.challengeId);
     const validationRunId = this.asString(payload.validationRunId)?.trim();
     if (validationRunId) {
       await this.recordValidationScoringProgress(
@@ -546,7 +547,7 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      payload.scorecardId,
+      this.coalesceString(payload.scorecardId, config.reviewScorecardId),
     );
     const metadata = this.withTestProgressMetadata(
       this.normalizeMetadata(
@@ -1207,7 +1208,7 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      data.scorecardId,
+      this.coalesceString(data.scorecardId, config.reviewScorecardId),
     );
     const lockedSettings: Required<RelativeScoringSettings> = {
       ...settings,
@@ -1854,6 +1855,7 @@ export class ScoringResultService {
             challengeId: true,
             name: true,
             submissionApiUrl: true,
+            reviewScorecardId: true,
             relativeScoringEnabled: true,
             scoreDirection: true,
           },
