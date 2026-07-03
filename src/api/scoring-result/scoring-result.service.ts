@@ -1367,12 +1367,21 @@ export class ScoringResultService {
       settings.submissionApiUrl,
       settings.challengeId,
     );
-    const reviewRecords = this.selectLatestRelativeReviewRecords(
+    const latestReviewRecords = this.selectLatestRelativeReviewRecords(
       submissions,
       testPhase,
       reviewTypeId,
       '',
       undefined,
+    );
+    const pendingReviewRecords = this.selectPendingRelativeReviewRecords(
+      submissions,
+      testPhase,
+      reviewTypeId,
+    );
+    const reviewRecords = this.mergeRelativeReviewRecords(
+      latestReviewRecords,
+      pendingReviewRecords,
     );
 
     if (reviewRecords.length === 0) {
@@ -1386,7 +1395,7 @@ export class ScoringResultService {
     }
 
     const bestScores = this.computeBestScores(
-      reviewRecords,
+      latestReviewRecords.length > 0 ? latestReviewRecords : reviewRecords,
       settings.scoreDirection,
     );
     const relativeReviewPayloads =
@@ -2602,6 +2611,83 @@ export class ScoringResultService {
   }
 
   /**
+   * Selects persisted raw relative-scoring placeholders that still need a
+   * normalized score. Queue jobs are debounced by challenge and phase, so a
+   * worker run must finish all pending raw callbacks it can see, not just the
+   * latest submission per member.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @param testPhase Requested scoring phase.
+   * @param reviewTypeId Review type identifier to preserve in normalized metadata.
+   * @returns Recomputable pending review records.
+   */
+  private selectPendingRelativeReviewRecords(
+    submissions: Record<string, unknown>[],
+    testPhase: string,
+    reviewTypeId: string,
+  ): RelativeReviewRecord[] {
+    const pendingRecords: RelativeReviewRecord[] = [];
+
+    for (const submission of submissions) {
+      const submissionId = this.extractSubmissionId(submission);
+      if (!submissionId) {
+        continue;
+      }
+
+      for (const reviewObject of this.extractReviewSummations(submission)) {
+        if (!this.matchesPhaseReview(reviewObject, testPhase)) {
+          continue;
+        }
+
+        const metadata = this.asRecord(reviewObject.metadata);
+        if (this.parseBooleanFlag(metadata.relativeScoringPending) !== true) {
+          continue;
+        }
+
+        const pendingRecord = this.buildRelativeReviewRecord({
+          createdAt: this.resolveSubmissionDate(submission),
+          memberKey:
+            this.extractSubmissionMemberKey(submission) ??
+            `submission:${submissionId}`,
+          reviewObject,
+          reviewTypeId,
+          submissionId,
+          testPhase,
+        });
+
+        if (pendingRecord) {
+          pendingRecords.push(pendingRecord);
+        }
+      }
+    }
+
+    return pendingRecords;
+  }
+
+  /**
+   * Merges relative review records by persisted review summation id, falling back
+   * to submission id for records that do not expose an id.
+   * @param recordGroups Ordered groups of recomputable review records.
+   * @returns De-duplicated records preserving the latest supplied version.
+   */
+  private mergeRelativeReviewRecords(
+    ...recordGroups: RelativeReviewRecord[][]
+  ): RelativeReviewRecord[] {
+    const merged = new Map<string, RelativeReviewRecord>();
+
+    for (const records of recordGroups) {
+      for (const record of records) {
+        const reviewSummationId = this.asString(record.reviewObject.id);
+        const key = reviewSummationId
+          ? `review:${reviewSummationId}`
+          : `submission:${record.submissionId}`;
+        merged.set(key, record);
+      }
+    }
+
+    return Array.from(merged.values());
+  }
+
+  /**
    * Compares scored relative-review candidates for per-member latest selection.
    * `isLatest=true` is authoritative when present; otherwise timestamp and
    * response order decide the winner.
@@ -3640,15 +3726,26 @@ export class ScoringResultService {
 
     const normalizedReviewId = reviewId?.trim();
     const reviewIds = new Set<string>();
-    if (normalizedReviewId) {
-      reviewIds.add(normalizedReviewId);
-    }
-
-    for (const fallbackReviewId of await this.findPendingSystemReviewIds(
+    const contextReviewIds = await this.findSystemReviewIdsForCompletion(
       token,
       context,
-    )) {
-      reviewIds.add(fallbackReviewId);
+    );
+
+    if (contextReviewIds) {
+      for (const contextReviewId of contextReviewIds) {
+        reviewIds.add(contextReviewId);
+      }
+      if (normalizedReviewId && !reviewIds.has(normalizedReviewId)) {
+        this.logger.warn({
+          message:
+            'Ignoring system reviewId because it does not match the callback submission context.',
+          reviewId: normalizedReviewId,
+          challengeId: this.asString(context?.challengeId) ?? null,
+          submissionId: this.asString(context?.submissionId) ?? null,
+        });
+      }
+    } else if (normalizedReviewId) {
+      reviewIds.add(normalizedReviewId);
     }
 
     if (reviewIds.size === 0) {
@@ -3690,21 +3787,23 @@ export class ScoringResultService {
   }
 
   /**
-   * Finds pending review-api SYSTEM review records for a completed scorer callback
-   * when the runner did not include a review ID. Matching by submission and
-   * configured scorecard lets Marathon Match review phases close after scoring.
+   * Finds review-api SYSTEM review records for a completed scorer callback.
+   * Matching by submission and configured scorecard lets Marathon Match review
+   * phases close after scoring and prevents a mismatched callback review ID from
+   * completing another submission's review.
    * @param token M2M token for review-api.
    * @param context Challenge/submission context from the scorer callback.
-   * @returns Review IDs that are still pending or in progress.
+   * @returns Matching review IDs, an empty list when lookup succeeds with no
+   * matches, or null when no context is available or lookup fails.
    */
-  private async findPendingSystemReviewIds(
+  private async findSystemReviewIdsForCompletion(
     token: string,
     context?: SystemReviewCompletionContext,
-  ): Promise<string[]> {
+  ): Promise<string[] | null> {
     const challengeId = this.asString(context?.challengeId);
     const submissionId = this.asString(context?.submissionId);
     if (!challengeId || !submissionId) {
-      return [];
+      return null;
     }
 
     const params: Record<string, string> = {
@@ -3728,7 +3827,12 @@ export class ScoringResultService {
 
       return this.extractReviewArray(response.data)
         .filter((review) =>
-          this.matchesPendingSystemReview(review, expectedScorecardId),
+          this.matchesSystemReviewForCompletion(
+            review,
+            expectedScorecardId,
+            submissionId,
+            challengeId,
+          ),
         )
         .map((review) => this.asString(review.id))
         .filter((id): id is string => Boolean(id));
@@ -3736,26 +3840,30 @@ export class ScoringResultService {
       const errorDetails = this.extractHttpError(error);
       this.logger.warn({
         message:
-          'Unable to look up pending system reviews for scorer completion fallback.',
+          'Unable to look up system reviews for scorer completion fallback.',
         url,
         params,
         statusCode: errorDetails.statusCode ?? null,
         responseBody: errorDetails.responseBody ?? null,
         error: errorDetails.message,
       });
-      return [];
+      return null;
     }
   }
 
   /**
-   * Checks whether a review-api record is a pending system review candidate.
+   * Checks whether a review-api record is a system review completion candidate.
    * @param review Review object returned by review-api.
    * @param expectedScorecardId Optional scorecard ID configured for MM review.
-   * @returns True when the review can be completed by the system scorer fallback.
+   * @param expectedSubmissionId Submission ID that received the scorer callback.
+   * @param expectedChallengeId Challenge ID that received the scorer callback.
+   * @returns True when the review belongs to the callback submission context.
    */
-  private matchesPendingSystemReview(
+  private matchesSystemReviewForCompletion(
     review: Record<string, unknown>,
     expectedScorecardId?: string,
+    expectedSubmissionId?: string,
+    expectedChallengeId?: string,
   ): boolean {
     const reviewId = this.asString(review.id);
     if (!reviewId) {
@@ -3763,7 +3871,30 @@ export class ScoringResultService {
     }
 
     const normalizedStatus = this.asString(review.status)?.toUpperCase();
-    if (normalizedStatus !== 'PENDING' && normalizedStatus !== 'IN_PROGRESS') {
+    if (
+      normalizedStatus &&
+      normalizedStatus !== 'PENDING' &&
+      normalizedStatus !== 'IN_PROGRESS' &&
+      normalizedStatus !== 'COMPLETED'
+    ) {
+      return false;
+    }
+
+    const submissionId = this.asString(review.submissionId);
+    if (
+      expectedSubmissionId &&
+      submissionId &&
+      submissionId !== expectedSubmissionId
+    ) {
+      return false;
+    }
+
+    const challengeId = this.asString(review.challengeId);
+    if (
+      expectedChallengeId &&
+      challengeId &&
+      challengeId !== expectedChallengeId
+    ) {
       return false;
     }
 

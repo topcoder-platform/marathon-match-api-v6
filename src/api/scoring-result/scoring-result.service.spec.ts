@@ -828,6 +828,121 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('finalizes pending relative placeholders even when they are not latest member submissions', async () => {
+    const { service, m2mService, prisma } = createService();
+    const reviewFor = (
+      submissionId: string,
+      rawScore: number,
+      relativeScoringPending = false,
+    ) => ({
+      id: `summation-${submissionId}`,
+      aggregateScore: relativeScoringPending ? 0 : rawScore,
+      isFinal: true,
+      scorecardId: 'scorecard-1',
+      metadata: {
+        ...(relativeScoringPending ? { relativeScoringPending: true } : {}),
+        testStatus: relativeScoringPending
+          ? ScoringTestStatus.InProgress
+          : ScoringTestStatus.Success,
+        testType: 'system',
+        testScores: [{ testcase: '753388858', score: rawScore }],
+      },
+    });
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'withRelativeScoringLock')
+      .mockImplementation(
+        async (
+          _challengeId: string,
+          _testPhase: string,
+          work: () => Promise<unknown>,
+        ) => work(),
+      );
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-newer',
+        memberId: 'member-a',
+        isLatest: true,
+        submittedDate: '2026-05-01T00:00:02.000Z',
+        reviewSummation: [reviewFor('submission-newer', 100)],
+      },
+      {
+        id: 'submission-old-pending',
+        memberId: 'member-a',
+        isLatest: false,
+        submittedDate: '2026-05-01T00:00:01.000Z',
+        reviewSummation: [reviewFor('submission-old-pending', 50, true)],
+      },
+      {
+        id: 'submission-other',
+        memberId: 'member-b',
+        isLatest: true,
+        submittedDate: '2026-05-01T00:00:03.000Z',
+        reviewSummation: [reviewFor('submission-other', 80)],
+      },
+    ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'notifyScoringCompletionEmailIfReady')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.recomputeQueuedRelativeScoring({
+        challengeId: basePayload.challengeId,
+        submissionId: 'submission-old-pending',
+        reviewId: 'review-old-pending',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        queuedAt: '2026-05-01T00:00:10.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    const pendingPayload = upsertReviewSummationSpy.mock.calls
+      .map(
+        ([, , payload]) =>
+          payload as {
+            aggregateScore: number;
+            isPassing: boolean;
+            metadata?: Record<string, unknown>;
+            submissionId: string;
+          },
+      )
+      .find((payload) => payload.submissionId === 'submission-old-pending');
+
+    expect(pendingPayload).toEqual(
+      expect.objectContaining({
+        aggregateScore: 50,
+        isPassing: true,
+        submissionId: 'submission-old-pending',
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+        }),
+      }),
+    );
+    expect(pendingPayload?.metadata).not.toHaveProperty(
+      'relativeScoringPending',
+    );
+  });
+
   it('serializes concurrent relative scoring recomputations for the same challenge phase', async () => {
     const { service, m2mService, prisma } = createService();
     const firstPayload: ScoringResultCallbackPayload = {
@@ -1642,6 +1757,83 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('uses the review matching the callback submission when reviewId is mismatched', async () => {
+    const { service, httpService, m2mService, prisma } = createService();
+
+    const systemPayload: ScoringResultCallbackPayload = {
+      ...basePayload,
+      reviewId: 'review-for-other-submission',
+      score: 100,
+      scorecardId: 'scorecard-1',
+      testPhase: 'system',
+    };
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([]);
+    jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          data: [
+            {
+              challengeId: basePayload.challengeId,
+              id: 'review-for-callback-submission',
+              scorecardId: 'scorecard-1',
+              status: 'COMPLETED',
+              submissionId: basePayload.submissionId,
+            },
+          ],
+        },
+      }),
+    );
+    httpService.patch.mockReturnValue(
+      of({ data: { id: 'review-for-callback-submission' } }),
+    );
+
+    await expect(service.processScoringResult(systemPayload)).resolves.toBe(
+      undefined,
+    );
+
+    expect(httpService.patch).toHaveBeenCalledTimes(1);
+    expect(httpService.patch).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-for-callback-submission',
+      expect.objectContaining({
+        finalScore: 100,
+        status: 'COMPLETED',
+      }),
+      expect.any(Object),
+    );
+    expect(httpService.patch).not.toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviews/review-for-other-submission',
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Ignoring system reviewId because it does not match the callback submission context.',
+        reviewId: 'review-for-other-submission',
+        submissionId: basePayload.submissionId,
+      }),
+    );
+  });
+
   it('persists system summation before completing the review', async () => {
     const { service, httpService, m2mService, prisma } = createService();
     const systemPayload: ScoringResultCallbackPayload = {
@@ -1673,7 +1865,14 @@ describe('ScoringResultService', () => {
     httpService.get.mockReturnValue(
       of({
         data: {
-          data: [],
+          data: [
+            {
+              challengeId: basePayload.challengeId,
+              id: 'review-1',
+              status: 'PENDING',
+              submissionId: basePayload.submissionId,
+            },
+          ],
         },
       }),
     );
@@ -1751,7 +1950,14 @@ describe('ScoringResultService', () => {
     httpService.get.mockReturnValue(
       of({
         data: {
-          data: [],
+          data: [
+            {
+              challengeId: basePayload.challengeId,
+              id: 'review-1',
+              status: 'PENDING',
+              submissionId: basePayload.submissionId,
+            },
+          ],
         },
       }),
     );
@@ -1842,7 +2048,14 @@ describe('ScoringResultService', () => {
       .mockReturnValueOnce(
         of({
           data: {
-            data: [],
+            data: [
+              {
+                challengeId: basePayload.challengeId,
+                id: 'review-1',
+                status: 'PENDING',
+                submissionId: basePayload.submissionId,
+              },
+            ],
           },
         }),
       );
