@@ -370,6 +370,8 @@ Relative scoring is controlled by the challenge setting `relativeScoringEnabled`
 
 When relative scoring is enabled, the system recalculates the latest submission from each member against the best current raw score for each testcase.
 
+Before that recalculation finishes, the raw callback result is stored as a pending, non-passing placeholder. The final passing summation is written only after normalized relative scores have been computed.
+
 For each testcase:
 
 - failed, missing, negative, or zero raw scores receive `0`, except for the `MINIMIZE` tied-zero case

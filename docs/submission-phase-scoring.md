@@ -112,7 +112,7 @@ Relative scoring applies when:
 - `relativeScoringEnabled = true` on the Marathon Match config
 - `testScores` are present in the scorer metadata
 
-In that case, `ScoringResultService` writes the raw completed summation first, then queues a pg-boss relative scoring recomputation. The worker recalculates latest-submission review scores relative to the current best result, updates the persisted aggregate scores, and keeps existing `reviewedDate` values so relative-score updates do not move historical review timestamps.
+In that case, `ScoringResultService` writes the raw callback result as a pending, non-passing placeholder, then queues a pg-boss relative scoring recomputation. The worker recalculates latest-submission review scores relative to the current best result, updates the persisted aggregate scores, and keeps existing `reviewedDate` values so relative-score updates do not move historical review timestamps.
 
 ## Tester-change rerun
 
