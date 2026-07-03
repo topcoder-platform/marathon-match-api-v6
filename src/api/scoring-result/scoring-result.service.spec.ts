@@ -943,6 +943,122 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('loads the queued submission pending relative placeholder directly when submissions omit it', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'withRelativeScoringLock')
+      .mockImplementation(
+        async (
+          _challengeId: string,
+          _testPhase: string,
+          work: () => Promise<unknown>,
+        ) => work(),
+      );
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-visible-latest',
+        memberId: 'member-visible',
+        isLatest: true,
+        submittedDate: '2026-05-01T00:00:02.000Z',
+        reviewSummation: [
+          {
+            id: 'summation-visible-latest',
+            aggregateScore: 100,
+            isFinal: true,
+            metadata: {
+              testScores: [{ testcase: '753388858', score: 100 }],
+              testStatus: ScoringTestStatus.Success,
+              testType: 'system',
+            },
+            scorecardId: 'scorecard-1',
+          },
+        ],
+      },
+    ]);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-hidden-pending',
+          aggregateScore: 0,
+          isFinal: true,
+          metadata: {
+            relativeScoringPending: true,
+            testScores: [{ testcase: '753388858', score: 50 }],
+            testStatus: ScoringTestStatus.InProgress,
+            testType: 'system',
+          },
+          scorecardId: 'scorecard-1',
+        },
+      ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'notifyScoringCompletionEmailIfReady')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.recomputeQueuedRelativeScoring({
+        challengeId: basePayload.challengeId,
+        submissionId: 'submission-hidden-pending',
+        reviewId: 'review-hidden-pending',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        queuedAt: '2026-05-01T00:00:10.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(upsertReviewSummationSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'system',
+      expect.objectContaining({
+        aggregateScore: 50,
+        isPassing: true,
+        submissionId: 'submission-hidden-pending',
+        metadata: expect.objectContaining({
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+        }),
+      }),
+      'summation-hidden-pending',
+    );
+    const hiddenPayload = upsertReviewSummationSpy.mock.calls.find(
+      ([, , payload]) =>
+        (payload as { submissionId: string }).submissionId ===
+        'submission-hidden-pending',
+    )?.[2] as { metadata?: Record<string, unknown> } | undefined;
+    expect(hiddenPayload?.metadata).not.toHaveProperty(
+      'relativeScoringPending',
+    );
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'review-hidden-pending',
+      50,
+      'system',
+      expect.objectContaining({
+        submissionId: 'submission-hidden-pending',
+      }),
+    );
+  });
+
   it('serializes concurrent relative scoring recomputations for the same challenge phase', async () => {
     const { service, m2mService, prisma } = createService();
     const firstPayload: ScoringResultCallbackPayload = {
