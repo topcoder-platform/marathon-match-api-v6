@@ -152,6 +152,7 @@ interface ScoringResultConfigSummary {
   submissionApiUrl: string;
   relativeScoringEnabled: boolean;
   scoreDirection: ScoreDirection;
+  reviewScorecardId?: string | null;
 }
 
 interface RelativeTestScoreEntry {
@@ -193,10 +194,8 @@ interface LatestMemberSubmissionCandidate {
   sequence: number;
 }
 
-interface LatestRelativeReviewCandidate extends LatestMemberSubmissionCandidate {
+interface LatestRelativeSubmissionCandidate extends LatestMemberSubmissionCandidate {
   submissionId: string;
-  memberId?: string;
-  reviewObject: Record<string, unknown>;
 }
 
 interface SubmissionMemberIdentity {
@@ -222,6 +221,8 @@ interface SubmissionPagination {
 
 const SUBMISSION_PAGE_SIZE = 100;
 const MAX_SUBMISSION_PAGES = 1000;
+const REVIEW_SUMMATION_PAGE_SIZE = 100;
+const MAX_REVIEW_SUMMATION_PAGES = 1000;
 
 /**
  * Applies marathon-match review summation updates based on scorer callback data.
@@ -292,7 +293,10 @@ export class ScoringResultService {
     );
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      payload.scorecardId,
+      this.coalesceString(
+        payload.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
 
     const relativeScoringSettings = this.resolveRelativeScoringSettings(
@@ -527,7 +531,7 @@ export class ScoringResultService {
     payload: ScoringProgressCallbackPayload,
   ): Promise<void> {
     const normalizedPhase = this.normalizeTestPhase(payload.testPhase);
-    await this.requireScoringResultConfig(payload.challengeId);
+    const config = await this.requireScoringResultConfig(payload.challengeId);
     const validationRunId = this.asString(payload.validationRunId)?.trim();
     if (validationRunId) {
       await this.recordValidationScoringProgress(
@@ -546,7 +550,10 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      payload.scorecardId,
+      this.coalesceString(
+        payload.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
     const metadata = this.withTestProgressMetadata(
       this.normalizeMetadata(
@@ -1207,7 +1214,10 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      data.scorecardId,
+      this.coalesceString(
+        data.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
     const lockedSettings: Required<RelativeScoringSettings> = {
       ...settings,
@@ -1371,15 +1381,24 @@ export class ScoringResultService {
       settings.submissionApiUrl,
       settings.challengeId,
     );
+    const hydratedSubmissions =
+      await this.hydrateLatestRelativeReviewSummations(
+        token,
+        settings.submissionApiUrl,
+        settings.challengeId,
+        submissions,
+        testPhase,
+        fallbackScorecardId,
+      );
     const latestReviewRecords = this.selectLatestRelativeReviewRecords(
-      submissions,
+      hydratedSubmissions,
       testPhase,
       reviewTypeId,
       '',
       undefined,
     );
     const pendingReviewRecords = this.selectPendingRelativeReviewRecords(
-      submissions,
+      hydratedSubmissions,
       testPhase,
       reviewTypeId,
     );
@@ -1395,7 +1414,7 @@ export class ScoringResultService {
         ? []
         : await this.fetchPendingRelativeReviewRecordsForSubmission(
             token,
-            submissions,
+            hydratedSubmissions,
             testPhase,
             reviewTypeId,
             callbackSubmissionId,
@@ -1415,8 +1434,19 @@ export class ScoringResultService {
       return [];
     }
 
+    if (latestReviewRecords.length === 0) {
+      this.logger.warn({
+        message:
+          'Relative scoring recomputation found pending review summations but no latest-submission baseline records with usable testScores.',
+        challengeId: settings.challengeId,
+        reviewRecordCount: reviewRecords.length,
+        testPhase,
+      });
+      return [];
+    }
+
     const bestScores = this.computeBestScores(
-      latestReviewRecords.length > 0 ? latestReviewRecords : reviewRecords,
+      latestReviewRecords,
       settings.scoreDirection,
     );
     const relativeReviewPayloads =
@@ -1514,8 +1544,17 @@ export class ScoringResultService {
       settings.submissionApiUrl,
       settings.challengeId,
     );
+    const hydratedSubmissions =
+      await this.hydrateLatestRelativeReviewSummations(
+        token,
+        settings.submissionApiUrl,
+        settings.challengeId,
+        submissions,
+        testPhase,
+        fallbackScorecardId,
+      );
     const currentSubmissionId = payload.submissionId.trim();
-    const currentSubmission = submissions.find(
+    const currentSubmission = hydratedSubmissions.find(
       (submission) =>
         this.extractSubmissionId(submission) === currentSubmissionId,
     );
@@ -1548,7 +1587,7 @@ export class ScoringResultService {
     }
 
     const impactedReviews = this.selectLatestRelativeReviewRecords(
-      submissions,
+      hydratedSubmissions,
       testPhase,
       payload.reviewTypeId,
       payload.submissionId,
@@ -1825,6 +1864,7 @@ export class ScoringResultService {
             challengeId: true,
             name: true,
             submissionApiUrl: true,
+            reviewScorecardId: true,
             relativeScoringEnabled: true,
             scoreDirection: true,
           },
@@ -2476,6 +2516,87 @@ export class ScoringResultService {
   }
 
   /**
+   * Fetches all review summations for one challenge and scoring phase directly
+   * from Review API with metadata included.
+   * @param token M2M token for review-api.
+   * @param challengeId Challenge whose review summations should be fetched.
+   * @param testPhase Requested scoring phase.
+   * @param scorecardId Optional Marathon Match scorecard id filter.
+   * @returns Every matching review summation returned across all API pages.
+   * @throws Error when pagination does not terminate within a defensive page cap.
+   * Used by relative scoring so submission-api decides latest submissions while
+   * Review API remains the source of raw per-test score metadata.
+   */
+  private async fetchChallengeReviewSummations(
+    token: string,
+    challengeId: string,
+    testPhase: string,
+    scorecardId?: string,
+  ): Promise<Record<string, unknown>[]> {
+    const reviewSummations: Record<string, unknown>[] = [];
+    const normalizedPhase = this.normalizeTestPhase(testPhase);
+    let page = 1;
+    let hasNextPage = true;
+
+    while (hasNextPage) {
+      const params: Record<string, string | number> = {
+        challengeId,
+        metadata: 'true',
+        page,
+        perPage: REVIEW_SUMMATION_PAGE_SIZE,
+      };
+
+      if (scorecardId) {
+        params.scorecardId = scorecardId;
+      }
+      if (normalizedPhase === 'example') {
+        params.example = 'true';
+      } else if (normalizedPhase === 'system') {
+        params.system = 'true';
+      } else {
+        params.provisional = 'true';
+      }
+
+      const response = await firstValueFrom(
+        this.httpService.get(this.buildReviewSummationUrl(), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params,
+        }),
+      );
+      const pageReviewSummations = this.extractReviewSummationArray(
+        response.data,
+      );
+      reviewSummations.push(...pageReviewSummations);
+
+      const pagination = this.resolveSubmissionPagination(
+        response.data,
+        response.headers,
+        REVIEW_SUMMATION_PAGE_SIZE,
+      );
+      hasNextPage = this.shouldFetchNextSubmissionPage(
+        page,
+        pageReviewSummations.length,
+        reviewSummations.length,
+        pagination,
+        REVIEW_SUMMATION_PAGE_SIZE,
+      );
+      page += 1;
+
+      if (hasNextPage && page > MAX_REVIEW_SUMMATION_PAGES) {
+        throw new Error(
+          `Unable to fetch all review summations for ${challengeId}/${normalizedPhase}: pagination exceeded ${MAX_REVIEW_SUMMATION_PAGES} pages.`,
+        );
+      }
+    }
+
+    return reviewSummations.filter((reviewSummation) =>
+      this.matchesPhaseReview(reviewSummation, normalizedPhase),
+    );
+  }
+
+  /**
    * Fetches one submission by ID from submission-api-v6 for identity fallback.
    * @param token M2M token for submission-api-v6.
    * @param submissionApiUrl Configured submission-api-v6 base URL.
@@ -2510,6 +2631,87 @@ export class ScoringResultService {
     submission: Record<string, unknown> | undefined,
   ): boolean {
     return this.parseBooleanFlag(submission?.virusScan) === true;
+  }
+
+  /**
+   * Replaces or augments embedded submission review summations with Review API
+   * metadata for the full challenge phase.
+   * @param token M2M token for submission-api-v6 and review-api.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param challengeId Challenge whose submissions are being recomputed.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @param testPhase Requested scoring phase.
+   * @param scorecardId Optional Marathon Match scorecard id filter.
+   * @returns Submission records with matching phase review summations attached.
+   * @throws Error when Review API references a submission that cannot be loaded.
+   * Used by relative scoring to avoid calculating baselines from incomplete
+   * `reviewSummation` expansions in the submission list response.
+   */
+  private async hydrateLatestRelativeReviewSummations(
+    token: string,
+    submissionApiUrl: string,
+    challengeId: string,
+    submissions: Record<string, unknown>[],
+    testPhase: string,
+    scorecardId?: string,
+  ): Promise<Record<string, unknown>[]> {
+    const reviewSummations = await this.fetchChallengeReviewSummations(
+      token,
+      challengeId,
+      testPhase,
+      scorecardId,
+    );
+    const submissionById = new Map<string, Record<string, unknown>>();
+
+    for (const submission of submissions) {
+      const submissionId = this.extractSubmissionId(submission);
+      if (submissionId) {
+        submissionById.set(submissionId, submission);
+      }
+    }
+
+    for (const reviewSummation of reviewSummations) {
+      const submissionId = this.asString(reviewSummation.submissionId);
+      if (!submissionId || submissionById.has(submissionId)) {
+        continue;
+      }
+
+      const fetchedSubmission = await this.fetchSubmissionById(
+        token,
+        submissionApiUrl,
+        submissionId,
+      );
+      if (!fetchedSubmission) {
+        throw new Error(
+          `Review summation ${this.asString(
+            reviewSummation.id,
+          )} references submission ${submissionId}, but submission-api-v6 did not return it.`,
+        );
+      }
+
+      submissionById.set(submissionId, fetchedSubmission);
+    }
+
+    const reviewSummationsBySubmissionId =
+      this.groupReviewSummationsBySubmissionId(reviewSummations);
+
+    return Array.from(submissionById.values()).map((submission) => {
+      const submissionId = this.extractSubmissionId(submission);
+      if (!submissionId) {
+        return submission;
+      }
+
+      const directReviewSummations =
+        reviewSummationsBySubmissionId.get(submissionId) ?? [];
+      if (directReviewSummations.length === 0) {
+        return submission;
+      }
+
+      return {
+        ...submission,
+        reviewSummation: directReviewSummations,
+      };
+    });
   }
 
   /**
@@ -2556,7 +2758,8 @@ export class ScoringResultService {
   }
 
   /**
-   * Selects the latest scored submission per member for the requested phase.
+   * Selects recomputable review records only from the latest submission per
+   * member for the requested phase.
    * Member keys are resolved from all supported submission identity fields so
    * legacy payloads without top-level `memberId` still collapse to one record.
    * @param submissions Submission records returned by submission-api-v6.
@@ -2564,7 +2767,7 @@ export class ScoringResultService {
    * @param reviewTypeId Review type identifier to preserve in normalized metadata.
    * @param excludedSubmissionId Current callback submission ID to skip.
    * @param excludedMemberKey Current callback member key to skip when present.
-   * @returns Recomputable latest scored review records for other members.
+   * @returns Recomputable latest-submission review records for other members.
    */
   private selectLatestRelativeReviewRecords(
     submissions: Record<string, unknown>[],
@@ -2573,7 +2776,48 @@ export class ScoringResultService {
     excludedSubmissionId: string,
     excludedMemberKey?: string,
   ): RelativeReviewRecord[] {
-    const latestByMember = new Map<string, LatestRelativeReviewCandidate>();
+    return this.selectLatestRelativeSubmissionCandidates(
+      submissions,
+      excludedSubmissionId,
+      excludedMemberKey,
+    )
+      .map((candidate) => {
+        const reviewObject = this.findPhaseReviewSummation(
+          candidate.submission,
+          testPhase,
+        );
+        if (!reviewObject) {
+          return null;
+        }
+
+        return this.buildRelativeReviewRecord({
+          createdAt: candidate.submittedDate,
+          memberKey: candidate.memberKey,
+          reviewObject,
+          reviewTypeId,
+          submissionId: candidate.submissionId,
+          testPhase,
+        });
+      })
+      .filter((entry): entry is RelativeReviewRecord => entry !== null);
+  }
+
+  /**
+   * Selects one latest submission per member before considering whether a phase
+   * review summation is available.
+   * @param submissions Submission records returned by submission-api-v6.
+   * @param excludedSubmissionId Current callback submission ID to skip.
+   * @param excludedMemberKey Current callback member key to skip when present.
+   * @returns Latest submission candidates grouped by member identity.
+   * Used by relative scoring so an older scored submission cannot replace a
+   * newer latest submission that is still waiting for SYSTEM results.
+   */
+  private selectLatestRelativeSubmissionCandidates(
+    submissions: Record<string, unknown>[],
+    excludedSubmissionId: string,
+    excludedMemberKey?: string,
+  ): LatestRelativeSubmissionCandidate[] {
+    const latestByMember = new Map<string, LatestRelativeSubmissionCandidate>();
     const normalizedExcludedSubmissionId = excludedSubmissionId.trim();
 
     for (const [sequence, submission] of submissions.entries()) {
@@ -2588,47 +2832,28 @@ export class ScoringResultService {
         continue;
       }
 
-      const reviewObject = this.findPhaseReviewSummation(submission, testPhase);
-      if (!reviewObject) {
-        continue;
-      }
-
-      const memberIdentity = this.extractSubmissionMemberIdentity(submission);
-      const candidate: LatestRelativeReviewCandidate = {
+      const candidate: LatestRelativeSubmissionCandidate = {
         submission,
         submissionId,
         memberKey,
-        memberId: memberIdentity.memberId,
         submittedDate: this.resolveSubmissionDate(submission),
         isLatest:
           this.parseBooleanFlag(submission.isLatest) ??
           this.parseBooleanFlag(submission.latest) ??
           undefined,
         sequence,
-        reviewObject,
       };
       const existing = latestByMember.get(memberKey);
 
       if (
         !existing ||
-        this.compareRelativeReviewCandidates(candidate, existing) > 0
+        this.compareRelativeSubmissionCandidates(candidate, existing) > 0
       ) {
         latestByMember.set(memberKey, candidate);
       }
     }
 
-    return Array.from(latestByMember.values())
-      .map((candidate) =>
-        this.buildRelativeReviewRecord({
-          createdAt: candidate.submittedDate,
-          memberKey: candidate.memberKey,
-          reviewObject: candidate.reviewObject,
-          reviewTypeId,
-          submissionId: candidate.submissionId,
-          testPhase,
-        }),
-      )
-      .filter((entry): entry is RelativeReviewRecord => entry !== null);
+    return Array.from(latestByMember.values());
   }
 
   /**
@@ -2790,16 +3015,16 @@ export class ScoringResultService {
   }
 
   /**
-   * Compares scored relative-review candidates for per-member latest selection.
+   * Compares relative-score submission candidates for per-member latest selection.
    * `isLatest=true` is authoritative when present; otherwise timestamp and
    * response order decide the winner.
    * @param left Candidate being evaluated.
    * @param right Current selected candidate.
    * @returns Positive when left should replace right, negative when right wins.
    */
-  private compareRelativeReviewCandidates(
-    left: LatestRelativeReviewCandidate,
-    right: LatestRelativeReviewCandidate,
+  private compareRelativeSubmissionCandidates(
+    left: LatestRelativeSubmissionCandidate,
+    right: LatestRelativeSubmissionCandidate,
   ): number {
     const leftIsLatest = left.isLatest === true;
     const rightIsLatest = right.isLatest === true;
@@ -3147,13 +3372,60 @@ export class ScoringResultService {
       return null;
     }
 
-    for (const review of this.extractReviewSummations(submission)) {
-      if (this.matchesPhaseReview(review, testPhase)) {
-        return review;
-      }
+    const phaseReviews = this.extractReviewSummations(submission).filter(
+      (review) => this.matchesPhaseReview(review, testPhase),
+    );
+    if (phaseReviews.length === 0) {
+      return null;
     }
 
-    return null;
+    const reviewsWithRawScores = phaseReviews.filter((review) =>
+      this.hasUsableRelativeTestScores(review, testPhase),
+    );
+    return this.selectMostRecentReviewSummation(
+      reviewsWithRawScores.length > 0 ? reviewsWithRawScores : phaseReviews,
+    );
+  }
+
+  /**
+   * Checks whether a review summation exposes raw per-test scores usable for
+   * relative scoring.
+   * @param reviewObject Review summation object to inspect.
+   * @param testPhase Requested scoring phase.
+   * @returns True when metadata contains at least one normalized raw test score.
+   */
+  private hasUsableRelativeTestScores(
+    reviewObject: Record<string, unknown>,
+    testPhase: string,
+  ): boolean {
+    const metadata = this.normalizeMetadata(
+      this.asRecord(reviewObject.metadata),
+      testPhase,
+    );
+    return this.extractRawTestScores(metadata).length > 0;
+  }
+
+  /**
+   * Selects the newest review summation from duplicate phase rows.
+   * @param reviewSummations Candidate review summations.
+   * @returns The most recent review summation.
+   */
+  private selectMostRecentReviewSummation(
+    reviewSummations: Record<string, unknown>[],
+  ): Record<string, unknown> {
+    return [...reviewSummations].sort((left, right) => {
+      const dateComparison = this.compareIsoDateStrings(
+        this.resolveReviewSummationDate(right),
+        this.resolveReviewSummationDate(left),
+      );
+      if (dateComparison !== 0) {
+        return dateComparison;
+      }
+
+      return (this.asString(right.id) ?? '').localeCompare(
+        this.asString(left.id) ?? '',
+      );
+    })[0];
   }
 
   /**
@@ -3173,6 +3445,32 @@ export class ScoringResultService {
     }
 
     return [];
+  }
+
+  /**
+   * Groups review-api review summation records by submission ID.
+   * @param reviewSummations Review summation records returned by Review API.
+   * @returns Map from submission ID to summations for that submission.
+   * Used by `hydrateLatestRelativeReviewSummations` when attaching authoritative
+   * Review API metadata to submission-api records.
+   */
+  private groupReviewSummationsBySubmissionId(
+    reviewSummations: Record<string, unknown>[],
+  ): Map<string, Record<string, unknown>[]> {
+    const grouped = new Map<string, Record<string, unknown>[]>();
+
+    for (const reviewSummation of reviewSummations) {
+      const submissionId = this.asString(reviewSummation.submissionId);
+      if (!submissionId) {
+        continue;
+      }
+
+      const existing = grouped.get(submissionId) ?? [];
+      existing.push(reviewSummation);
+      grouped.set(submissionId, existing);
+    }
+
+    return grouped;
   }
 
   /**
@@ -4767,6 +5065,23 @@ export class ScoringResultService {
       this.asString(submission.createdAt),
       this.asString(submission.updatedAt),
       this.asString(submission.created),
+    );
+  }
+
+  /**
+   * Resolves the best available timestamp for ordering duplicate review
+   * summation rows.
+   * @param reviewSummation Review summation record returned by Review API.
+   * @returns Review summation timestamp, or undefined when none is available.
+   */
+  private resolveReviewSummationDate(
+    reviewSummation: Record<string, unknown>,
+  ): string | undefined {
+    return this.coalesceString(
+      this.asString(reviewSummation.updatedAt),
+      this.asString(reviewSummation.reviewedDate),
+      this.asString(reviewSummation.createdAt),
+      this.asString(reviewSummation.created),
     );
   }
 
