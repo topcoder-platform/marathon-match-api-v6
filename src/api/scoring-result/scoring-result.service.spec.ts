@@ -500,6 +500,22 @@ describe('ScoringResultService', () => {
         reviewSummation: [],
       },
     ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-2',
+          isProvisional: true,
+          metadata: {
+            testType: 'provisional',
+            testScores: [
+              { testcase: '1', score: 0 },
+              { testcase: '2', score: 0 },
+            ],
+          },
+          submissionId: 'submission-2',
+        },
+      ]);
     const upsertReviewSummationSpy = jest
       .spyOn(service as any, 'upsertReviewSummation')
       .mockResolvedValue(undefined);
@@ -756,6 +772,12 @@ describe('ScoringResultService', () => {
         reviewSummation: [reviewFor('submission-b', 45)],
       },
     ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        { ...reviewFor('submission-a', 90), submissionId: 'submission-a' },
+        { ...reviewFor('submission-b', 45), submissionId: 'submission-b' },
+      ]);
     const upsertReviewSummationSpy = jest
       .spyOn(service as any, 'upsertReviewSummation')
       .mockResolvedValue(undefined);
@@ -893,6 +915,22 @@ describe('ScoringResultService', () => {
         reviewSummation: [reviewFor('submission-other', 80)],
       },
     ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        {
+          ...reviewFor('submission-newer', 100),
+          submissionId: 'submission-newer',
+        },
+        {
+          ...reviewFor('submission-old-pending', 50, true),
+          submissionId: 'submission-old-pending',
+        },
+        {
+          ...reviewFor('submission-other', 80),
+          submissionId: 'submission-other',
+        },
+      ]);
     const upsertReviewSummationSpy = jest
       .spyOn(service as any, 'upsertReviewSummation')
       .mockResolvedValue(undefined);
@@ -989,6 +1027,22 @@ describe('ScoringResultService', () => {
       },
     ]);
     jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-visible-latest',
+          aggregateScore: 100,
+          isFinal: true,
+          metadata: {
+            testScores: [{ testcase: '753388858', score: 100 }],
+            testStatus: ScoringTestStatus.Success,
+            testType: 'system',
+          },
+          scorecardId: 'scorecard-1',
+          submissionId: 'submission-visible-latest',
+        },
+      ]);
+    jest
       .spyOn(service as any, 'findExistingReviewSummations')
       .mockResolvedValue([
         {
@@ -1055,6 +1109,129 @@ describe('ScoringResultService', () => {
       'system',
       expect.objectContaining({
         submissionId: 'submission-hidden-pending',
+      }),
+    );
+  });
+
+  it('normalizes queued system scores against Review API hydrated latest submissions', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    jest
+      .spyOn(service as any, 'withRelativeScoringLock')
+      .mockImplementation(
+        async (
+          _challengeId: string,
+          _testPhase: string,
+          work: () => Promise<unknown>,
+        ) => work(),
+      );
+    jest
+      .spyOn(service as any, 'resolveScorecardId')
+      .mockResolvedValue('scorecard-1');
+    jest.spyOn(service as any, 'fetchChallengeSubmissions').mockResolvedValue([
+      {
+        id: 'submission-current',
+        memberId: 'member-current',
+        isLatest: true,
+        submittedDate: '2026-05-01T00:00:02.000Z',
+        reviewSummation: [],
+      },
+      {
+        id: 'submission-other',
+        memberId: 'member-other',
+        isLatest: true,
+        submittedDate: '2026-05-01T00:00:03.000Z',
+        reviewSummation: [],
+      },
+    ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-current',
+          aggregateScore: 0,
+          isFinal: true,
+          metadata: {
+            relativeScoringPending: true,
+            testScores: [{ testcase: '753388858', score: 50 }],
+            testStatus: ScoringTestStatus.InProgress,
+            testType: 'system',
+          },
+          scorecardId: 'scorecard-1',
+          submissionId: 'submission-current',
+        },
+        {
+          id: 'summation-other',
+          aggregateScore: 100,
+          isFinal: true,
+          metadata: {
+            testScores: [{ testcase: '753388858', score: 100 }],
+            testStatus: ScoringTestStatus.Success,
+            testType: 'system',
+          },
+          scorecardId: 'scorecard-1',
+          submissionId: 'submission-other',
+        },
+      ]);
+    const upsertReviewSummationSpy = jest
+      .spyOn(service as any, 'upsertReviewSummation')
+      .mockResolvedValue(undefined);
+    const completeSystemReviewIfNeededSpy = jest
+      .spyOn(service as any, 'completeSystemReviewIfNeeded')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'notifyScoringCompletionEmailIfReady')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.recomputeQueuedRelativeScoring({
+        challengeId: basePayload.challengeId,
+        submissionId: 'submission-current',
+        reviewId: 'review-current',
+        testPhase: 'system',
+        reviewTypeId: basePayload.reviewTypeId,
+        scorecardId: 'scorecard-1',
+        queuedAt: '2026-05-01T00:00:10.000Z',
+      }),
+    ).resolves.toBe(undefined);
+
+    const currentPayload = upsertReviewSummationSpy.mock.calls.find(
+      ([, , payload]) =>
+        (payload as { submissionId: string }).submissionId ===
+        'submission-current',
+    )?.[2] as
+      | {
+          aggregateScore: number;
+          metadata?: { relativeScores?: Array<{ score: number }> };
+        }
+      | undefined;
+
+    expect(currentPayload).toEqual(
+      expect.objectContaining({
+        aggregateScore: 50,
+        isPassing: true,
+        submissionId: 'submission-current',
+      }),
+    );
+    expect(currentPayload?.metadata?.relativeScores).toEqual([
+      { testcase: '1', score: 50 },
+    ]);
+    expect(completeSystemReviewIfNeededSpy).toHaveBeenCalledWith(
+      'm2m-token',
+      'review-current',
+      50,
+      'system',
+      expect.objectContaining({
+        submissionId: 'submission-current',
       }),
     );
   });
@@ -1147,6 +1324,20 @@ describe('ScoringResultService', () => {
           memberId: 'member-b',
           submittedDate: '2026-05-01T00:00:01.000Z',
           reviewSummation: [],
+        },
+      ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'review-a',
+          isProvisional: true,
+          metadata: {
+            testType: 'provisional',
+            testScores: [{ testcase: '1', score: 90 }],
+          },
+          submissionId: 'submission-a',
         },
       ]);
     const upsertReviewSummationSpy = jest
@@ -2147,6 +2338,9 @@ describe('ScoringResultService', () => {
     const upsertReviewSummationSpy = jest
       .spyOn(service as any, 'upsertReviewSummation')
       .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([]);
 
     httpService.get
       .mockReturnValueOnce(
@@ -2913,6 +3107,38 @@ describe('ScoringResultService', () => {
         memberId: 'member-tsegaye',
       },
     ]);
+    jest
+      .spyOn(service as any, 'fetchChallengeReviewSummations')
+      .mockResolvedValue([
+        {
+          ...reviewFor('submission-ghost', 100),
+          submissionId: 'submission-ghost',
+        },
+        {
+          ...reviewFor('submission-vdave', 88.33507138754184),
+          submissionId: 'submission-vdave',
+        },
+        {
+          ...reviewFor('submission-bitrelica', 79.5106923255694),
+          submissionId: 'submission-bitrelica',
+        },
+        {
+          ...reviewFor('submission-kazaward', 0.004946668727778636),
+          submissionId: 'submission-kazaward',
+        },
+        {
+          ...reviewFor('submission-eulerschez', 0.004946668727778636),
+          submissionId: 'submission-eulerschez',
+        },
+        {
+          ...reviewFor('submission-shxzhaosr', 0),
+          submissionId: 'submission-shxzhaosr',
+        },
+        {
+          ...reviewFor('submission-failed', -1),
+          submissionId: 'submission-failed',
+        },
+      ]);
     const upsertReviewSummationSpy = jest
       .spyOn(service as any, 'upsertReviewSummation')
       .mockResolvedValue(undefined);
@@ -3234,6 +3460,55 @@ describe('ScoringResultService', () => {
         rawTestScores: [expect.objectContaining({ score: 100 })],
       }),
     );
+  });
+
+  it('does not use an older scored summation when the latest submission has no phase score', () => {
+    const { service } = createService();
+    const selectLatestRelativeReviewRecords = (
+      service as any
+    ).selectLatestRelativeReviewRecords.bind(service) as (
+      submissions: Record<string, unknown>[],
+      testPhase: string,
+      reviewTypeId: string,
+      excludedSubmissionId: string,
+      excludedMemberId?: string,
+    ) => Array<{
+      submissionId: string;
+      rawTestScores: Array<{ score: number }>;
+    }>;
+
+    const records = selectLatestRelativeReviewRecords(
+      [
+        {
+          id: 'latest-unscored-submission',
+          memberId: 'member-1',
+          isLatest: true,
+          submittedDate: '2026-05-28T15:23:32.877Z',
+          reviewSummation: [],
+        },
+        {
+          id: 'older-scored-submission',
+          memberId: 'member-1',
+          isLatest: false,
+          submittedDate: '2026-05-28T15:21:12.605Z',
+          reviewSummation: [
+            {
+              id: 'older-scored-review',
+              isFinal: true,
+              metadata: {
+                testType: 'system',
+                testScores: [{ testcase: '753388858', score: 100 }],
+              },
+            },
+          ],
+        },
+      ],
+      'system',
+      basePayload.reviewTypeId,
+      'current-submission',
+    );
+
+    expect(records).toEqual([]);
   });
 
   it('groups relative reviews by extracted submission ID and member identity', () => {

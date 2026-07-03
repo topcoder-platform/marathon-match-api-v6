@@ -112,7 +112,7 @@ Relative scoring applies when:
 - `relativeScoringEnabled = true` on the Marathon Match config
 - `testScores` are present in the scorer metadata
 
-In that case, `ScoringResultService` writes the raw callback result as a pending, non-passing placeholder, then queues a pg-boss relative scoring recomputation. The worker recalculates latest-submission review scores relative to the current best result, updates the persisted aggregate scores, and keeps existing `reviewedDate` values so relative-score updates do not move historical review timestamps. A worker pass also finalizes visible `relativeScoringPending` placeholders that are not selected as the latest member submission, and fetches the queued callback submission's review summation directly from Review API so completed reruns do not remain in progress.
+In that case, `ScoringResultService` writes the raw callback result as a pending, non-passing placeholder, then queues a pg-boss relative scoring recomputation. The worker selects the latest submission for each member from submission-api, hydrates the phase review summation metadata directly from Review API, recalculates review scores relative to the current best raw testcase results, updates the persisted aggregate scores, and keeps existing `reviewedDate` values so relative-score updates do not move historical review timestamps. A worker pass also finalizes visible `relativeScoringPending` placeholders that are not selected as the latest member submission, and fetches the queued callback submission's review summation directly from Review API so completed reruns do not remain in progress. If no latest-submission baseline has usable raw `testScores`, the job retries instead of writing a self-normalized score.
 
 ## Tester-change rerun
 
