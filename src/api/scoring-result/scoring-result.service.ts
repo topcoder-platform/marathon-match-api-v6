@@ -1225,6 +1225,7 @@ export class ScoringResultService {
           reviewTypeId,
           fallbackScorecardId,
           lockedSettings,
+          submissionId,
         ),
     );
 
@@ -1352,6 +1353,8 @@ export class ScoringResultService {
    * @param reviewTypeId Review type identifier to preserve in normalized metadata.
    * @param fallbackScorecardId Scorecard ID resolved from callback/config data.
    * @param settings Relative scoring configuration for the challenge.
+   * @param callbackSubmissionId Submission from the queued callback; its pending
+   * summation is fetched directly so reruns for non-listed submissions finalize.
    * @returns Recomputed relative review payloads that were written.
    * @throws Error when submission-api or review-api calls fail.
    */
@@ -1361,6 +1364,7 @@ export class ScoringResultService {
     reviewTypeId: string,
     fallbackScorecardId: string | undefined,
     settings: Required<RelativeScoringSettings>,
+    callbackSubmissionId?: string,
   ): Promise<RelativeReviewPayload[]> {
     const submissions = await this.fetchChallengeSubmissions(
       token,
@@ -1379,9 +1383,26 @@ export class ScoringResultService {
       testPhase,
       reviewTypeId,
     );
-    const reviewRecords = this.mergeRelativeReviewRecords(
+    const visibleReviewRecords = this.mergeRelativeReviewRecords(
       latestReviewRecords,
       pendingReviewRecords,
+    );
+    const callbackPendingReviewRecords =
+      this.hasRelativeReviewRecordForSubmission(
+        visibleReviewRecords,
+        callbackSubmissionId,
+      )
+        ? []
+        : await this.fetchPendingRelativeReviewRecordsForSubmission(
+            token,
+            submissions,
+            testPhase,
+            reviewTypeId,
+            callbackSubmissionId,
+          );
+    const reviewRecords = this.mergeRelativeReviewRecords(
+      visibleReviewRecords,
+      callbackPendingReviewRecords,
     );
 
     if (reviewRecords.length === 0) {
@@ -2661,6 +2682,87 @@ export class ScoringResultService {
     }
 
     return pendingRecords;
+  }
+
+  /**
+   * Fetches pending relative-scoring placeholders for the queued callback
+   * submission directly from Review API. This covers reruns whose submission is
+   * not present, or not expanded with metadata, in the challenge submission list.
+   * @param token M2M token for review-api.
+   * @param challengeSubmissions Submission records already fetched for context.
+   * @param testPhase Requested scoring phase.
+   * @param reviewTypeId Review type identifier to preserve in normalized metadata.
+   * @param callbackSubmissionId Submission ID carried by the recompute job.
+   * @returns Recomputable pending review records for the callback submission.
+   */
+  private async fetchPendingRelativeReviewRecordsForSubmission(
+    token: string,
+    challengeSubmissions: Record<string, unknown>[],
+    testPhase: string,
+    reviewTypeId: string,
+    callbackSubmissionId?: string,
+  ): Promise<RelativeReviewRecord[]> {
+    const submissionId = this.asString(callbackSubmissionId);
+    if (!submissionId) {
+      return [];
+    }
+
+    const submission = challengeSubmissions.find(
+      (entry) => this.extractSubmissionId(entry) === submissionId,
+    );
+    const reviewSummations = await this.findExistingReviewSummations(
+      token,
+      submissionId,
+      testPhase,
+    );
+    const pendingRecords: RelativeReviewRecord[] = [];
+
+    for (const reviewObject of reviewSummations) {
+      const metadata = this.asRecord(reviewObject.metadata);
+      if (this.parseBooleanFlag(metadata.relativeScoringPending) !== true) {
+        continue;
+      }
+
+      const pendingRecord = this.buildRelativeReviewRecord({
+        createdAt: submission
+          ? this.resolveSubmissionDate(submission)
+          : undefined,
+        memberKey: submission
+          ? (this.extractSubmissionMemberKey(submission) ??
+            `submission:${submissionId}`)
+          : `submission:${submissionId}`,
+        reviewObject,
+        reviewTypeId,
+        submissionId,
+        testPhase,
+      });
+
+      if (pendingRecord) {
+        pendingRecords.push(pendingRecord);
+      }
+    }
+
+    return pendingRecords;
+  }
+
+  /**
+   * Checks whether a recompute record set already includes one submission.
+   * @param reviewRecords Candidate relative review records.
+   * @param submissionId Submission ID to find.
+   * @returns True when the submission is already represented.
+   */
+  private hasRelativeReviewRecordForSubmission(
+    reviewRecords: RelativeReviewRecord[],
+    submissionId?: string,
+  ): boolean {
+    const normalizedSubmissionId = this.asString(submissionId);
+    if (!normalizedSubmissionId) {
+      return false;
+    }
+
+    return reviewRecords.some(
+      (reviewRecord) => reviewRecord.submissionId === normalizedSubmissionId,
+    );
   }
 
   /**
