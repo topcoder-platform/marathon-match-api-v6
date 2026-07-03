@@ -293,7 +293,10 @@ export class ScoringResultService {
     );
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      this.coalesceString(payload.scorecardId, config.reviewScorecardId),
+      this.coalesceString(
+        payload.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
 
     const relativeScoringSettings = this.resolveRelativeScoringSettings(
@@ -547,7 +550,10 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      this.coalesceString(payload.scorecardId, config.reviewScorecardId),
+      this.coalesceString(
+        payload.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
     const metadata = this.withTestProgressMetadata(
       this.normalizeMetadata(
@@ -1208,7 +1214,10 @@ export class ScoringResultService {
 
     const fallbackScorecardId = await this.resolveScorecardId(
       token,
-      this.coalesceString(data.scorecardId, config.reviewScorecardId),
+      this.coalesceString(
+        data.scorecardId,
+        this.asString(config.reviewScorecardId),
+      ),
     );
     const lockedSettings: Required<RelativeScoringSettings> = {
       ...settings,

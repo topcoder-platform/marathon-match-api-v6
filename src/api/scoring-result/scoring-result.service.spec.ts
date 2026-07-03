@@ -198,6 +198,7 @@ describe('ScoringResultService', () => {
         challengeId: true,
         name: true,
         submissionApiUrl: true,
+        reviewScorecardId: true,
         relativeScoringEnabled: true,
         scoreDirection: true,
       },
