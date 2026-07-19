@@ -108,6 +108,7 @@ public class EcsRunnerMain {
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
     private static final String COMPILATION_OUTPUT_METADATA_KEY = "compilationOutput";
+    private static final String MEMORY_LIMIT_ERROR_PREFIX = "MEMORY LIMIT EXCEEDED!";
     private static final String JAVA_SUBMISSION_RELEASE = "11";
     private static final String CXX_MARCH_FLAG = "-march=x86-64";
     private static final String CXX_MTUNE_FLAG = "-mtune=generic";
@@ -2018,20 +2019,21 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Appends generated public output while enforcing the configured byte cap.
+     * Streams generated public output while enforcing the configured byte cap.
      *
-     * @param target Destination buffer for {@code output.txt}.
+     * @param writer Destination writer for {@code output.txt}.
      * @param value Text to append.
      * @param currentBytes UTF-8 bytes already appended.
      * @param outputName Human-readable output label for errors.
      * @return Updated UTF-8 byte count after appending.
+     * @throws IOException When the output writer cannot be updated.
      */
     private static long appendLimitedOutput(
-        StringBuilder target,
+        BufferedWriter writer,
         String value,
         long currentBytes,
         String outputName
-    ) {
+    ) throws IOException {
         if (value == null || value.isEmpty()) {
             return currentBytes;
         }
@@ -2041,7 +2043,8 @@ public class EcsRunnerMain {
             value.getBytes(StandardCharsets.UTF_8).length,
             outputName
         );
-        target.append(value);
+        writer.write(value);
+        writer.flush();
         return nextBytes;
     }
 
@@ -4727,7 +4730,6 @@ public class EcsRunnerMain {
                 compileLogPath
             );
             String compilationOutput = readCompilationOutput(compileLogPath);
-            StringBuilder outputText = new StringBuilder();
             long outputBytes = 0L;
             grantScorerReadExecuteAccess(compileWorkDir);
 
@@ -4736,77 +4738,63 @@ public class EcsRunnerMain {
             double totalScore = 0.0;
             int failedTests = 0;
 
-            long endSeed = startSeed + numberOfTests - 1L;
-            for (long seed = startSeed; seed <= endSeed; seed++) {
-                int testCaseNumber = testScores.size() + 1;
-                resetScorerWritableStateForTestCase("before", testCaseNumber);
-                MarathonTestResult testResult;
-                try {
-                    testResult = controller.run(
-                        testerClassName,
-                        seed,
-                        compiledSubmission.getExecutionCommand(),
-                        timeLimitMs
+            try (BufferedWriter outputWriter = Files.newBufferedWriter(
+                outputPath,
+                StandardCharsets.UTF_8
+            )) {
+                long endSeed = startSeed + numberOfTests - 1L;
+                for (long seed = startSeed; seed <= endSeed; seed++) {
+                    int testCaseNumber = testScores.size() + 1;
+                    GenericTestCaseOutcome testCaseOutcome;
+                    try {
+                        resetScorerWritableStateForTestCase("before", testCaseNumber);
+                        MarathonTestResult testResult;
+                        try {
+                            testResult = controller.run(
+                                testerClassName,
+                                seed,
+                                compiledSubmission.getExecutionCommand(),
+                                timeLimitMs
+                            );
+                        } finally {
+                            resetScorerWritableStateForTestCase("after", testCaseNumber);
+                        }
+
+                        testCaseOutcome = buildGenericTestCaseOutcome(
+                            testCaseNumber,
+                            seed,
+                            testResult,
+                            stdoutArtifactsDir,
+                            stderrArtifactsDir,
+                            outputWriter,
+                            outputBytes
+                        );
+                    } catch (OutOfMemoryError error) {
+                        testCaseOutcome = buildMemoryLimitTestCaseOutcome(
+                            testCaseNumber,
+                            seed,
+                            timeLimitMs,
+                            outputWriter,
+                            outputBytes,
+                            error
+                        );
+                    }
+
+                    outputBytes = testCaseOutcome.getOutputBytes();
+                    totalScore += testCaseOutcome.getScore();
+                    if (testCaseOutcome.isFailed()) {
+                        failedTests += 1;
+                    }
+                    testScores.add(testCaseOutcome.getSeedResult());
+
+                    emitIsolatedTesterProgress(
+                        testScores.size(),
+                        numberOfTests,
+                        failedTests,
+                        TEST_STATUS_IN_PROGRESS,
+                        "Completed test " + testCaseNumber + " of " + numberOfTests
                     );
-                } finally {
-                    resetScorerWritableStateForTestCase("after", testCaseNumber);
                 }
-
-                double seedScore = testResult.getScore();
-                String seedError = testResult.getError();
-                writeSeedOutputArtifact(
-                    stdoutArtifactsDir,
-                    seed,
-                    testResult.getStdout()
-                );
-                writeSeedOutputArtifact(
-                    stderrArtifactsDir,
-                    seed,
-                    testResult.getStderr()
-                );
-                String scoreValidationError = validateScoreValue(
-                    seedScore,
-                    "Test Case #" + testCaseNumber + " score"
-                );
-                if (scoreValidationError != null) {
-                    logWarn("tester.score", scoreValidationError);
-                    seedScore = FAILED_TEST_SCORE;
-                    seedError = appendErrorMessage(seedError, scoreValidationError);
-                }
-                totalScore += seedScore;
-                if (seedScore < 0 || (seedError != null && !seedError.trim().isEmpty())) {
-                    failedTests += 1;
-                }
-
-                Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
-                seedResult.put("testcase", Integer.toString(testCaseNumber));
-                seedResult.put("seed", seed);
-                seedResult.put("score", seedScore);
-                seedResult.put("runTimeMs", testResult.getRunTime());
-                seedResult.put("error", seedError);
-                testScores.add(seedResult);
-
-                outputBytes = appendLimitedOutput(
-                    outputText,
-                    buildMemberVisibleTestOutput(
-                        testCaseNumber,
-                        seed,
-                        seedScore,
-                        testResult.getRunTime(),
-                        seedError,
-                        testResult.getStderr()
-                    ),
-                    outputBytes,
-                    "artifacts/public/output.txt"
-                );
-
-                emitIsolatedTesterProgress(
-                    testScores.size(),
-                    numberOfTests,
-                    failedTests,
-                    TEST_STATUS_IN_PROGRESS,
-                    "Completed test " + testCaseNumber + " of " + numberOfTests
-                );
             }
 
             double averageScore = testScores.isEmpty()
@@ -4819,13 +4807,6 @@ public class EcsRunnerMain {
             if (averageScoreValidationError != null) {
                 logWarn("tester.score", averageScoreValidationError);
                 averageScore = FAILED_TEST_SCORE;
-            }
-
-            try (BufferedWriter writer = Files.newBufferedWriter(
-                outputPath,
-                StandardCharsets.UTF_8
-            )) {
-                writer.write(outputText.toString());
             }
 
             Map<String, Object> metadata = new LinkedHashMap<String, Object>();
@@ -4852,6 +4833,223 @@ public class EcsRunnerMain {
     }
 
     /**
+     * Converts a raw Marathon seed result into runner artifacts, streamed output,
+     * and scoring metadata.
+     *
+     * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param seed Actual configured seed value for the testcase.
+     * @param testResult Result returned by the Marathon controller.
+     * @param stdoutArtifactsDir Private stdout artifact directory for per-seed diagnostics.
+     * @param stderrArtifactsDir Private stderr artifact directory for per-seed diagnostics.
+     * @param outputWriter Public output writer for {@code output.txt}.
+     * @param outputBytes UTF-8 bytes already appended to the public output accumulator.
+     * @return Finalized testcase outcome containing score metadata and the updated output byte count.
+     * @throws IOException When private seed output artifacts or public output cannot be written.
+     */
+    private static GenericTestCaseOutcome buildGenericTestCaseOutcome(
+        int testCaseNumber,
+        long seed,
+        MarathonTestResult testResult,
+        Path stdoutArtifactsDir,
+        Path stderrArtifactsDir,
+        BufferedWriter outputWriter,
+        long outputBytes
+    ) throws IOException {
+        double seedScore = testResult.getScore();
+        String seedError = testResult.getError();
+        long runTimeMs = testResult.getRunTime();
+        String stderr = testResult.getStderr();
+
+        writeSeedOutputArtifact(stdoutArtifactsDir, seed, testResult.getStdout());
+        writeSeedOutputArtifact(stderrArtifactsDir, seed, stderr);
+
+        String scoreValidationError = validateScoreValue(
+            seedScore,
+            "Test Case #" + testCaseNumber + " score"
+        );
+        if (scoreValidationError != null) {
+            logWarn("tester.score", scoreValidationError);
+            seedScore = FAILED_TEST_SCORE;
+            seedError = appendErrorMessage(seedError, scoreValidationError);
+        }
+
+        long updatedOutputBytes = appendLimitedOutput(
+            outputWriter,
+            buildMemberVisibleTestOutput(
+                testCaseNumber,
+                seed,
+                seedScore,
+                runTimeMs,
+                seedError,
+                stderr
+            ),
+            outputBytes,
+            "artifacts/public/output.txt"
+        );
+
+        return new GenericTestCaseOutcome(
+            seedScore,
+            isFailedGenericTest(seedScore, seedError),
+            buildSeedResult(testCaseNumber, seed, seedScore, runTimeMs, seedError),
+            updatedOutputBytes
+        );
+    }
+
+    /**
+     * Builds a compact failed testcase outcome after heap exhaustion during one seed.
+     *
+     * <p>The runner treats this the same as a timeout for scoring purposes: the
+     * current seed receives the Marathon failed-test score and the caller can continue
+     * with later seeds instead of losing system-test progress.
+     *
+     * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param seed Actual configured seed value for the testcase.
+     * @param timeLimitMs Configured timeout used as the synthetic runtime.
+     * @param outputWriter Public output writer for {@code output.txt}.
+     * @param outputBytes UTF-8 bytes already appended to the public output accumulator.
+     * @param error Heap exhaustion raised while running or recording the seed.
+     * @return Failed testcase outcome containing score metadata and the updated output byte count.
+     */
+    private static GenericTestCaseOutcome buildMemoryLimitTestCaseOutcome(
+        int testCaseNumber,
+        long seed,
+        long timeLimitMs,
+        BufferedWriter outputWriter,
+        long outputBytes,
+        OutOfMemoryError error
+    ) {
+        recoverAfterOutOfMemory();
+        String seedError = buildMemoryLimitErrorMessage(error);
+        logWarn(
+            "tester.memory-limit",
+            "Treating test case #"
+                + testCaseNumber
+                + " seed "
+                + seed
+                + " as failed after heap exhaustion: "
+                + safeLogValue(error == null ? null : error.getMessage())
+        );
+
+        long updatedOutputBytes = outputBytes;
+        try {
+            updatedOutputBytes = appendLimitedOutput(
+                outputWriter,
+                buildMemberVisibleTestOutput(
+                    testCaseNumber,
+                    seed,
+                    FAILED_TEST_SCORE,
+                    timeLimitMs,
+                    seedError,
+                    null
+                ),
+                outputBytes,
+                "artifacts/public/output.txt"
+            );
+        } catch (IOException appendError) {
+            logWarn(
+                "tester.memory-limit",
+                "Unable to append memory-limit output for test case #"
+                    + testCaseNumber
+                    + " seed "
+                    + seed
+                    + ": "
+                    + safeLogValue(appendError.getMessage())
+            );
+        } catch (OutOfMemoryError appendError) {
+            recoverAfterOutOfMemory();
+            logWarn(
+                "tester.memory-limit",
+                "Unable to append memory-limit output for test case #"
+                    + testCaseNumber
+                    + " seed "
+                    + seed
+                    + ": "
+                    + safeLogValue(appendError.getMessage())
+            );
+        }
+
+        return new GenericTestCaseOutcome(
+            FAILED_TEST_SCORE,
+            true,
+            buildSeedResult(
+                testCaseNumber,
+                seed,
+                FAILED_TEST_SCORE,
+                timeLimitMs,
+                seedError
+            ),
+            updatedOutputBytes
+        );
+    }
+
+    /**
+     * Creates the metadata entry recorded for one generic Marathon testcase.
+     *
+     * @param testCaseNumber Stable 1-based testcase ordinal shown to members.
+     * @param seed Actual configured seed value for the testcase.
+     * @param score Final score assigned to this seed.
+     * @param runTimeMs Runtime reported for the seed, or a synthetic timeout-like runtime.
+     * @param error Tester, validation, or runner error text for the seed.
+     * @return Ordered metadata map used in callback metadata and internal review artifacts.
+     */
+    private static Map<String, Object> buildSeedResult(
+        int testCaseNumber,
+        long seed,
+        double score,
+        long runTimeMs,
+        String error
+    ) {
+        Map<String, Object> seedResult = new LinkedHashMap<String, Object>();
+        seedResult.put("testcase", Integer.toString(testCaseNumber));
+        seedResult.put("seed", seed);
+        seedResult.put("score", score);
+        seedResult.put("runTimeMs", runTimeMs);
+        seedResult.put("error", error);
+        return seedResult;
+    }
+
+    /**
+     * Checks whether a generic Marathon testcase should count as failed.
+     *
+     * @param score Final score assigned to this seed.
+     * @param error Tester, validation, or runner error text for the seed.
+     * @return {@code true} when the seed has a negative score or non-empty error text.
+     */
+    private static boolean isFailedGenericTest(double score, String error) {
+        return score < 0 || (error != null && !error.trim().isEmpty());
+    }
+
+    /**
+     * Builds a member-visible memory-limit error message for a failed seed.
+     *
+     * @param error Heap exhaustion raised while running or recording the seed.
+     * @return Compact error text that avoids retaining large stderr/stdout content.
+     */
+    private static String buildMemoryLimitErrorMessage(OutOfMemoryError error) {
+        String detail = error == null ? null : error.getMessage();
+        if (detail == null || detail.trim().isEmpty()) {
+            return MEMORY_LIMIT_ERROR_PREFIX
+                + " Test case exceeded available memory and was scored as a timeout.";
+        }
+        return MEMORY_LIMIT_ERROR_PREFIX
+            + " Test case exceeded available memory and was scored as a timeout. "
+            + detail.trim();
+    }
+
+    /**
+     * Gives the JVM a chance to reclaim large per-seed buffers after heap exhaustion.
+     *
+     * <p>This method only performs best-effort recovery. If the JVM cannot allocate
+     * enough memory afterward, the next append or artifact write will still fail normally.
+     */
+    private static void recoverAfterOutOfMemory() {
+        try {
+            System.gc();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
      * Reads the compiler log that should be retained in metadata and private outputs.
      *
      * @param compileLogPath Public compile log written by compiler commands.
@@ -4874,7 +5072,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Writes a partial member-visible output file when the generic runner fails
+     * Writes or appends partial member-visible output when the generic runner fails
      * before normal score output can be finalized.
      *
      * @param outputPath Public {@code output.txt} artifact path.
@@ -4884,21 +5082,33 @@ public class EcsRunnerMain {
         Path outputPath,
         Throwable error
     ) {
-        if (outputPath == null || isNonSymlinkRegularFile(outputPath)) {
+        if (outputPath == null) {
             return;
         }
 
         try {
-            StringBuilder outputText = new StringBuilder();
-            appendLimitedOutput(
-                outputText,
-                "Runner Error:\n" + safeLogValue(error == null ? null : error.getMessage()) + "\n",
-                0L,
+            boolean outputExists = Files.exists(outputPath, LinkOption.NOFOLLOW_LINKS);
+            if (outputExists && !isNonSymlinkRegularFile(outputPath)) {
+                return;
+            }
+
+            byte[] outputBytes =
+                ("Runner Error:\n"
+                    + safeLogValue(error == null ? null : error.getMessage())
+                    + "\n").getBytes(StandardCharsets.UTF_8);
+            addOutputBytesWithLimit(
+                outputExists ? Files.size(outputPath) : 0L,
+                outputBytes.length,
                 "artifacts/public/output.txt"
             );
 
             Files.createDirectories(outputPath.getParent());
-            Files.write(outputPath, outputText.toString().getBytes(StandardCharsets.UTF_8));
+            Files.write(
+                outputPath,
+                outputBytes,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+            );
         } catch (Exception outputError) {
             logWarn(
                 "artifacts.public-output",
@@ -6395,6 +6605,75 @@ public class EcsRunnerMain {
                 return className;
             }
             return packageName + "." + className;
+        }
+    }
+
+    /**
+     * Final per-seed result produced by the generic Marathon runner.
+     *
+     * <p>The loop uses this object to update aggregate score, failed-test counts,
+     * callback metadata, and the public output byte counter after each seed. It
+     * also carries synthetic memory-limit outcomes produced when heap exhaustion
+     * is recovered at the seed boundary.
+     */
+    private static class GenericTestCaseOutcome {
+        private final double score;
+        private final boolean failed;
+        private final Map<String, Object> seedResult;
+        private final long outputBytes;
+
+        /**
+         * Creates finalized generic testcase output.
+         *
+         * @param score Final score assigned to this seed.
+         * @param failed Whether this seed should increment failed-test progress.
+         * @param seedResult Ordered metadata entry for callback and review artifacts.
+         * @param outputBytes UTF-8 bytes appended to the public output accumulator.
+         */
+        GenericTestCaseOutcome(
+            double score,
+            boolean failed,
+            Map<String, Object> seedResult,
+            long outputBytes
+        ) {
+            this.score = score;
+            this.failed = failed;
+            this.seedResult = seedResult == null
+                ? new LinkedHashMap<String, Object>()
+                : seedResult;
+            this.outputBytes = outputBytes;
+        }
+
+        /**
+         * Gets the final score assigned to this seed.
+         * @return Score included in the aggregate average.
+         */
+        double getScore() {
+            return score;
+        }
+
+        /**
+         * Checks whether this seed should count as failed in progress updates.
+         * @return {@code true} when the seed has failed or timeout-like outcome.
+         */
+        boolean isFailed() {
+            return failed;
+        }
+
+        /**
+         * Gets callback/review metadata for this seed.
+         * @return Ordered map containing testcase, seed, score, runtime, and error fields.
+         */
+        Map<String, Object> getSeedResult() {
+            return seedResult;
+        }
+
+        /**
+         * Gets the updated public output byte count.
+         * @return UTF-8 bytes appended to {@code artifacts/public/output.txt}.
+         */
+        long getOutputBytes() {
+            return outputBytes;
         }
     }
 
