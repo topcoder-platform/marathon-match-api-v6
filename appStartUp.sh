@@ -14,13 +14,13 @@ fi
 echo "Database - running migrations."
 if $RESET_DB; then
     echo "Resetting DB"
-    pnpm exec prisma migrate reset --force
+    node node_modules/prisma/build/index.js migrate reset --force
 else
     echo "Bootstrapping DB schema"
-    pnpm run db:migrate
+    node dist/prisma/migrate.js
 
     echo "Running migrations"
-    pnpm exec prisma migrate deploy
+    node node_modules/prisma/build/index.js migrate deploy
 fi
 
 # Start the app
