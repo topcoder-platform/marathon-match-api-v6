@@ -508,9 +508,18 @@ export class TesterCompilationService {
         MAVEN_OPTS: mavenOptsWithTmpDir,
       };
 
+      // Surefire forks a test JVM that does not inherit MAVEN_OPTS, so it
+      // needs the writable temp directory as a JVM startup argument as well.
       const child = spawn(
         this.mavenBinary,
-        ['clean', 'package', '-f', pomPath, '-q'],
+        [
+          'clean',
+          'package',
+          '-f',
+          pomPath,
+          '-q',
+          `-DargLine=-Djava.io.tmpdir=${compileTempDir}`,
+        ],
         {
           env: compileEnv,
         },
