@@ -2,6 +2,10 @@
 
 NestJS service for managing marathon match scorer configuration, compiling tester JARs, consuming submission events from Kafka, and launching ECS scoring tasks.
 
+## Development runtime
+
+Use Node.js 26.5.0 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+
 ## Service base path
 
 All HTTP endpoints are exposed under:
