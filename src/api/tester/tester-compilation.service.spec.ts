@@ -142,6 +142,27 @@ describe('TesterCompilationService', () => {
         '[ERROR] Tester.java:12: cannot find symbol\njavac failed with diagnostics',
       timedOut: false,
     });
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      'mvn',
+      [
+        'clean',
+        'package',
+        '-f',
+        '/tmp/project/pom.xml',
+        '-q',
+        '-DargLine=-Djava.io.tmpdir=/tmp/project',
+      ],
+      {
+        env: expect.objectContaining({
+          JANSI_MODE: 'off',
+          JANSI_TMPDIR: '/tmp/project',
+          TEMP: '/tmp/project',
+          TMP: '/tmp/project',
+          TMPDIR: '/tmp/project',
+          MAVEN_OPTS: expect.stringContaining('-Djava.io.tmpdir=/tmp/project'),
+        }),
+      },
+    );
   });
 
   it('reads the compiled jar when it contains the configured class', async () => {

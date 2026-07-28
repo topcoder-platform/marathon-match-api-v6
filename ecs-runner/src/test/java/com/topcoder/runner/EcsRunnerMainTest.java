@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -316,6 +317,74 @@ public class EcsRunnerMainTest {
     }
 
     @Test
+    public void buildMemoryLimitTestCaseOutcomeScoresSeedAsTimeout()
+        throws Exception {
+        Path outputPath = temporaryFolder.newFile("output.txt").toPath();
+        Method method = EcsRunnerMain.class.getDeclaredMethod(
+            "buildMemoryLimitTestCaseOutcome",
+            int.class,
+            long.class,
+            long.class,
+            BufferedWriter.class,
+            long.class,
+            OutOfMemoryError.class
+        );
+        method.setAccessible(true);
+
+        Object outcome;
+        try (BufferedWriter outputWriter = Files.newBufferedWriter(
+            outputPath,
+            StandardCharsets.UTF_8
+        )) {
+            outcome = method.invoke(
+                null,
+                2,
+                98765L,
+                1500L,
+                outputWriter,
+                0L,
+                new OutOfMemoryError("Java heap space")
+            );
+        }
+        Class<?> outcomeClass = getGenericTestCaseOutcomeClass();
+        Method getScore = outcomeClass.getDeclaredMethod("getScore");
+        Method isFailed = outcomeClass.getDeclaredMethod("isFailed");
+        Method getSeedResult = outcomeClass.getDeclaredMethod("getSeedResult");
+        Method getOutputBytes = outcomeClass.getDeclaredMethod("getOutputBytes");
+        getScore.setAccessible(true);
+        isFailed.setAccessible(true);
+        getSeedResult.setAccessible(true);
+        getOutputBytes.setAccessible(true);
+
+        assertEquals(-1.0, ((Number) getScore.invoke(outcome)).doubleValue(), 0.0);
+        assertTrue(((Boolean) isFailed.invoke(outcome)).booleanValue());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> seedResult =
+            (Map<String, Object>) getSeedResult.invoke(outcome);
+        assertEquals("2", seedResult.get("testcase"));
+        assertEquals(98765L, ((Number) seedResult.get("seed")).longValue());
+        assertEquals(
+            -1.0,
+            ((Number) seedResult.get("score")).doubleValue(),
+            0.0
+        );
+        assertEquals(1500L, ((Number) seedResult.get("runTimeMs")).longValue());
+        assertTrue(
+            ((String) seedResult.get("error")).contains("MEMORY LIMIT EXCEEDED!")
+        );
+        String outputText = new String(
+            Files.readAllBytes(outputPath),
+            StandardCharsets.UTF_8
+        );
+        assertTrue(outputText.contains("MEMORY LIMIT EXCEEDED!"));
+        assertEquals(
+            outputText.getBytes(StandardCharsets.UTF_8).length,
+            ((Number) getOutputBytes.invoke(outcome)).longValue()
+        );
+    }
+
+    @Test
     public void createDirectoryZipIncludesPerSeedStdoutAndStderrArtifacts()
         throws Exception {
         Path artifactsDir = createArtifactsDir();
@@ -554,6 +623,12 @@ public class EcsRunnerMainTest {
     private Class<?> getTesterExecutionResultClass() throws Exception {
         return Class.forName(
             "com.topcoder.runner.EcsRunnerMain$TesterExecutionResult"
+        );
+    }
+
+    private Class<?> getGenericTestCaseOutcomeClass() throws Exception {
+        return Class.forName(
+            "com.topcoder.runner.EcsRunnerMain$GenericTestCaseOutcome"
         );
     }
 
