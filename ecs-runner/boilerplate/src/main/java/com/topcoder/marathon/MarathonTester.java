@@ -13,6 +13,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,6 +33,7 @@ public abstract class MarathonTester {
 
     private long elapsedTime, timeLimit, lastStart;
     private final Object timeLock = new Object();
+    private final CountDownLatch timeoutHandlingComplete = new CountDownLatch(1);
     private final List<BufferedWriter> solInputWriters = new ArrayList<BufferedWriter>();
     private static final int maxSolutionOutputLength = 10_000_000;
     private static final long processDrainTimeoutMillis = 250;
@@ -47,7 +49,7 @@ public abstract class MarathonTester {
     private String errorMessage = "";
     private String lastLine = "";
     private StringBuilder executionErrors = new StringBuilder();
-    private boolean timeout;
+    private volatile boolean timeout;
     private boolean readFailed;
     private Thread lastTimeoutThread;
 
@@ -131,18 +133,24 @@ public abstract class MarathonTester {
 
     /**
      * Stops measuring submitted-solution execution time.
+     *
+     * <p>A watcher that has already recorded a timeout is allowed to finish
+     * process cleanup and the timeout callback. {@link #runTest()} waits for
+     * that work before returning.
      */
     protected final void stopTime() {
+        Thread timeoutThreadToInterrupt = null;
         synchronized (timeLock) {
             if (lastStart > 0) elapsedTime += System.nanoTime() - lastStart;
             lastStart = 0;
-            try {
-                if (lastTimeoutThread != null && lastTimeoutThread.isAlive()) {
-                    lastTimeoutThread.interrupt();
-                    lastTimeoutThread = null;
-                }
-            } catch (Exception e) {
+            if (!timeout && lastTimeoutThread != null && lastTimeoutThread.isAlive()) {
+                timeoutThreadToInterrupt = lastTimeoutThread;
             }
+            lastTimeoutThread = null;
+        }
+        try {
+            if (timeoutThreadToInterrupt != null) timeoutThreadToInterrupt.interrupt();
+        } catch (Exception e) {
         }
     }
 
@@ -154,7 +162,7 @@ public abstract class MarathonTester {
             score = getErrorScore();
             score = run();
             if (timeLimit > 0 && elapsedTime > timeLimit) {
-                if (recordTimeout(false)) timeout();
+                handleTimeout(false, false);
             }
             end();
         } catch (Exception e) {
@@ -172,6 +180,7 @@ public abstract class MarathonTester {
                 executionErrors.append(msg).append("\n");
             }
         }
+        if (timeout) awaitTimeoutHandling();
         if (timeout) {
             String msg = "TIMEOUT! Time limit of " + timeLimit / 1_000_000 + " ms exceeded.";
             System.out.println(msg);
@@ -199,14 +208,56 @@ public abstract class MarathonTester {
                 if (watchedProcess.waitFor(remainingTime, TimeUnit.NANOSECONDS)) return;
             }
 
-            if (recordTimeout(true)) {
-                terminateTimedOutProcess();
-                timeout();
-            }
+            handleTimeout(true, true);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
         }
+    }
+
+    /**
+     * Records and fully handles a timeout exactly once.
+     *
+     * <p>The winning caller optionally terminates the submitted process, invokes
+     * the concrete tester's timeout callback, and then releases
+     * {@link #runTest()}. The callback is invoked even if process cleanup fails.
+     *
+     * @param requireActiveInterval True when timeout should only be recorded if
+     *                              {@link #startTime()} is still active.
+     * @param terminateProcess True when the submitted process and its streams
+     *                         must be terminated before invoking the callback.
+     */
+    private void handleTimeout(boolean requireActiveInterval, boolean terminateProcess) {
+        if (!recordTimeout(requireActiveInterval)) return;
+
+        try {
+            if (terminateProcess) terminateTimedOutProcess();
+        } finally {
+            try {
+                timeout();
+            } finally {
+                timeoutHandlingComplete.countDown();
+            }
+        }
+    }
+
+    /**
+     * Waits uninterruptibly for process cleanup and the timeout callback to finish.
+     *
+     * <p>If interrupted while waiting, this method restores the calling thread's
+     * interrupted status after timeout handling completes.
+     */
+    private void awaitTimeoutHandling() {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                timeoutHandlingComplete.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
     }
 
     /**

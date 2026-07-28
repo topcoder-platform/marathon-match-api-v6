@@ -479,8 +479,12 @@ export class TesterCompilationService {
   }
 
   /**
-   * Runs Maven package for the prepared boilerplate project and captures
-   * combined stdout/stderr compiler output for user-facing failure details.
+   * Runs Maven package for the prepared boilerplate project without executing
+   * the boilerplate's own unit tests, and captures combined stdout/stderr
+   * compiler output for user-facing failure details.
+   *
+   * Harness tests run when the harness itself is verified; user tester
+   * packaging only needs to compile the copied harness and submitted source.
    * @param pomPath Absolute path to the temporary `pom.xml` file.
    * @param compileTempDir Writable temp directory used for Maven/JVM temp files.
    * @returns Compile result including exit code, combined compiler output, and timeout state.
@@ -508,8 +512,6 @@ export class TesterCompilationService {
         MAVEN_OPTS: mavenOptsWithTmpDir,
       };
 
-      // Surefire forks a test JVM that does not inherit MAVEN_OPTS, so it
-      // needs the writable temp directory as a JVM startup argument as well.
       const child = spawn(
         this.mavenBinary,
         [
@@ -518,7 +520,7 @@ export class TesterCompilationService {
           '-f',
           pomPath,
           '-q',
-          `-DargLine=-Djava.io.tmpdir=${compileTempDir}`,
+          '-DskipTests',
         ],
         {
           env: compileEnv,

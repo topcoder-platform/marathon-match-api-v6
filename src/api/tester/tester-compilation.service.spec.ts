@@ -150,7 +150,7 @@ describe('TesterCompilationService', () => {
         '-f',
         '/tmp/project/pom.xml',
         '-q',
-        '-DargLine=-Djava.io.tmpdir=/tmp/project',
+        '-DskipTests',
       ],
       {
         env: expect.objectContaining({
