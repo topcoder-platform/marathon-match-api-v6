@@ -17,7 +17,7 @@ services:
       - mm-network
 
   mm-zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
+    image: confluentinc/cp-zookeeper:7.5.0
     container_name: mm-zookeeper
     hostname: mm-zookeeper
     environment:
@@ -29,7 +29,7 @@ services:
       - mm-network
 
   mm-kafka:
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:7.5.0
     container_name: mm-kafka
     hostname: mm-kafka
     depends_on:
