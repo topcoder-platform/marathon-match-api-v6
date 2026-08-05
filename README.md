@@ -71,16 +71,31 @@ The service is configured via environment variables.
 | `KAFKA_SASL_USERNAME`                | No       | (unset)                            | SASL username (enables SASL when set)                                     |
 | `KAFKA_SASL_PASSWORD`                | No       | empty string                       | SASL password                                                             |
 | `KAFKA_CONNECTION_TIMEOUT`           | No       | `10000`                            | Kafka connect timeout (ms)                                                |
-| `KAFKA_REQUEST_TIMEOUT`              | No       | `30000`                            | Kafka request timeout (ms)                                                |
-| `KAFKA_MAXBYTES` / `KAFKA_MAX_BYTES` | No       | Kafka client default               | Consumer fetch max bytes (dev parity with review-api usage)               |
+| `KAFKA_REQUEST_TIMEOUT`              | No       | `30000`                            | Client-side deadline for an in-flight Kafka request (ms)                   |
+| `KAFKA_BROKER_TIMEOUT`               | No       | `5000`                             | Timeout sent to broker APIs that support one (ms)                         |
+| `KAFKA_SESSION_TIMEOUT`              | No       | `60000`                            | Consumer group session timeout (ms)                                       |
+| `KAFKA_HEARTBEAT_INTERVAL`           | No       | `3000`                             | Consumer group heartbeat interval (ms)                                    |
+| `KAFKA_MAXBYTES` / `KAFKA_MAX_BYTES` | No       | `10485760`                         | Consumer aggregate Fetch limit (10 MiB)                                   |
 | `KAFKA_MIN_BYTES`                    | No       | Kafka client default               | Consumer fetch minimum bytes                                              |
-| `KAFKA_MAX_WAIT_TIME`                | No       | Auto-derived from request timeout  | Consumer fetch max wait (ms)                                              |
+| `KAFKA_MAX_WAIT_TIME`                | No       | `5000`                             | Maximum time the broker may hold an idle Fetch request (ms)               |
 | `KAFKA_RETRY_ATTEMPTS`               | No       | `5`                                | Client reconnection retry count                                           |
 | `KAFKA_INITIAL_RETRY_TIME`           | No       | `100`                              | Initial retry delay (ms)                                                  |
 | `KAFKA_MAX_RETRY_TIME`               | No       | `30000`                            | Max exponential retry delay (ms)                                          |
 | `KAFKA_DLQ_ENABLED`                  | No       | `false`                            | Enable DLQ publishing after retry exhaustion                              |
 | `KAFKA_DLQ_TOPIC_SUFFIX`             | No       | `.dlq`                             | DLQ topic suffix                                                          |
 | `KAFKA_DLQ_MAX_RETRIES`              | No       | `3`                                | Per-message retries before DLQ                                            |
+
+Kafka access uses `@platformatic/kafka` 2.8.0. `KAFKA_REQUEST_TIMEOUT` must
+exceed both `KAFKA_BROKER_TIMEOUT` and `KAFKA_MAX_WAIT_TIME`, and
+`KAFKA_SESSION_TIMEOUT` must exceed the sum of `KAFKA_HEARTBEAT_INTERVAL` and
+`KAFKA_REQUEST_TIMEOUT`. Terminal consumer, producer, stream, and offset-commit
+errors move Kafka health to `reconnecting` and rebuild both clients. Reconnect
+delays use bounded jitter; exhausted attempts leave Kafka health as `failed`
+with the last error reason. Initial startup and every reconnect resume from the
+consumer group's committed offsets, falling back to the latest offset only when
+the group has no committed position. If an offset commit fails, the active
+processing loop stops before a later record from that partition can advance the
+committed position, and recovery rebuilds the stream.
 
 ### Scoring completion email notifications
 

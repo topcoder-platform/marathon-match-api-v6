@@ -76,6 +76,8 @@ sequenceDiagram
 
 Kafka consumption retries with exponential backoff. When `KAFKA_DLQ_ENABLED=true`, messages that still fail after `KAFKA_DLQ_MAX_RETRIES` are published to the configured DLQ topic suffix and the original offset is committed.
 
+Kafka access uses `@platformatic/kafka` 2.8.0 with a default 10 MiB aggregate Fetch limit. Initial startup and reconnects resume from committed consumer-group offsets, falling back to the latest offset only when no committed position exists. A failed offset commit stops the active processing loop before a later same-partition record can advance the committed position. Terminal consumer, producer, stream, and offset-commit errors rebuild both Kafka clients through the shared reconnect lifecycle; reconnect delays use bounded jitter and are reflected in the service health response.
+
 ## Scorer task launch limits
 
 Before each `RunTask`, `EcsService.launchScorerTask(...)` lists pending/running scorer tasks for the configured ECS task family. It skips duplicate active launches for the same challenge, submission, and phase config type; stops older active tasks for the same challenge/member when a newer submission arrives; and enforces `ECS_SCORER_MAX_CONCURRENT_TASKS` before launching another task. The cap defaults to `20`.

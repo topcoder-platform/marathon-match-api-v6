@@ -6,6 +6,7 @@ import {
 } from './kafka-consumer.service';
 import { KafkaHandlerRegistry } from './kafka-handler.registry';
 import registeredHandlersConfig from './handlers/registered-handlers.config';
+import { KAFKA_TIMING_DEFAULTS } from './kafka.constants';
 
 @Module({})
 export class KafkaModule {
@@ -55,17 +56,10 @@ export class KafkaModule {
       .map((broker) => broker.trim())
       .filter((broker) => broker.length > 0);
 
-    const connectionTimeout = this.parseNumberEnv(
-      process.env.KAFKA_CONNECTION_TIMEOUT,
-    );
-    const requestTimeout = this.parseNumberEnv(
-      process.env.KAFKA_REQUEST_TIMEOUT,
-    );
     const maxBytes =
       this.parseNumberEnv(process.env.KAFKA_MAXBYTES) ??
       this.parseNumberEnv(process.env.KAFKA_MAX_BYTES);
     const minBytes = this.parseNumberEnv(process.env.KAFKA_MIN_BYTES);
-    const maxWaitTime = this.parseNumberEnv(process.env.KAFKA_MAX_WAIT_TIME);
 
     const kafkaOptions: KafkaModuleOptions = {
       brokers:
@@ -82,11 +76,30 @@ export class KafkaModule {
             password: saslPassword,
           }
         : undefined,
-      connectionTimeout: connectionTimeout ?? 10000,
-      requestTimeout: requestTimeout ?? 30000,
+      connectionTimeout: Number(
+        process.env.KAFKA_CONNECTION_TIMEOUT ??
+          KAFKA_TIMING_DEFAULTS.connectionTimeout,
+      ),
+      requestTimeout: Number(
+        process.env.KAFKA_REQUEST_TIMEOUT ??
+          KAFKA_TIMING_DEFAULTS.requestTimeout,
+      ),
+      brokerTimeout: Number(
+        process.env.KAFKA_BROKER_TIMEOUT ?? KAFKA_TIMING_DEFAULTS.brokerTimeout,
+      ),
+      sessionTimeout: Number(
+        process.env.KAFKA_SESSION_TIMEOUT ??
+          KAFKA_TIMING_DEFAULTS.sessionTimeout,
+      ),
+      heartbeatInterval: Number(
+        process.env.KAFKA_HEARTBEAT_INTERVAL ??
+          KAFKA_TIMING_DEFAULTS.heartbeatInterval,
+      ),
       maxBytes,
       minBytes,
-      maxWaitTime,
+      maxWaitTime: Number(
+        process.env.KAFKA_MAX_WAIT_TIME ?? KAFKA_TIMING_DEFAULTS.maxWaitTime,
+      ),
       retry: {
         retries: parseInt(process.env.KAFKA_RETRY_ATTEMPTS || '5'),
         initialRetryTime: parseInt(
