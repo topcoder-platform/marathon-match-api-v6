@@ -1,13 +1,16 @@
 package com.topcoder.scorer.services;
 
+import org.apache.http.Header;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -20,6 +23,7 @@ import java.util.zip.ZipInputStream;
  * Service used by ECS runner to read and download submissions from submission-api.
  */
 public class SubmissionService {
+    private static final int MAX_DOWNLOAD_REDIRECTS = 5;
     private static final int RESPONSE_BODY_PREVIEW_LIMIT = 4000;
     private final CloseableHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -90,7 +94,9 @@ public class SubmissionService {
 
     /**
      * Downloads a submission zip from an explicit URL and extracts it to the target directory.
-     * @param url Absolute URL returning the submission ZIP.
+     * Redirects are followed manually so the API bearer token is used only for the initial
+     * authorized request and is not forwarded to a presigned storage URL.
+     * @param url Absolute URL returning the submission ZIP or a redirect to it.
      * @param targetDir Directory to extract the submission to.
      * @param submissionId Submission or validation-run ID for contextual logs.
      * @throws Exception if download or extraction fails.
@@ -100,8 +106,6 @@ public class SubmissionService {
         String targetDir,
         String submissionId
     ) throws Exception {
-        HttpGet get = new HttpGet(url);
-        get.setHeader("Authorization", "Bearer " + accessToken);
         logInfo(submissionId, "GET " + url + " (submission zip download)");
         logInfo(
             submissionId,
@@ -111,40 +115,176 @@ public class SubmissionService {
                     : accessToken.substring(0, Math.min(12, accessToken.length())) + "...")
         );
 
-        try (CloseableHttpResponse response = httpClient.execute(get)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            logInfo(submissionId, "Download response status: HTTP " + statusCode);
-            if (statusCode != 200) {
-                String responseBody = readResponseBody(response);
-                logError(
+        String requestUrl = url;
+        boolean includeAuthorization = true;
+        int redirectCount = 0;
+        while (true) {
+            HttpGet get = new HttpGet(requestUrl);
+            get.setConfig(
+                RequestConfig.custom().setRedirectsEnabled(false).build()
+            );
+            if (includeAuthorization) {
+                get.setHeader("Authorization", "Bearer " + accessToken);
+            }
+
+            try (CloseableHttpResponse response = httpClient.execute(get)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                logInfo(submissionId, "Download response status: HTTP " + statusCode);
+                if (isRedirectStatus(statusCode)) {
+                    if (redirectCount >= MAX_DOWNLOAD_REDIRECTS) {
+                        throw new RuntimeException(
+                            "Failed to download submission zip: exceeded "
+                                + MAX_DOWNLOAD_REDIRECTS
+                                + " redirects."
+                        );
+                    }
+
+                    Header location = response.getFirstHeader("Location");
+                    if (location == null || location.getValue().trim().isEmpty()) {
+                        throw new RuntimeException(
+                            "Failed to download submission zip: HTTP "
+                                + statusCode
+                                + " redirect is missing the Location header."
+                        );
+                    }
+
+                    URI redirectUri = resolveRedirectUri(
+                        get.getURI(),
+                        location.getValue(),
+                        statusCode
+                    );
+                    includeAuthorization = includeAuthorization
+                        && isSameOrigin(get.getURI(), redirectUri);
+                    requestUrl = redirectUri.toString();
+                    redirectCount += 1;
+                    logInfo(
+                        submissionId,
+                        "Following submission download redirect "
+                            + redirectCount
+                            + "/"
+                            + MAX_DOWNLOAD_REDIRECTS
+                            + (includeAuthorization
+                                ? " on the authenticated API origin."
+                                : " without the Authorization header.")
+                    );
+                    continue;
+                }
+
+                if (statusCode != 200) {
+                    String responseBody = readResponseBody(response);
+                    logError(
+                        submissionId,
+                        "Download failed: HTTP "
+                            + statusCode
+                            + ", body="
+                            + truncate(responseBody, RESPONSE_BODY_PREVIEW_LIMIT),
+                        null
+                    );
+                    throw new RuntimeException(
+                        "Failed to download submission zip: HTTP "
+                            + statusCode
+                            + ", body="
+                            + responseBody
+                    );
+                }
+
+                if (response.getEntity() == null) {
+                    throw new RuntimeException("Submission zip response body is empty.");
+                }
+
+                try (InputStream zipStream = response.getEntity().getContent()) {
+                    unzip(zipStream, targetDir, submissionId);
+                }
+
+                logInfo(
                     submissionId,
-                    "Download failed: HTTP "
-                        + statusCode
-                        + ", body="
-                        + truncate(responseBody, RESPONSE_BODY_PREVIEW_LIMIT),
-                    null
+                    "Submission zip extracted successfully to " + targetDir
                 );
-                throw new RuntimeException(
-                    "Failed to download submission zip: HTTP "
-                        + statusCode
-                        + ", body="
-                        + responseBody
-                );
+                return;
             }
+        }
+    }
 
-            if (response.getEntity() == null) {
-                throw new RuntimeException("Submission zip response body is empty.");
-            }
+    /**
+     * Determines whether an HTTP status represents a redirect supported for a GET download.
+     * @param statusCode HTTP response status.
+     * @return True for permanent or temporary redirect statuses.
+     */
+    private boolean isRedirectStatus(int statusCode) {
+        return statusCode == 301
+            || statusCode == 302
+            || statusCode == 303
+            || statusCode == 307
+            || statusCode == 308;
+    }
 
-            try (InputStream zipStream = response.getEntity().getContent()) {
-                unzip(zipStream, targetDir, submissionId);
-            }
-
-            logInfo(
-                submissionId,
-                "Submission zip extracted successfully to " + targetDir
+    /**
+     * Resolves and validates a submission download redirect without logging its signed query.
+     * @param requestUri URI that returned the redirect.
+     * @param location Location header value.
+     * @param statusCode Redirect response status used in failure context.
+     * @return Absolute HTTP or HTTPS redirect URI.
+     * @throws RuntimeException when the Location is invalid, unsupported, or downgrades HTTPS.
+     */
+    private URI resolveRedirectUri(URI requestUri, String location, int statusCode) {
+        final URI redirectUri;
+        try {
+            redirectUri = requestUri.resolve(location.trim());
+        } catch (IllegalArgumentException error) {
+            throw new RuntimeException(
+                "Failed to download submission zip: HTTP "
+                    + statusCode
+                    + " returned an invalid Location header.",
+                error
             );
         }
+
+        String scheme = redirectUri.getScheme();
+        if (
+            scheme == null
+                || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+                || redirectUri.getHost() == null
+                || redirectUri.getUserInfo() != null
+        ) {
+            throw new RuntimeException(
+                "Failed to download submission zip: HTTP "
+                    + statusCode
+                    + " returned an unsupported Location header."
+            );
+        }
+        if (
+            "https".equalsIgnoreCase(requestUri.getScheme())
+                && !"https".equalsIgnoreCase(scheme)
+        ) {
+            throw new RuntimeException(
+                "Failed to download submission zip: refusing an HTTPS downgrade redirect."
+            );
+        }
+        return redirectUri;
+    }
+
+    /**
+     * Determines whether two HTTP URIs share a scheme, host, and effective port.
+     * @param first First URI.
+     * @param second Second URI.
+     * @return True when credentials may remain scoped to the same origin.
+     */
+    private boolean isSameOrigin(URI first, URI second) {
+        return first.getScheme().equalsIgnoreCase(second.getScheme())
+            && first.getHost().equalsIgnoreCase(second.getHost())
+            && effectivePort(first) == effectivePort(second);
+    }
+
+    /**
+     * Returns an explicit port or the default port for a validated HTTP URI.
+     * @param uri Validated HTTP or HTTPS URI.
+     * @return Effective network port.
+     */
+    private int effectivePort(URI uri) {
+        if (uri.getPort() >= 0) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     /**

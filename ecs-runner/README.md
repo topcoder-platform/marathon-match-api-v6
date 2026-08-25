@@ -18,7 +18,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 ## Isolation model
 
 - The container entrypoint starts as `root`. Do not override the ECS task-definition `user` for this container; root is needed for trusted bootstrap work and for preparing runner-owned files before the child JVM starts.
-- The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback.
+- The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback. Submission downloads authenticate the initial API request, then follow short-lived signed-storage redirects without forwarding the API bearer token across origins.
 - The tester executes in a separate child JVM launched through `mm-runner-isolate` as uid/gid `10001` (`runner`) with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
 - Generic submitted solution commands execute through the setuid-root `mm-scorer-isolate` bridge as uid/gid `10002` (`scorer`). The bridge drops its supervisor back to the invoking `runner` uid after it forks the solution child, retaining only `CAP_KILL` so tester timeouts can still terminate the lower-privilege solution process group.
 - Downloaded tester JARs are mode `0400` runner-owned files. The serialized scorer config starts as a mode `0400` runner-owned handoff file and the child JVM deletes it immediately after loading it, before tester or submitted solution code executes.
