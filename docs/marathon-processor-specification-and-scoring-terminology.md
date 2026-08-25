@@ -111,6 +111,12 @@ Compile and test timeouts are configured per Marathon Match challenge.
 - `compileTimeout` controls submission compilation timeout.
 - For Java submissions, `compileTimeout` also covers class startup and static
   initializer checks performed after `javac`.
+- The ECS runner enforces `compileTimeout` plus an internal 10 second buffer.
+  Fargate does not guarantee an exact platform for every task, so a submission
+  that compiles just inside the configured limit during provisional testing
+  could otherwise fail compilation during system testing. Compile artifacts and
+  run metadata keep reporting the configured `compileTimeout`, which is the
+  limit announced to members.
 - `testTimeout` controls the per-seed measured submitted-solution execution timeout. Runner setup, initial tester input writes, and artifact IO before the tester starts its timed section are outside this limit; a timed-out seed reports the configured limit as its runtime.
 - `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 - `POST /v6/marathon-match/challenge/:challengeId/rerun/system` restarts existing non-cancelled SYSTEM reviews with the current `testTimeout`, `systemTestTimeout`, SYSTEM seed, and SYSTEM test count settings.
