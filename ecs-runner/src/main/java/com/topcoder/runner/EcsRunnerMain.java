@@ -106,6 +106,7 @@ public class EcsRunnerMain {
         TimeUnit.SECONDS.toNanos(5);
     private static final int DEFAULT_TEST_TIMEOUT_MS = 10000;
     private static final int DEFAULT_COMPILE_TIMEOUT_MS = 30000;
+    private static final int COMPILE_TIMEOUT_BUFFER_MS = 10000;
     private static final String GENERIC_SOLUTION_BASE_NAME = "Solution";
     private static final String COMPILATION_OUTPUT_METADATA_KEY = "compilationOutput";
     private static final String MEMORY_LIMIT_ERROR_PREFIX = "MEMORY LIMIT EXCEEDED!";
@@ -5958,9 +5959,14 @@ public class EcsRunnerMain {
     /**
      * Executes a compiler command with timeout and appends compiler output to an artifact log.
      *
+     * <p>The command is allowed to run for {@link #COMPILE_TIMEOUT_BUFFER_MS} longer than
+     * {@code timeoutMs} so Fargate platform variance cannot fail a submission during system
+     * testing that already compiled during provisional testing. Member-visible messages keep
+     * reporting the announced {@code timeoutMs} value.
+     *
      * @param command Command and arguments.
      * @param workDir Working directory for the compiler process.
-     * @param timeoutMs Timeout in milliseconds.
+     * @param timeoutMs Announced compile timeout in milliseconds.
      * @param failureContext Message prefix used when compilation fails.
      * @param logFile Public artifact log file for compiler output.
      * @throws Exception When the process cannot start, times out, is interrupted, or exits
@@ -5994,7 +6000,10 @@ public class EcsRunnerMain {
             );
         }
 
-        boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+        boolean finished = process.waitFor(
+            bufferedCompileTimeoutMs(timeoutMs),
+            TimeUnit.MILLISECONDS
+        );
         if (!finished) {
             process.destroyForcibly();
             appendText(
@@ -6050,6 +6059,27 @@ public class EcsRunnerMain {
      */
     private static int resolvePositiveInt(int configured, int fallback) {
         return configured > 0 ? configured : fallback;
+    }
+
+    /**
+     * Adds the compile timeout buffer to an announced compile timeout.
+     *
+     * <p>Fargate does not guarantee an exact platform for every task, so a submission that
+     * compiles just inside the announced limit during provisional testing can exceed it during
+     * system testing. Compilation is therefore enforced against the announced timeout plus
+     * {@link #COMPILE_TIMEOUT_BUFFER_MS}, while members are still told the announced timeout.
+     *
+     * <p>Used by {@link #runCommand(List, Path, int, String, Path)} for every submission
+     * compilation, Java startup check, and tester helper compilation performed by the runner.
+     *
+     * @param announcedTimeoutMs Announced compile timeout in milliseconds.
+     * @return Buffered compile timeout in milliseconds, clamped to {@code Integer.MAX_VALUE}.
+     */
+    private static int bufferedCompileTimeoutMs(int announcedTimeoutMs) {
+        if (announcedTimeoutMs > Integer.MAX_VALUE - COMPILE_TIMEOUT_BUFFER_MS) {
+            return Integer.MAX_VALUE;
+        }
+        return announcedTimeoutMs + COMPILE_TIMEOUT_BUFFER_MS;
     }
 
     /**
