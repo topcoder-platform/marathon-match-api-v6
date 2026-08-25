@@ -33,6 +33,7 @@ describe('MarathonMatchSubmissionHandler', () => {
     };
     const ecsService = {
       launchScorerTask: jest.fn(),
+      cancelMemberScorerTasks: jest.fn().mockResolvedValue([]),
     };
 
     jest.spyOn(LoggerService, 'forRoot').mockReturnValue(mockLogger as never);
@@ -482,6 +483,112 @@ describe('MarathonMatchSubmissionHandler', () => {
           Authorization: 'Bearer m2m-token',
         },
       }),
+    );
+  });
+
+  it('cancels the in-flight scorer for the member and marks the superseded submission cancelled', async () => {
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: 'challenge-1',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      reviewScorecardId: 'scorecard-1',
+      taskDefinitionName: 'mm-ecs-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: 'PROVISIONAL',
+          phaseId: 'submission-phase',
+          startSeed: BigInt(500),
+          numberOfTests: 20,
+        },
+      ],
+    });
+
+    (handler as any).getOpenPhaseResolution = jest.fn().mockResolvedValue({
+      phaseIds: ['submission-phase'],
+      phaseIdentifiers: ['submission-phase'],
+    });
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockImplementation((url: string) =>
+      url.includes('/reviewSummations')
+        ? of({ data: { data: [] } })
+        : of({ data: { id: 'submission-2', virusScan: true } }),
+    );
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+    ecsService.cancelMemberScorerTasks.mockResolvedValue([
+      {
+        submissionId: 'submission-1',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+        taskId: 'old-task',
+        phaseConfigType: 'PROVISIONAL',
+      },
+    ]);
+    ecsService.launchScorerTask.mockResolvedValue({
+      taskArn: 'arn:aws:ecs:task/provisional',
+      taskId: 'provisional-task',
+      cluster: 'cluster-1',
+      containerName: 'tc-mm-runner',
+      taskDefinition: 'mm-ecs-runner:7',
+    });
+
+    await handler.handle({
+      submissionId: 'submission-2',
+      challengeId: 'challenge-1',
+      submissionUrl: 'https://example.com/submission.zip',
+      memberHandle: 'tester',
+      memberId: 'member-1',
+      submittedDate: '2026-03-26T01:27:22.829Z',
+    });
+
+    expect(ecsService.cancelMemberScorerTasks).toHaveBeenCalledWith({
+      challengeId: 'challenge-1',
+      submissionId: 'submission-2',
+      memberId: 'member-1',
+      taskDefinitionName: 'mm-ecs-runner',
+    });
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        submissionId: 'submission-1',
+        metadata: expect.objectContaining({
+          challengeId: 'challenge-1',
+          testProcess: 'provisional',
+          testProgress: 1,
+          testStatus: 'CANCELLED',
+          testType: 'provisional',
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
+    );
+    expect(ecsService.launchScorerTask).toHaveBeenCalledTimes(1);
+    expect(ecsService.launchScorerTask).toHaveBeenCalledWith(
+      'challenge-1',
+      'submission-2',
+      {
+        taskDefinitionName: 'mm-ecs-runner',
+        taskDefinitionVersion: '7',
+      },
+      {
+        configType: 'PROVISIONAL',
+        startSeed: BigInt(500),
+        numberOfTests: 20,
+      },
+      undefined,
+      { memberId: 'member-1' },
     );
   });
 });

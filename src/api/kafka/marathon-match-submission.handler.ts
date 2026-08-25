@@ -49,6 +49,13 @@ interface SkippedSubmissionScoringConfig {
   reviewScorecardId?: string | null;
 }
 
+/**
+ * Terminal test statuses used when scoring stops before a score is produced.
+ * `CANCELLED` marks a run that was intentionally superseded, so it is not
+ * reported to members as a scoring failure.
+ */
+type TerminalTestStatus = 'CANCELLED' | 'FAILED';
+
 interface SkippedSubmissionScoringPayload {
   submissionId: string;
   challengeId: string;
@@ -56,6 +63,7 @@ interface SkippedSubmissionScoringPayload {
   scorecardId?: string;
   reason: string;
   details?: Record<string, unknown>;
+  testStatus?: TerminalTestStatus;
 }
 
 interface SkippedReviewSummationPayload {
@@ -280,6 +288,15 @@ export class MarathonMatchSubmissionHandler
         });
         return;
       }
+
+      await this.cancelInFlightMemberScoring(token, {
+        challengeId,
+        submissionId,
+        memberId,
+        configId: config.id,
+        taskDefinitionName: config.taskDefinitionName,
+        reviewScorecardId: config.reviewScorecardId,
+      });
 
       const launchedPhaseTasks: Array<Record<string, unknown>> = [];
       for (const matchingPhaseConfig of matchingPhaseConfigs) {
@@ -561,6 +578,76 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
+   * Cancels the scorer this member already has running on the challenge so only
+   * one tester instance per submitter can consume the Fargate scoring cluster.
+   * @param token M2M token for review-api.
+   * @param input New submission identity plus challenge scoring configuration.
+   * @returns Resolves after superseded submissions are marked cancelled.
+   * @throws Error when ECS cancellation or review-api persistence fails.
+   * Superseded submissions are marked `CANCELLED` rather than `FAILED` so they
+   * do not stay in the member-facing preparing state after their scorer stops.
+   */
+  private async cancelInFlightMemberScoring(
+    token: string,
+    input: {
+      challengeId: string;
+      submissionId: string;
+      memberId: string;
+      configId: string;
+      taskDefinitionName: string;
+      reviewScorecardId?: string | null;
+    },
+  ): Promise<void> {
+    if (!input.memberId) {
+      this.logger.log({
+        message:
+          'Skipping Marathon Match member scorer cancellation because the submission event has no member ID.',
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+      });
+      return;
+    }
+
+    const cancelledTasks = await this.ecsService.cancelMemberScorerTasks({
+      challengeId: input.challengeId,
+      submissionId: input.submissionId,
+      memberId: input.memberId,
+      taskDefinitionName: input.taskDefinitionName,
+    });
+
+    if (cancelledTasks.length === 0) {
+      return;
+    }
+
+    for (const cancelledTask of cancelledTasks) {
+      const testPhase = this.normalizeTestPhase(cancelledTask.phaseConfigType);
+      await this.upsertSkippedReviewSummation(token, {
+        submissionId: cancelledTask.submissionId,
+        challengeId: input.challengeId,
+        testPhase,
+        reason: `Marathon Match ${testPhase} scoring cancelled because the member submitted a newer solution.`,
+        testStatus: 'CANCELLED',
+        details: {
+          configId: input.configId,
+          memberId: input.memberId,
+          replacementSubmissionId: input.submissionId,
+          cancelledTaskArn: cancelledTask.taskArn,
+          cancelledTaskId: cancelledTask.taskId,
+        },
+        scorecardId: input.reviewScorecardId?.trim() || undefined,
+      });
+    }
+
+    this.logger.log({
+      message: 'Cancelled in-flight Marathon Match scoring for member',
+      challengeId: input.challengeId,
+      memberId: input.memberId,
+      replacementSubmissionId: input.submissionId,
+      cancelledTasks,
+    });
+  }
+
+  /**
    * Persists a terminal failed phase summation when a configured submission
    * cannot be dispatched and would otherwise remain queued forever.
    * @param submissionId Submission ID from the Kafka event.
@@ -640,8 +727,9 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Builds a failed phase review summation payload for skipped dispatch.
-   * @param input Submission and skip context to persist.
+   * Builds a terminal phase review summation payload for skipped or cancelled
+   * dispatch.
+   * @param input Submission, terminal status, and skip/cancel context to persist.
    * @returns Review summation payload accepted by review-api-v6.
    */
   private buildSkippedReviewSummationPayload(
@@ -650,10 +738,11 @@ export class MarathonMatchSubmissionHandler
     const now = new Date().toISOString();
     const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
     const normalizedPhase = this.normalizeTestPhase(input.testPhase);
+    const testStatus = input.testStatus ?? 'FAILED';
     const testProgressDetails: Record<string, unknown> = {
       message: input.reason,
       progress: 1,
-      status: 'FAILED',
+      status: testStatus,
       updatedAt: now,
     };
     const metadata: Record<string, unknown> = {
@@ -662,7 +751,7 @@ export class MarathonMatchSubmissionHandler
       marathonMatchScoringSkipReason: input.reason,
       testProgress: 1,
       testProgressDetails,
-      testStatus: 'FAILED',
+      testStatus,
       testType: normalizedPhase,
     };
 

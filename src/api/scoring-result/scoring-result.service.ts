@@ -56,6 +56,7 @@ export enum ScoringTestStatus {
   InProgress = 'IN PROGRESS',
   Success = 'SUCCESS',
   Failed = 'FAILED',
+  Cancelled = 'CANCELLED',
 }
 
 const MAX_REVIEW_SCORE_LABEL = '9223372036854775807';
