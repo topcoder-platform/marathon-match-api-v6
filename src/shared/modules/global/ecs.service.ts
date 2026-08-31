@@ -44,6 +44,20 @@ export interface MarathonMatchScorerTaskLaunchOptions {
   validationSubmissionDownloadUrl?: string;
 }
 
+export interface CancelMemberScorerTasksInput {
+  challengeId: string;
+  submissionId: string;
+  memberId: string;
+  taskDefinitionName: string;
+}
+
+export interface CancelledScorerTask {
+  submissionId: string;
+  taskArn: string;
+  taskId: string;
+  phaseConfigType?: string;
+}
+
 interface ActiveScorerTask {
   taskArn: string;
   taskId: string;
@@ -769,6 +783,46 @@ export class EcsService {
   }
 
   /**
+   * Cancels every scorer task a member still has in flight for a challenge so
+   * only one tester instance per submitter is ever running.
+   * @param input Challenge, new submission, member, and task definition family.
+   * @returns Cancelled tasks with the submissions whose scoring was stopped.
+   * @throws Error when required env vars are missing or ECS lookup/stop fails
+   * for a reason other than missing ECS inspection permissions.
+   * Callers use the returned submissions to mark their scoring as cancelled
+   * instead of leaving them queued forever.
+   */
+  async cancelMemberScorerTasks(
+    input: CancelMemberScorerTasksInput,
+  ): Promise<CancelledScorerTask[]> {
+    const memberId = input.memberId?.trim();
+    const taskDefinitionName = input.taskDefinitionName?.trim();
+    if (!memberId || !taskDefinitionName) {
+      return [];
+    }
+
+    const cluster = this.getRequiredEnv('ECS_CLUSTER');
+    const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
+
+    return this.runWithScorerLaunchLock(async () => {
+      const activeTasks = await this.listActiveScorerTasksIfPermitted(
+        cluster,
+        taskDefinitionName,
+        containerName,
+      );
+      if (!activeTasks) {
+        return [];
+      }
+
+      return this.stopMemberScorerTasks(cluster, activeTasks, {
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+        memberId,
+      });
+    });
+  }
+
+  /**
    * Stops older active scorer tasks for the same challenge/member before the
    * new submission is launched.
    * @param cluster ECS cluster name or ARN.
@@ -786,17 +840,45 @@ export class EcsService {
       return activeTasks;
     }
 
-    const supersededTasks = activeTasks.filter(
-      (task) =>
-        task.challengeId === input.challengeId &&
-        task.memberId === memberId &&
-        task.submissionId !== input.submissionId,
+    const stoppedTasks = await this.stopMemberScorerTasks(
+      cluster,
+      activeTasks,
+      {
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+        memberId,
+      },
     );
 
-    if (supersededTasks.length === 0) {
+    if (stoppedTasks.length === 0) {
       return activeTasks;
     }
 
+    const stoppedTaskArns = new Set(stoppedTasks.map((task) => task.taskArn));
+    return activeTasks.filter((task) => !stoppedTaskArns.has(task.taskArn));
+  }
+
+  /**
+   * Stops the member's active scorer tasks for other submissions on a challenge.
+   * @param cluster ECS cluster name or ARN.
+   * @param activeTasks Currently active scorer tasks.
+   * @param input Challenge, superseding submission, and member identity.
+   * @returns Tasks that were asked to stop, keyed by superseded submission.
+   */
+  private async stopMemberScorerTasks(
+    cluster: string,
+    activeTasks: ActiveScorerTask[],
+    input: { challengeId: string; submissionId: string; memberId: string },
+  ): Promise<CancelledScorerTask[]> {
+    const supersededTasks = activeTasks.filter(
+      (task) =>
+        Boolean(task.submissionId) &&
+        task.challengeId === input.challengeId &&
+        task.memberId === input.memberId &&
+        task.submissionId !== input.submissionId,
+    );
+
+    const cancelledTasks: CancelledScorerTask[] = [];
     for (const task of supersededTasks) {
       await this.ecsClient.send(
         new StopTaskCommand({
@@ -808,18 +890,21 @@ export class EcsService {
       this.logger.log({
         message: 'Stopped superseded ECS scorer task',
         challengeId: input.challengeId,
-        memberId,
+        memberId: input.memberId,
         supersededSubmissionId: task.submissionId,
         replacementSubmissionId: input.submissionId,
         taskArn: task.taskArn,
         taskId: task.taskId,
       });
+      cancelledTasks.push({
+        submissionId: task.submissionId as string,
+        taskArn: task.taskArn,
+        taskId: task.taskId,
+        phaseConfigType: task.phaseConfigType,
+      });
     }
 
-    const stoppedTaskArns = new Set(
-      supersededTasks.map((task) => task.taskArn),
-    );
-    return activeTasks.filter((task) => !stoppedTaskArns.has(task.taskArn));
+    return cancelledTasks;
   }
 
   /**

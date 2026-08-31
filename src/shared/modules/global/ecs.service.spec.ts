@@ -596,4 +596,95 @@ describe('EcsService', () => {
     expect(environmentByName.get('REVIEW_ID')).toBe('review-1');
     expect(environmentByName.has('DEBUG_LOG_FULL_ACCESS_TOKEN')).toBe(false);
   });
+
+  it('cancels the active scorer tasks a member still has running on a challenge', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/other-member-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+              submissionId: 'old-submission',
+            }),
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/other-member-task',
+              memberId: 'member-2',
+              submissionId: 'other-member-submission',
+            }),
+          ],
+        });
+      }
+      if (command instanceof StopTaskCommand) {
+        return Promise.resolve({});
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    const cancelledTasks = await service.cancelMemberScorerTasks({
+      challengeId: 'challenge-1',
+      submissionId: 'new-submission',
+      memberId: 'member-1',
+      taskDefinitionName: 'mm-ecs-runner',
+    });
+
+    expect(cancelledTasks).toEqual([
+      {
+        submissionId: 'old-submission',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+        taskId: 'old-task',
+        phaseConfigType: 'PROVISIONAL',
+      },
+    ]);
+
+    const stopCommands = send.mock.calls
+      .map((call) => call[0] as unknown)
+      .filter(
+        (command): command is StopTaskCommand =>
+          command instanceof StopTaskCommand,
+      );
+    expect(stopCommands).toHaveLength(1);
+    expect(stopCommands[0].input.task).toBe(
+      'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+    );
+  });
+
+  it('returns no cancelled tasks when active scorer task listing is not permitted', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.reject(
+          Object.assign(new Error('User is not authorized to perform: ecs:ListTasks'), {
+            name: 'AccessDeniedException',
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await expect(
+      service.cancelMemberScorerTasks({
+        challengeId: 'challenge-1',
+        submissionId: 'new-submission',
+        memberId: 'member-1',
+        taskDefinitionName: 'mm-ecs-runner',
+      }),
+    ).resolves.toEqual([]);
+  });
 });
