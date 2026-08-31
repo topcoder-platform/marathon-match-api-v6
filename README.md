@@ -4,7 +4,10 @@ NestJS service for managing marathon match scorer configuration, compiling teste
 
 ## Development runtime
 
-Use Node.js 26.5.0 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+Use Node.js 26.5.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+The production image uses Alpine's dynamically linked Node.js package and
+patched system OpenSSL, runs as an unprivileged application user, and keeps a
+writable application home for Maven's runtime cache.
 
 ## Service base path
 
