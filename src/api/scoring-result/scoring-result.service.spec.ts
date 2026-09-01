@@ -2516,6 +2516,66 @@ describe('ScoringResultService', () => {
     );
   });
 
+  it('ignores late scorer progress after the submission was cancelled', async () => {
+    const { service, m2mService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      challengeId: basePayload.challengeId,
+      name: 'Blocks',
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      relativeScoringEnabled: false,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+    });
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+
+    const updateReviewSummationSpy = jest
+      .spyOn(service as any, 'updateReviewSummation')
+      .mockResolvedValue(undefined);
+    const createReviewSummationSpy = jest
+      .spyOn(service as any, 'createReviewSummation')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'findExistingReviewSummations')
+      .mockResolvedValue([
+        {
+          id: 'summation-1',
+          metadata: {
+            testProcess: 'provisional',
+            testProgress: 1,
+            testStatus: ScoringTestStatus.Cancelled,
+            testType: 'provisional',
+          },
+        },
+      ]);
+
+    await expect(
+      service.processScoringProgress({
+        challengeId: basePayload.challengeId,
+        completedTests: 20,
+        failedTests: 0,
+        progress: 1,
+        reviewTypeId: basePayload.reviewTypeId,
+        status: ScoringTestStatus.InProgress,
+        message: 'Completed test 20 of 20',
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        totalTests: 20,
+      }),
+    ).resolves.toBe(undefined);
+
+    expect(updateReviewSummationSpy).not.toHaveBeenCalled();
+    expect(createReviewSummationSpy).not.toHaveBeenCalled();
+    expect(mockLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Ignored scorer callback because the review summation is already cancelled.',
+        submissionId: basePayload.submissionId,
+        testPhase: 'provisional',
+        incomingTestStatus: ScoringTestStatus.InProgress,
+      }),
+    );
+  });
+
   it('keeps the failed score sentinel for failed scoring progress', async () => {
     const { service, m2mService, prisma } = createService();
 
