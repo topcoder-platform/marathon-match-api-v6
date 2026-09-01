@@ -4,7 +4,10 @@ NestJS service for managing marathon match scorer configuration, compiling teste
 
 ## Development runtime
 
-Use Node.js 26.5.0 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+Use Node.js 26.5.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+The production image uses Alpine's dynamically linked Node.js package and
+patched system OpenSSL, runs as an unprivileged application user, and keeps a
+writable application home for Maven's runtime cache.
 
 ## Service base path
 
@@ -181,11 +184,11 @@ Optional debug vars (set on API service env to be forwarded to runner):
 
 The ECS task still needs trusted outbound access to fetch challenge config, download submission artifacts, upload artifacts, and post the scoring callback. Untrusted tester/submission execution is therefore split from that bootstrap logic inside the container:
 
-- The container starts as `root`. Do not override the ECS task-definition `user`; the trusted runner needs root only to drop submitted solution commands to `scorer`.
+- The container starts as the non-root `runner-parent` user (uid `10000`). Do not override the ECS task-definition `user`; the entrypoint rejects other UIDs. Narrow `root:runner` mode `4750` setuid helpers fork and immediately drop tester commands to `runner` (uid `10001`) and submitted solution commands to `scorer` (uid `10002`), while their supervisors return to the invoking non-root UID with only timeout-signalling capability. The scorer account is not in group `runner` and cannot invoke either privileged helper directly.
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
-- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept runner-owned mode `0400`, so submitted code cannot read or modify them from `/tmp`.
-- Standard generic-runner seed execution asks `mm-scorer-isolate` to reset scorer-owned writable state before and after each test case. The cleanup helper only scans fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and only removes entries owned by the scorer UID.
+- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are parent-owned, runner-group-readable mode `0440`, so submitted code cannot read or modify them; the config is deleted before tester code executes.
+- Standard generic-runner seed execution asks `mm-scorer-isolate` to reset scorer-owned writable state before and after each test case. The cleanup helper accepts no path argument, scans only fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and only removes entries owned by the scorer UID. Descriptor-relative no-follow operations prevent a scorer-controlled symlink swap from redirecting the privileged traversal.
 - Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads, `/proc/self/maps` for glibc/Mono stack introspection, and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
 - Native wrappers block `io_uring` and creation of non-`AF_UNIX` sockets for submitted solution processes and their fork/exec children, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.

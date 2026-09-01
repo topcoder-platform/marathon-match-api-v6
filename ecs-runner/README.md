@@ -4,25 +4,26 @@ This image is the runtime container for marathon match scoring tasks launched by
 
 ## What this image includes
 
-- Java 11 JDK/runtime (`eclipse-temurin:11-jdk-noble`) for runner execution and Java submission compilation (`javac --release 11`, `java`)
+- Ubuntu OpenJDK 17 JDK/runtime for runner execution and Java submission compilation; Java submissions remain targeted to the Java 11 language/API level with `javac --release 11`
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
 - C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
-- Kotlin/JVM compiler support for tester-side submission compilation (`kotlinc`)
+- Kotlin/JVM 2.4.10 compiler support for tester-side `.kt` submission compilation (`kotlinc`); the unused main-kts scripting plugin is omitted
 - Python 3.12 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
-- C# (.NET 7 / C# 11 and .NET 10 / C# 14) SDK support for tester-side submission compilation (`dotnet publish`)
+- C# (.NET 7 / C# 11 and .NET 10 / C# 14) support for tester-side submission compilation (`dotnet publish`); the maintained .NET 10 SDK compiles both targets and the image retains only the .NET 7 reference, host, and runtime packs required by `net7.0`
 - Rust latest stable compiler support for tester-side submission compilation (`rustc`)
 - native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, restrict submitted-solution filesystem access, block `io_uring`, and block non-`AF_UNIX` sockets for submitted solution processes
 
 ## Isolation model
 
-- The container entrypoint starts as `root`. Do not override the ECS task-definition `user` for this container; root is needed for trusted bootstrap work and for preparing runner-owned files before the child JVM starts.
+- The container entrypoint runs as non-root uid `10000` (`runner-parent`) with primary group `runner`. Do not override the ECS task-definition `user`; the entrypoint rejects any other uid so an accidental root override cannot weaken the image's default boundary.
 - The trusted parent runner performs network bootstrap work: fetch challenge config, download tester/submission artifacts, upload artifacts, and post the scoring callback. Submission downloads authenticate the initial API request, then follow short-lived signed-storage redirects without forwarding the API bearer token across origins.
-- The tester executes in a separate child JVM launched through `mm-runner-isolate` as uid/gid `10001` (`runner`) with a scrubbed environment, so `ACCESS_TOKEN` and other runner env vars are not inherited by untrusted code.
+- The tester executes in a separate child JVM launched through the setuid-root `mm-runner-isolate` bridge as uid/gid `10001` (`runner`) with a scrubbed environment. The bridge forks, drops the child permanently to `runner`, and drops its supervisor back to `runner-parent` with only `CAP_KILL` for timeout forwarding. Distinct parent/tester UIDs prevent the tester from reading trusted parent process state such as `ACCESS_TOKEN` through `/proc`. Both setuid helpers are owned by `root:runner` with mode `4750`, so only the trusted parent and tester accounts can invoke them; the submitted `scorer` account cannot.
 - Generic submitted solution commands execute through the setuid-root `mm-scorer-isolate` bridge as uid/gid `10002` (`scorer`). The bridge drops its supervisor back to the invoking `runner` uid after it forks the solution child, retaining only `CAP_KILL` so tester timeouts can still terminate the lower-privilege solution process group.
-- Downloaded tester JARs are mode `0400` runner-owned files. The serialized scorer config starts as a mode `0400` runner-owned handoff file and the child JVM deletes it immediately after loading it, before tester or submitted solution code executes.
-- Generic Marathon seed execution resets scorer-owned writable state before and after every test case, so files written by one seed are not visible to later seeds in the same submission run. The Java child invokes the setuid `mm-scorer-isolate --cleanup-scorer-state` mode, which scans only fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and removes only entries owned by uid `10002`.
+- Downloaded tester JARs and the serialized scorer-config handoff are parent-owned mode `0440` files in group `runner`. This gives the isolated tester read-only access without exposing either file to `scorer`; the config is created inside the shared workspace and the child JVM deletes it immediately after loading it, before tester or submitted solution code executes.
+- Parent-created workspaces use group `runner` with group read/write access. The tester helper applies umask `0007`, so tester-created files remain manageable by the non-root parent without making them accessible to `scorer`.
+- Generic Marathon seed execution resets scorer-owned writable state before and after every test case, so files written by one seed are not visible to later seeds in the same submission run. The Java child invokes the setuid `mm-scorer-isolate --cleanup-scorer-state` mode, which accepts no caller-supplied path, scans only fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and removes only entries owned by uid `10002`. Cleanup uses descriptor-relative `openat`, `fstatat`, and `unlinkat` operations with `O_NOFOLLOW`, so swapping an entry for a symlink cannot redirect the privileged traversal.
 - Generic submitted solution commands run under a Landlock filesystem allowlist. Runtime and toolchain files are readable, `/proc/self/maps` is readable for glibc/Mono stack introspection, `/tmp` and the scorer home are writable, and infrastructure-revealing paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, and proc network tables are not readable by submitted code.
 - Rust submissions run with `RUST_BACKTRACE=1` so panic stderr captured in `output.txt` includes a backtrace.
 - Artifact previews and artifact zip uploads include only non-symlink regular files from the runner artifact directories. Submitted symlinks are ignored instead of being dereferenced by the trusted parent runner.
@@ -152,7 +153,7 @@ docker build -f ecs-runner/Dockerfile -t mm-ecs-runner:local ecs-runner
 docker run --rm mm-ecs-runner:local
 ```
 
-The container exits quickly unless all required scorer environment variables are provided.
+The default process reports uid `10000` and exits quickly unless all required scorer environment variables are provided. `mm-runner-isolate id -u` reports `10001`, while `mm-scorer-isolate id -u` reports `10002`; both helpers discard caller secrets before starting their child commands.
 
 ## Local socket-isolation regression
 

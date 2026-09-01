@@ -52,6 +52,14 @@
 #define MM_SKIP_USER_DROP 0
 #endif
 
+#ifndef MM_ENABLE_ADMIN_MODES
+#define MM_ENABLE_ADMIN_MODES 0
+#endif
+
+#ifndef MM_ISOLATED_UMASK
+#define MM_ISOLATED_UMASK 0022
+#endif
+
 #ifndef MM_CLOSE_FD_FALLBACK_MAX
 #define MM_CLOSE_FD_FALLBACK_MAX ((rlim_t) 1048576)
 #endif
@@ -177,6 +185,7 @@ static void close_extra_fds(void) {
     }
 }
 
+#if MM_ENABLE_ADMIN_MODES
 /**
  * Checks whether a directory entry is "." or "..".
  *
@@ -187,96 +196,182 @@ static int is_current_or_parent_directory(const char *name) {
     return strcmp(name, ".") == 0 || strcmp(name, "..") == 0;
 }
 
+enum cleanup_result {
+    CLEANUP_REMOVED = 0,
+    CLEANUP_FAILED = 1,
+    CLEANUP_SKIPPED_OWNER = 2
+};
+
 /**
- * Builds a child path under a parent directory.
+ * Reports an error for a descriptor-relative cleanup operation.
  *
- * buffer receives the joined path, buffer_size is its capacity, parent is the
- * directory being scanned, and name is a direct child entry. Returns 0 when the
- * joined path fits and 1 when it would be truncated.
+ * operation identifies the failed system call, directory identifies the fixed
+ * cleanup root, and name is the current entry name. The function preserves no
+ * errno state and returns no value.
  */
-static int join_child_path(
-    char *buffer,
-    size_t buffer_size,
-    const char *parent,
+static void report_cleanup_error(
+    const char *operation,
+    const char *directory,
     const char *name
 ) {
-    int written = snprintf(buffer, buffer_size, "%s/%s", parent, name);
-    if (written < 0 || (size_t) written >= buffer_size) {
-        fprintf(stderr, "cleanup path too long under %s\n", parent);
-        return 1;
-    }
-    return 0;
+    fprintf(
+        stderr,
+        "%s(%s entry %s): %s\n",
+        operation,
+        directory,
+        name,
+        strerror(errno)
+    );
 }
 
 /**
- * Removes one untrusted path tree without following symlinks.
+ * Removes one entry tree relative to an already-open directory descriptor.
  *
- * The cleanup entry point is used by the Java runner between test cases. It
- * runs with the scorer helper's setuid-root privilege, but it only removes
- * entries that were already selected as owned by the scorer UID. path is the
- * selected top-level entry. Returns 0 when the tree was removed or already
- * disappeared and 1 when any entry could not be removed.
+ * parent_fd is the descriptor containing name, directory is the fixed cleanup
+ * root used for diagnostics, and require_scorer_owner requires the selected
+ * entry itself to be owned by MM_ISOLATED_UID. Directories are opened with
+ * O_NOFOLLOW and children are inspected and removed with descriptor-relative
+ * calls, so a scorer cannot redirect the privileged traversal through a
+ * symlink. Returns CLEANUP_REMOVED when the entry was removed or disappeared,
+ * CLEANUP_SKIPPED_OWNER when the required owner does not match, and
+ * CLEANUP_FAILED when inspection or removal fails.
  */
-static int remove_tree_no_follow(const char *path) {
-    struct stat stat_buffer;
-    if (lstat(path, &stat_buffer) != 0) {
-        if (errno == ENOENT || errno == ENOTDIR) {
-            return 0;
-        }
-        fprintf(stderr, "lstat(%s): %s\n", path, strerror(errno));
-        return 1;
-    }
+static enum cleanup_result remove_tree_at(
+    int parent_fd,
+    const char *name,
+    const char *directory,
+    int require_scorer_owner
+) {
+    int child_fd = openat(
+        parent_fd,
+        name,
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+    );
 
-    if (S_ISDIR(stat_buffer.st_mode)) {
-        DIR *dir = opendir(path);
+    if (child_fd >= 0) {
+        struct stat opened_stat;
+        DIR *child_directory;
         struct dirent *entry;
         int failed = 0;
 
-        if (dir == NULL) {
-            if (errno == ENOENT || errno == ENOTDIR) {
-                return 0;
-            }
-            fprintf(stderr, "opendir(%s): %s\n", path, strerror(errno));
-            return 1;
+        if (fstat(child_fd, &opened_stat) != 0) {
+            report_cleanup_error("fstat", directory, name);
+            close(child_fd);
+            return CLEANUP_FAILED;
+        }
+        if (
+            require_scorer_owner
+            && opened_stat.st_uid != (uid_t) MM_ISOLATED_UID
+        ) {
+            close(child_fd);
+            return CLEANUP_SKIPPED_OWNER;
         }
 
-        while ((entry = readdir(dir)) != NULL) {
-            char child_path[PATH_MAX];
+        child_directory = fdopendir(child_fd);
+        if (child_directory == NULL) {
+            report_cleanup_error("fdopendir", directory, name);
+            close(child_fd);
+            return CLEANUP_FAILED;
+        }
+
+        while ((entry = readdir(child_directory)) != NULL) {
+            enum cleanup_result child_result;
+
             if (is_current_or_parent_directory(entry->d_name)) {
                 continue;
             }
+            child_result = remove_tree_at(
+                dirfd(child_directory),
+                entry->d_name,
+                directory,
+                0
+            );
+            if (child_result != CLEANUP_REMOVED) {
+                failed = 1;
+            }
+        }
+
+        if (closedir(child_directory) != 0) {
+            report_cleanup_error("closedir", directory, name);
+            failed = 1;
+        }
+
+        if (!failed) {
+            struct stat current_stat;
+
             if (
-                join_child_path(
-                    child_path,
-                    sizeof(child_path),
-                    path,
-                    entry->d_name
+                fstatat(
+                    parent_fd,
+                    name,
+                    &current_stat,
+                    AT_SYMLINK_NOFOLLOW
                 ) != 0
             ) {
-                failed = 1;
-                continue;
+                if (errno == ENOENT) {
+                    return CLEANUP_REMOVED;
+                }
+                report_cleanup_error("fstatat", directory, name);
+                return CLEANUP_FAILED;
             }
-            if (remove_tree_no_follow(child_path) != 0) {
-                failed = 1;
+            if (
+                current_stat.st_dev != opened_stat.st_dev
+                || current_stat.st_ino != opened_stat.st_ino
+            ) {
+                fprintf(
+                    stderr,
+                    "cleanup entry changed while scanning %s entry %s\n",
+                    directory,
+                    name
+                );
+                return CLEANUP_FAILED;
+            }
+            if (
+                unlinkat(parent_fd, name, AT_REMOVEDIR) != 0
+                && errno != ENOENT
+            ) {
+                report_cleanup_error("unlinkat(AT_REMOVEDIR)", directory, name);
+                return CLEANUP_FAILED;
             }
         }
-
-        if (closedir(dir) != 0) {
-            fprintf(stderr, "closedir(%s): %s\n", path, strerror(errno));
-            failed = 1;
-        }
-        if (rmdir(path) != 0 && errno != ENOENT && errno != ENOTDIR) {
-            fprintf(stderr, "rmdir(%s): %s\n", path, strerror(errno));
-            failed = 1;
-        }
-        return failed;
+        return failed ? CLEANUP_FAILED : CLEANUP_REMOVED;
     }
 
-    if (unlink(path) != 0 && errno != ENOENT && errno != ENOTDIR) {
-        fprintf(stderr, "unlink(%s): %s\n", path, strerror(errno));
-        return 1;
+    if (errno == ENOENT) {
+        return CLEANUP_REMOVED;
     }
-    return 0;
+    if (errno != ENOTDIR && errno != ELOOP) {
+        report_cleanup_error("openat(O_NOFOLLOW)", directory, name);
+        return CLEANUP_FAILED;
+    }
+
+    struct stat entry_stat;
+    if (fstatat(parent_fd, name, &entry_stat, AT_SYMLINK_NOFOLLOW) != 0) {
+        if (errno == ENOENT) {
+            return CLEANUP_REMOVED;
+        }
+        report_cleanup_error("fstatat", directory, name);
+        return CLEANUP_FAILED;
+    }
+    if (
+        require_scorer_owner
+        && entry_stat.st_uid != (uid_t) MM_ISOLATED_UID
+    ) {
+        return CLEANUP_SKIPPED_OWNER;
+    }
+    if (S_ISDIR(entry_stat.st_mode)) {
+        fprintf(
+            stderr,
+            "cleanup directory changed while opening %s entry %s\n",
+            directory,
+            name
+        );
+        return CLEANUP_FAILED;
+    }
+    if (unlinkat(parent_fd, name, 0) != 0 && errno != ENOENT) {
+        report_cleanup_error("unlinkat", directory, name);
+        return CLEANUP_FAILED;
+    }
+    return CLEANUP_REMOVED;
 }
 
 /**
@@ -291,53 +386,44 @@ static int cleanup_scorer_owned_entries_under(
     const char *directory,
     int *deleted_entries
 ) {
-    DIR *dir = opendir(directory);
+    int directory_fd = open(
+        directory,
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+    );
+    DIR *dir;
     struct dirent *entry;
     int failed = 0;
 
-    if (dir == NULL) {
+    if (directory_fd < 0) {
         if (errno == ENOENT || errno == ENOTDIR) {
             return 0;
         }
-        fprintf(stderr, "opendir(%s): %s\n", directory, strerror(errno));
+        fprintf(stderr, "open(%s): %s\n", directory, strerror(errno));
+        return 1;
+    }
+
+    dir = fdopendir(directory_fd);
+    if (dir == NULL) {
+        fprintf(stderr, "fdopendir(%s): %s\n", directory, strerror(errno));
+        close(directory_fd);
         return 1;
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        char entry_path[PATH_MAX];
-        struct stat stat_buffer;
+        enum cleanup_result result;
 
         if (is_current_or_parent_directory(entry->d_name)) {
             continue;
         }
-        if (
-            join_child_path(
-                entry_path,
-                sizeof(entry_path),
-                directory,
-                entry->d_name
-            ) != 0
-        ) {
-            failed = 1;
-            continue;
-        }
-
-        if (lstat(entry_path, &stat_buffer) != 0) {
-            if (errno == ENOENT || errno == ENOTDIR) {
-                continue;
-            }
-            fprintf(stderr, "lstat(%s): %s\n", entry_path, strerror(errno));
-            failed = 1;
-            continue;
-        }
-
-        if (stat_buffer.st_uid != (uid_t) MM_ISOLATED_UID) {
-            continue;
-        }
-
-        if (remove_tree_no_follow(entry_path) == 0) {
+        result = remove_tree_at(
+            dirfd(dir),
+            entry->d_name,
+            directory,
+            1
+        );
+        if (result == CLEANUP_REMOVED) {
             *deleted_entries += 1;
-        } else {
+        } else if (result == CLEANUP_FAILED) {
             failed = 1;
         }
     }
@@ -391,6 +477,7 @@ static int cleanup_scorer_writable_state(void) {
     printf("%d\n", deleted_entries);
     return failed;
 }
+#endif
 
 #if MM_INSTALL_SOCKET_FILTER
 static int install_socket_filter(void) {
@@ -824,7 +911,8 @@ static void sanitize_environment(void) {
 
 /**
  * Drops all supplementary groups and switches to the compile-time isolated UID/GID.
- * The helper is invoked by the trusted root runner before the submitted command starts.
+ * A narrowly scoped setuid helper invokes this before a tester or submitted
+ * command starts.
  *
  * Returns 0 on success and 1 when any privilege drop call fails.
  */
@@ -852,6 +940,42 @@ static int drop_to_isolated_user(void) {
 }
 
 /**
+ * Terminates lingering processes owned by the compile-time isolated account.
+ *
+ * The Java runner invokes this fixed administrative mode after isolated work.
+ * The helper first drops permanently to the isolated UID/GID and then runs
+ * pkill for that same fixed account, so the kernel prevents it from signalling
+ * any other account even if a PID changes during process discovery. This mode
+ * accepts no caller-controlled command or user name. Returns pkill's exit code,
+ * where 0 means at least one process was signalled and 1 means none matched;
+ * returns 127 when the fixed pkill executable cannot be started.
+ */
+#if MM_ENABLE_ADMIN_MODES
+static int terminate_isolated_user_processes(void) {
+    if (geteuid() != 0) {
+        fprintf(stderr, "process cleanup requires setuid-root scorer helper\n");
+        return 1;
+    }
+
+    if (drop_to_isolated_user() != 0) {
+        return 1;
+    }
+
+    clearenv();
+    execl(
+        "/usr/bin/pkill",
+        "pkill",
+        "-KILL",
+        "-u",
+        MM_ISOLATED_NAME,
+        (char *) NULL
+    );
+    perror("execl(/usr/bin/pkill)");
+    return 127;
+}
+#endif
+
+/**
  * Enters the low-privilege execution context.
  *
  * Returns 0 on success and 1 when the user drop or seccomp setup fails.
@@ -860,6 +984,8 @@ static int enter_isolated_execution(void) {
     if (drop_to_isolated_user() != 0) {
         return 1;
     }
+
+    umask(MM_ISOLATED_UMASK);
 
 #if MM_ENABLE_FS_SANDBOX
     if (install_filesystem_filter() != 0) {
@@ -878,8 +1004,8 @@ static int enter_isolated_execution(void) {
 
 /**
  * Forwards termination signals from the supervised wrapper to the isolated
- * solution process group. The wrapper remains signalable by the Java runner
- * because its real UID is still the runner UID.
+ * child process group. The wrapper remains signalable by its invoking process
+ * because the supervisor returns to the invoker's real UID.
  */
 #if MM_SUPERVISE_CHILD
 static int signal_child_process_group(pid_t child_pid, int signo) {
@@ -941,10 +1067,10 @@ static int wait_status_to_exit_code(int status) {
 }
 
 /**
- * Drops the supervising wrapper back to the real user that invoked the setuid
- * scorer helper while retaining only CAP_KILL. The already-forked child keeps
- * the temporary root privilege it needs to switch to the configured isolated
- * UID before exec.
+ * Drops the supervising wrapper back to the real user that invoked a setuid
+ * isolation helper while retaining only CAP_KILL. The already-forked child
+ * keeps the temporary root privilege it needs to switch to the configured
+ * isolated UID before exec.
  */
 static int drop_supervisor_to_invoker(void) {
 #if MM_DROP_SUPERVISOR_PRIVS
@@ -999,7 +1125,7 @@ static int drop_supervisor_to_invoker(void) {
 /**
  * Runs the target command as an isolated child while this wrapper waits
  * as a small supervisor. This lets the Java runner terminate the wrapper on
- * timeouts and have the wrapper relay the signal to the lower-privilege scorer
+ * timeouts and have the wrapper relay the signal to the lower-privilege child
  * process group.
  *
  * argc/argv are the original command-line arguments where argv[1] is the target
@@ -1067,9 +1193,14 @@ int main(int argc, char **argv) {
     }
 
     close_extra_fds();
+#if MM_ENABLE_ADMIN_MODES
     if (argc == 2 && strcmp(argv[1], "--cleanup-scorer-state") == 0) {
         return cleanup_scorer_writable_state();
     }
+    if (argc == 2 && strcmp(argv[1], "--kill-isolated-processes") == 0) {
+        return terminate_isolated_user_processes();
+    }
+#endif
 
     sanitize_environment();
 
