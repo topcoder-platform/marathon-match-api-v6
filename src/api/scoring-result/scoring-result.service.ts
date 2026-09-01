@@ -3939,6 +3939,9 @@ export class ScoringResultService {
 
   /**
    * Creates a phase review summation or updates every matching existing row.
+   * An existing `CANCELLED` summation is terminal: progress or final callbacks
+   * from the ECS task being stopped are ignored so they cannot resurrect a
+   * superseded run as `IN PROGRESS` or `SUCCESS`.
    * @param token M2M token for review-api.
    * @param testPhase Normalized or raw phase value.
    * @param payload Review summation payload to persist.
@@ -3956,6 +3959,25 @@ export class ScoringResultService {
       payload.submissionId,
       testPhase,
     );
+    const incomingTestStatus = this.asString(
+      this.asRecord(payload.metadata).testStatus,
+    )?.toUpperCase();
+    if (
+      incomingTestStatus !== ScoringTestStatus.Cancelled &&
+      existingReviews.some((review) =>
+        this.isCancelledReviewSummation(review),
+      )
+    ) {
+      this.logger.log({
+        message:
+          'Ignored scorer callback because the review summation is already cancelled.',
+        submissionId: payload.submissionId,
+        testPhase: this.normalizeTestPhase(testPhase),
+        incomingTestStatus: incomingTestStatus ?? null,
+      });
+      return;
+    }
+
     const reviewSummationIds = new Set<string>();
     const normalizedPreferredReviewSummationId = this.asString(
       preferredReviewSummationId,
@@ -3980,6 +4002,21 @@ export class ScoringResultService {
     }
 
     await this.createReviewSummation(token, payload);
+  }
+
+  /**
+   * Checks whether a review summation has the terminal cancelled test status.
+   * @param reviewSummation Existing review-api summation record.
+   * @returns True when metadata.testStatus is `CANCELLED`.
+   */
+  private isCancelledReviewSummation(
+    reviewSummation: Record<string, unknown>,
+  ): boolean {
+    const metadata = this.asRecord(reviewSummation.metadata);
+    return (
+      this.asString(metadata.testStatus)?.toUpperCase() ===
+      ScoringTestStatus.Cancelled
+    );
   }
 
   /**

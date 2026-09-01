@@ -158,7 +158,10 @@ describe('MarathonMatchSubmissionHandler', () => {
         numberOfTests: 10,
       },
       undefined,
-      { memberId: 'member-1' },
+      {
+        memberId: 'member-1',
+        stopSupersededMemberTasks: false,
+      },
     );
     expect(ecsService.launchScorerTask).toHaveBeenNthCalledWith(
       2,
@@ -174,7 +177,10 @@ describe('MarathonMatchSubmissionHandler', () => {
         numberOfTests: 20,
       },
       undefined,
-      { memberId: 'member-1' },
+      {
+        memberId: 'member-1',
+        stopSupersededMemberTasks: false,
+      },
     );
   });
 
@@ -588,7 +594,120 @@ describe('MarathonMatchSubmissionHandler', () => {
         numberOfTests: 20,
       },
       undefined,
-      { memberId: 'member-1' },
+      {
+        memberId: 'member-1',
+        stopSupersededMemberTasks: false,
+      },
+    );
+  });
+
+  it('cancels a stale event instead of replacing the scorer for a newer clean submission', async () => {
+    const { handler, prisma, m2mService, httpService, ecsService } =
+      createHandler();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: 'challenge-1',
+      active: true,
+      submissionApiUrl: 'https://submissions.example.com/v6',
+      testerId: 'tester-1',
+      reviewScorecardId: 'scorecard-1',
+      taskDefinitionName: 'mm-ecs-runner',
+      taskDefinitionVersion: '7',
+      tester: {
+        compilationStatus: CompilationStatus.SUCCESS,
+      },
+      phaseConfigs: [
+        {
+          id: 'phase-provisional',
+          configType: 'PROVISIONAL',
+          phaseId: 'submission-phase',
+          startSeed: BigInt(500),
+          numberOfTests: 20,
+        },
+      ],
+    });
+
+    (handler as any).getOpenPhaseResolution = jest.fn().mockResolvedValue({
+      phaseIds: ['submission-phase'],
+      phaseIdentifiers: ['submission-phase'],
+    });
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    httpService.get.mockImplementation((url: string) => {
+      if (url.includes('/reviewSummations')) {
+        return of({ data: { data: [] } });
+      }
+      if (url.endsWith('/submissions/submission-1')) {
+        return of({
+          data: {
+            id: 'submission-1',
+            challengeId: 'challenge-1',
+            memberId: 'member-1',
+            submittedDate: '2026-03-26T01:27:22.829Z',
+            virusScan: true,
+          },
+        });
+      }
+
+      return of({
+        data: {
+          data: [
+            {
+              id: 'submission-2',
+              challengeId: 'challenge-1',
+              memberId: 'member-1',
+              submittedDate: '2026-03-26T01:28:22.829Z',
+              virusScan: true,
+            },
+            {
+              id: 'submission-1',
+              challengeId: 'challenge-1',
+              memberId: 'member-1',
+              submittedDate: '2026-03-26T01:27:22.829Z',
+              virusScan: true,
+            },
+          ],
+        },
+      });
+    });
+    httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
+
+    await handler.handle({
+      submissionId: 'submission-1',
+      challengeId: 'challenge-1',
+      submissionUrl: 'https://example.com/submission.zip',
+      memberHandle: 'tester',
+      memberId: 'member-1',
+      submittedDate: '2026-03-26T01:27:22.829Z',
+    });
+
+    expect(ecsService.cancelMemberScorerTasks).toHaveBeenCalledWith({
+      challengeId: 'challenge-1',
+      submissionId: 'submission-2',
+      memberId: 'member-1',
+      taskDefinitionName: 'mm-ecs-runner',
+    });
+    expect(ecsService.launchScorerTask).not.toHaveBeenCalled();
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v6/reviewSummations',
+      expect.objectContaining({
+        submissionId: 'submission-1',
+        metadata: expect.objectContaining({
+          testProcess: 'provisional',
+          testProgress: 1,
+          testStatus: 'CANCELLED',
+          testType: 'provisional',
+          marathonMatchScoringSkipDetails: expect.objectContaining({
+            replacementSubmissionId: 'submission-2',
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer m2m-token',
+        },
+      }),
     );
   });
 });

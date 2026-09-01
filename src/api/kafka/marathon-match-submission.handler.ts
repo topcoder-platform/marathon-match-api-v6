@@ -45,6 +45,13 @@ interface OpenPhaseResolution {
   phaseIdentifiers: string[];
 }
 
+interface CleanMemberSubmission {
+  submissionId: string;
+  submittedDate?: string;
+  sortTimestamp: number;
+  sequence: number;
+}
+
 interface SkippedSubmissionScoringConfig {
   reviewScorecardId?: string | null;
 }
@@ -157,9 +164,9 @@ export class MarathonMatchSubmissionHandler
       const submissionId = (submissionPayload.submissionId ?? '').trim();
       const challengeId = (submissionPayload.challengeId ?? '').trim();
       const memberId = (submissionPayload.memberId ?? '').trim();
-      if (!submissionId || !challengeId) {
+      if (!submissionId || !challengeId || !memberId) {
         throw new Error(
-          'Missing required message fields: submissionId and challengeId are required.',
+          'Missing required message fields: submissionId, challengeId, and memberId are required.',
         );
       }
 
@@ -289,6 +296,80 @@ export class MarathonMatchSubmissionHandler
         return;
       }
 
+      const newestCleanSubmission =
+        await this.fetchNewestCleanMemberSubmission(
+          token,
+          submissionApiBaseUrl,
+          challengeId,
+          memberId,
+          {
+            ...submission,
+            id: submissionId,
+            memberId,
+            challengeId,
+            submittedDate:
+              this.asString(submission?.submittedDate) ??
+              this.asString(submissionPayload.submittedDate),
+            virusScan: true,
+          },
+        );
+
+      if (
+        newestCleanSubmission &&
+        newestCleanSubmission.submissionId !== submissionId
+      ) {
+        await this.cancelInFlightMemberScoring(token, {
+          challengeId,
+          submissionId: newestCleanSubmission.submissionId,
+          memberId,
+          configId: config.id,
+          taskDefinitionName: config.taskDefinitionName,
+          reviewScorecardId: config.reviewScorecardId,
+        });
+
+        const cancelledPhaseTasks: Array<Record<string, unknown>> = [];
+        for (const matchingPhaseConfig of matchingPhaseConfigs) {
+          const testPhase = this.normalizeTestPhase(
+            matchingPhaseConfig.configType,
+          );
+          const reason = `Marathon Match ${testPhase} scoring cancelled because this submission was superseded by a newer solution before dispatch.`;
+          await this.upsertSkippedReviewSummation(token, {
+            submissionId,
+            challengeId,
+            testPhase,
+            reason,
+            testStatus: 'CANCELLED',
+            details: {
+              configId: config.id,
+              memberId,
+              replacementSubmissionId:
+                newestCleanSubmission.submissionId,
+              replacementSubmittedDate:
+                newestCleanSubmission.submittedDate ?? null,
+            },
+            scorecardId: config.reviewScorecardId?.trim() || undefined,
+          });
+          cancelledPhaseTasks.push({
+            configType: matchingPhaseConfig.configType,
+            phaseId: matchingPhaseConfig.phaseId,
+            phaseConfigId: matchingPhaseConfig.id,
+          });
+        }
+
+        this.logger.log({
+          message:
+            'Skipped stale Marathon Match submission event because a newer clean member submission exists.',
+          challengeId,
+          memberId,
+          submissionId,
+          replacementSubmissionId: newestCleanSubmission.submissionId,
+          replacementSubmittedDate:
+            newestCleanSubmission.submittedDate ?? null,
+          cancelledPhaseTasks,
+        });
+        return;
+      }
+
       await this.cancelInFlightMemberScoring(token, {
         challengeId,
         submissionId,
@@ -313,7 +394,10 @@ export class MarathonMatchSubmissionHandler
             numberOfTests: matchingPhaseConfig.numberOfTests,
           },
           undefined,
-          { memberId },
+          {
+            memberId,
+            stopSupersededMemberTasks: false,
+          },
         );
         this.logSubmissionRunnerMapping(
           challengeId,
@@ -437,6 +521,106 @@ export class MarathonMatchSubmissionHandler
     );
 
     return this.extractSubmissionRecord(response.data);
+  }
+
+  /**
+   * Finds the newest virus-clean submission for a challenge/member before ECS
+   * orchestration. Submission scan events can be published or consumed out of
+   * submission order, so this authoritative lookup prevents an older event from
+   * stopping and replacing the scorer for a newer solution.
+   *
+   * @param token M2M token for submission-api-v6.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param challengeId Challenge whose member submissions are compared.
+   * @param memberId Member whose most recent clean submission is required.
+   * @param currentSubmission Current clean submission used as a safe fallback.
+   * @returns Newest clean member submission, or undefined when no candidate exists.
+   * @throws Error when submission-api-v6 rejects the member submission lookup.
+   */
+  private async fetchNewestCleanMemberSubmission(
+    token: string,
+    submissionApiUrl: string,
+    challengeId: string,
+    memberId: string,
+    currentSubmission: Record<string, unknown>,
+  ): Promise<CleanMemberSubmission | undefined> {
+    const url = `${this.buildSubmissionApiBaseUrl(
+      submissionApiUrl,
+    )}/submissions`;
+    const params: Record<string, string | number> = {
+      challengeId,
+      memberId,
+      orderBy: 'desc',
+      page: 1,
+      perPage: 100,
+      sortBy: 'submittedDate',
+      type: 'CONTEST_SUBMISSION',
+    };
+    const response = await this.callExternalApi(
+      {
+        operation: 'submission-api.find-member-submissions',
+        method: 'GET',
+        url,
+        challengeId,
+        params,
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.get(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            params,
+          }),
+        ),
+    );
+
+    const submissions = this.extractSubmissionArray(response.data);
+    submissions.push(currentSubmission);
+
+    const candidatesById = new Map<string, CleanMemberSubmission>();
+    for (const [sequence, submission] of submissions.entries()) {
+      const candidateSubmissionId =
+        this.asString(submission.submissionId) ??
+        this.asString(submission.id);
+      if (
+        !candidateSubmissionId ||
+        candidatesById.has(candidateSubmissionId) ||
+        this.parseBooleanFlag(submission.virusScan) !== true
+      ) {
+        continue;
+      }
+
+      const candidateChallengeId = this.asString(submission.challengeId);
+      const candidateMemberId = this.asString(submission.memberId);
+      if (
+        (candidateChallengeId && candidateChallengeId !== challengeId) ||
+        (candidateMemberId && candidateMemberId !== memberId)
+      ) {
+        continue;
+      }
+
+      const submittedDate =
+        this.asString(submission.submittedDate) ??
+        this.asString(submission.receivedDate) ??
+        this.asString(submission.receivedAt) ??
+        this.asString(submission.createdAt) ??
+        this.asString(submission.updatedAt);
+      candidatesById.set(candidateSubmissionId, {
+        submissionId: candidateSubmissionId,
+        submittedDate,
+        sortTimestamp: this.toTimestamp(submittedDate),
+        sequence,
+      });
+    }
+
+    return Array.from(candidatesById.values()).sort((left, right) => {
+      if (left.sortTimestamp !== right.sortTimestamp) {
+        return right.sortTimestamp - left.sortTimestamp;
+      }
+
+      return left.sequence - right.sequence;
+    })[0];
   }
 
   /**
@@ -1405,6 +1589,51 @@ export class MarathonMatchSubmissionHandler
     }
 
     return Object.keys(direct).length > 0 ? direct : undefined;
+  }
+
+  /**
+   * Extracts submission arrays from direct and paginated submission-api
+   * response variants. A direct submission object is returned as a one-item
+   * array so test doubles and legacy API responses remain compatible.
+   *
+   * @param data Raw submission-api response body.
+   * @returns Submission records found in the response.
+   */
+  private extractSubmissionArray(data: unknown): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const direct = this.asRecord(data);
+    const directData = direct.data;
+    if (Array.isArray(directData)) {
+      return directData.map((entry) => this.asRecord(entry));
+    }
+
+    const directResult = direct.result;
+    if (Array.isArray(directResult)) {
+      return directResult.map((entry) => this.asRecord(entry));
+    }
+
+    const dataRecord = this.asRecord(directData);
+    if (Array.isArray(dataRecord.data)) {
+      return dataRecord.data.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(directResult);
+    for (const candidate of [
+      resultRecord.data,
+      resultRecord.content,
+      resultRecord.items,
+    ]) {
+      if (Array.isArray(candidate)) {
+        return candidate.map((entry) => this.asRecord(entry));
+      }
+    }
+
+    return this.asString(direct.id) || this.asString(direct.submissionId)
+      ? [direct]
+      : [];
   }
 
   /**
