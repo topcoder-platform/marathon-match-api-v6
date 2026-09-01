@@ -34,7 +34,6 @@ import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -66,9 +65,12 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
 /**
- * ECS entrypoint that fetches marathon match config and tester artifacts from API,
- * runs tester execution, uploads artifacts, and reports results back to the
- * marathon-match API for TypeScript-side review processing.
+ * ECS entrypoint that fetches Marathon Match config and tester artifacts,
+ * delegates tester and submission execution across distinct low-privilege
+ * accounts, uploads artifacts, and reports results to the Marathon Match API.
+ * The trusted parent itself runs as the non-root {@code runner-parent} user;
+ * fixed setuid helpers only bridge to the lower-privilege {@code runner} and
+ * {@code scorer} accounts and immediately drop their temporary privilege.
  */
 public class EcsRunnerMain {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -95,8 +97,10 @@ public class EcsRunnerMain {
     private static final String RUST_BACKTRACE_ENV = "RUST_BACKTRACE=1";
     private static final String SCORER_STATE_CLEANUP_ARGUMENT =
         "--cleanup-scorer-state";
+    private static final String SCORER_PROCESS_CLEANUP_ARGUMENT =
+        "--kill-isolated-processes";
     private static final int SCORER_STATE_CLEANUP_TIMEOUT_MS = 10_000;
-    private static final String RUNNER_EXECUTION_USER = "runner";
+    private static final String TRUSTED_PARENT_USER = "runner-parent";
     private static final String RUNNER_EXECUTION_GROUP = "runner";
     private static final String SCORER_EXECUTION_USER = "scorer";
     private static final String TEST_STATUS_IN_PROGRESS = "IN PROGRESS";
@@ -674,7 +678,7 @@ public class EcsRunnerMain {
      * Loads the short-lived scorer config handoff file and removes it before any
      * tester or submitted solution code can execute.
      *
-     * @param scorerConfigPath Runner-owned scorer config file written by the parent runner.
+     * @param scorerConfigPath Parent-owned, runner-group-readable scorer config handoff file.
      * @return Parsed scorer configuration for the isolated child JVM.
      * @throws IOException When the config cannot be read or deleted.
      */
@@ -705,7 +709,7 @@ public class EcsRunnerMain {
             throw new IOException("Submission directory is not available: " + submissionDir);
         }
         grantRunnerWorkspaceAccess(submissionDir);
-        secureRunnerOnlyFile(testerJarPath);
+        secureRunnerHandoffFile(testerJarPath);
     }
 
     /**
@@ -732,9 +736,13 @@ public class EcsRunnerMain {
     ) throws Exception {
         Path scorerConfigPath = null;
         try {
-            scorerConfigPath = Files.createTempFile("mm-isolated-scorer-", ".json");
+            scorerConfigPath = createRunnerHandoffTempFile(
+                submissionDir,
+                ".mm-isolated-scorer-",
+                ".json"
+            );
             OBJECT_MAPPER.writeValue(scorerConfigPath.toFile(), scorerConfig);
-            secureRunnerOnlyFile(scorerConfigPath);
+            secureRunnerHandoffFile(scorerConfigPath);
 
             List<String> command = buildIsolatedTesterCommand(
                 challengeId,
@@ -1132,21 +1140,20 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Fails fast when the trusted parent process is not running as root.
+     * Fails fast when the process is not the dedicated trusted parent account.
      *
      * <p>The trusted parent owns bootstrap, artifact upload, and filesystem
-     * preparation. The child JVM runs as the unprivileged {@code runner} user,
-     * and generic submitted solution commands run as the separate
-     * unprivileged {@code scorer} user.
+     * preparation while remaining non-root. Fixed setuid helpers bridge to the
+     * lower-privilege {@code runner} tester and {@code scorer} submission users.
      *
-     * @throws IllegalStateException When the runner process is not root.
+     * @throws IllegalStateException When the process is not {@code runner-parent}.
      */
     private static void requireTrustedRunnerProcess() {
         String currentUser = System.getProperty("user.name", "");
-        if (!"root".equals(currentUser)) {
+        if (!TRUSTED_PARENT_USER.equals(currentUser)) {
             throw new IllegalStateException(
-                "Runner must start as root so submitted solution commands can drop to "
-                    + SCORER_EXECUTION_USER
+                "Runner must start as the non-root trusted parent account "
+                    + TRUSTED_PARENT_USER
                     + ". Current user: "
                     + currentUser
             );
@@ -1154,36 +1161,40 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Restricts a sensitive file to read-only access by the isolated Java runner user.
+     * Restricts a parent-created handoff file to parent and tester read access.
      *
      * <p>This is used for downloaded tester JARs and serialized scorer config.
-     * The submitted solution process runs as {@code scorer}, so runner-owned
-     * read-only permissions prevent shell probes from reading or modifying
-     * those files even when they can guess the path.
+     * The parent owns the file and the isolated tester receives read access
+     * through the shared {@code runner} group. The submitted solution runs as
+     * {@code scorer}, which is outside that group and cannot read or modify the
+     * file even when it can guess the path.
      *
      * @param path Sensitive regular file to restrict.
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
-    private static void secureRunnerOnlyFile(Path path) throws IOException {
-        setRunnerOnlyPermissions(path);
+    private static void secureRunnerHandoffFile(Path path) throws IOException {
+        setRunnerHandoffPermissions(path);
     }
 
     /**
-     * Applies runner-owned POSIX permissions to a sensitive runner file.
+     * Applies parent-owned, runner-group-readable POSIX permissions to a handoff file.
      *
      * @param path Sensitive regular file to restrict.
      * @throws IOException When permissions cannot be applied on POSIX filesystems.
      */
-    private static void setRunnerOnlyPermissions(Path path) throws IOException {
+    private static void setRunnerHandoffPermissions(Path path) throws IOException {
         if (path == null || !Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
 
         try {
-            setRunnerOwnerAndGroup(path);
+            setRunnerGroup(path);
             Files.setPosixFilePermissions(
                 path,
-                EnumSet.of(PosixFilePermission.OWNER_READ)
+                EnumSet.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.GROUP_READ
+                )
             );
         } catch (UnsupportedOperationException ignored) {
             logWarn(
@@ -1195,7 +1206,7 @@ public class EcsRunnerMain {
 
     /**
      * Makes a runner workspace writable by the isolated tester JVM without
-     * granting the lower-privilege scorer user direct access to runner-only files.
+     * granting the lower-privilege scorer user direct access to handoff files.
      *
      * @param path Workspace directory or file prepared by the trusted parent.
      * @throws IOException When walking the workspace fails.
@@ -1214,20 +1225,23 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Applies runner ownership and owner-only permissions to one workspace entry.
+     * Applies runner-group ownership and shared parent/tester permissions to one workspace entry.
      *
      * @param path Workspace entry to update.
      */
     private static void applyRunnerWorkspacePermissions(Path path) {
         try {
-            setRunnerOwnerAndGroup(path);
+            setRunnerGroup(path);
             if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
                 Files.setPosixFilePermissions(
                     path,
                     EnumSet.of(
                         PosixFilePermission.OWNER_READ,
                         PosixFilePermission.OWNER_WRITE,
-                        PosixFilePermission.OWNER_EXECUTE
+                        PosixFilePermission.OWNER_EXECUTE,
+                        PosixFilePermission.GROUP_READ,
+                        PosixFilePermission.GROUP_WRITE,
+                        PosixFilePermission.GROUP_EXECUTE
                     )
                 );
             } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -1235,7 +1249,9 @@ public class EcsRunnerMain {
                     path,
                     EnumSet.of(
                         PosixFilePermission.OWNER_READ,
-                        PosixFilePermission.OWNER_WRITE
+                        PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.GROUP_READ,
+                        PosixFilePermission.GROUP_WRITE
                     )
                 );
             }
@@ -1256,12 +1272,16 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Changes one path to the isolated runner user and group.
+     * Assigns one parent-owned path to the shared isolated-runner group.
      *
-     * @param path File or directory to chown without following symlinks.
-     * @throws IOException When ownership cannot be applied.
+     * <p>The trusted parent and isolated tester use distinct UIDs but share this
+     * group. The parent can therefore prepare handoff files without retaining
+     * root or a broad chown capability.
+     *
+     * @param path File or directory to change without following symlinks.
+     * @throws IOException When group ownership cannot be applied.
      */
-    private static void setRunnerOwnerAndGroup(Path path) throws IOException {
+    private static void setRunnerGroup(Path path) throws IOException {
         PosixFileAttributeView view = Files.getFileAttributeView(
             path,
             PosixFileAttributeView.class,
@@ -1276,13 +1296,9 @@ public class EcsRunnerMain {
         UserPrincipalLookupService lookupService = path
             .getFileSystem()
             .getUserPrincipalLookupService();
-        UserPrincipal runnerUser = lookupService.lookupPrincipalByName(
-            RUNNER_EXECUTION_USER
-        );
         GroupPrincipal runnerGroup = lookupService.lookupPrincipalByGroupName(
             RUNNER_EXECUTION_GROUP
         );
-        view.setOwner(runnerUser);
         view.setGroup(runnerGroup);
     }
 
@@ -1375,25 +1391,10 @@ public class EcsRunnerMain {
      * @return {@code true} when at least one lingering scorer process was killed.
      */
     private static boolean killLingeringIsolatedProcesses(boolean quietWhenNone) {
-        if (!"root".equals(System.getProperty("user.name", ""))) {
-            if (!quietWhenNone) {
-                logInfo(
-                    "tester.isolated",
-                    "Skipping scorer process cleanup from non-root runner. User="
-                        + System.getProperty("user.name", "")
-                        + ", target="
-                        + SCORER_EXECUTION_USER
-                );
-            }
-            return false;
-        }
-
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(
-                "pkill",
-                "-KILL",
-                "-u",
-                SCORER_EXECUTION_USER
+                SCORER_ISOLATION_WRAPPER_PATH,
+                SCORER_PROCESS_CLEANUP_ARGUMENT
             );
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
@@ -4410,7 +4411,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Writes tester JAR bytes to a unique runner-owned temporary path.
+     * Writes tester JAR bytes to a unique parent-owned temporary handoff path.
      *
      * @param testerConfigId Tester configuration ID used for diagnostics.
      * @param jarBytes Downloaded tester JAR bytes.
@@ -4419,9 +4420,9 @@ public class EcsRunnerMain {
      */
     private static Path writeTesterJar(String testerConfigId, byte[] jarBytes)
         throws IOException {
-        Path jarPath = createRunnerOnlyTempFile("tester-", ".jar");
+        Path jarPath = createRunnerHandoffTempFile(null, "tester-", ".jar");
         Files.write(jarPath, jarBytes);
-        secureRunnerOnlyFile(jarPath);
+        secureRunnerHandoffFile(jarPath);
         logInfo(
             "filesystem.testerJar",
             "Wrote tester JAR for testerConfigId="
@@ -4437,14 +4438,21 @@ public class EcsRunnerMain {
 
     /**
      * Creates a temporary file that is never backed by a predictable pre-existing
-     * path and is immediately restricted to the trusted runner owner.
+     * path and is immediately restricted to the trusted parent. When a
+     * directory is supplied, the file is created there so the isolated tester
+     * can delete short-lived handoffs through the directory's shared group.
      *
+     * @param directory Optional directory for the temporary file; null uses the system temp root.
      * @param prefix File prefix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
      * @param suffix File suffix accepted by {@link Files#createTempFile(String, String, FileAttribute[])}.
-     * @return Newly created runner-only temporary file.
+     * @return Newly created parent-owned temporary handoff file.
      * @throws IOException When the temporary file cannot be created or restricted.
      */
-    private static Path createRunnerOnlyTempFile(String prefix, String suffix)
+    private static Path createRunnerHandoffTempFile(
+        Path directory,
+        String prefix,
+        String suffix
+    )
         throws IOException {
         try {
             FileAttribute<Set<PosixFilePermission>> permissions =
@@ -4454,10 +4462,14 @@ public class EcsRunnerMain {
                         PosixFilePermission.OWNER_WRITE
                     )
                 );
-            return Files.createTempFile(prefix, suffix, permissions);
+            return directory == null
+                ? Files.createTempFile(prefix, suffix, permissions)
+                : Files.createTempFile(directory, prefix, suffix, permissions);
         } catch (UnsupportedOperationException ignored) {
-            Path path = Files.createTempFile(prefix, suffix);
-            secureRunnerOnlyFile(path);
+            Path path = directory == null
+                ? Files.createTempFile(prefix, suffix)
+                : Files.createTempFile(directory, prefix, suffix);
+            secureRunnerHandoffFile(path);
             return path;
         }
     }
