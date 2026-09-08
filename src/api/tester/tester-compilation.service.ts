@@ -289,7 +289,7 @@ export class TesterCompilationService {
    * 4) `<process.cwd()>/tmp`
    *
    * @returns Absolute writable directory path.
-   * @throws Error When none of the candidates can be created or written.
+   * @throws Error With each candidate's failure when no directory supports writing and execution.
    */
   private async resolveWritableTempRoot(): Promise<string> {
     const configuredTmpDir = process.env.COMPILATION_TMP_DIR?.trim();
@@ -304,25 +304,23 @@ export class TesterCompilationService {
       ),
     );
 
-    let lastError: unknown;
+    const failures: string[] = [];
     for (const candidate of candidates) {
       try {
         await this.ensureWritableDirectory(candidate);
         return candidate;
       } catch (error) {
-        lastError = error;
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        failures.push(`${candidate}: ${errorMessage}`);
         this.logger.warn(
           `Temp root candidate is not writable: ${candidate}. ${errorMessage}`,
         );
       }
     }
 
-    const detail =
-      lastError instanceof Error ? lastError.message : String(lastError);
     throw new Error(
-      `No writable temporary directory is available for tester compilation. Last error: ${detail}`,
+      `No writable temporary directory is available for tester compilation. Attempted directories: ${failures.join('; ')}`,
     );
   }
 

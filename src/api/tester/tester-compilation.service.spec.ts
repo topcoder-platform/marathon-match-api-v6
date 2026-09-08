@@ -25,6 +25,7 @@ type TesterCompilationServicePrivate = TesterCompilationService & {
     timedOut: boolean;
   }>;
   readCompiledJar: (tempDir: string, className: string) => Promise<Buffer>;
+  resolveWritableTempRoot: () => Promise<string>;
 };
 
 describe('TesterCompilationService', () => {
@@ -106,6 +107,51 @@ describe('TesterCompilationService', () => {
       tempDirs
         .splice(0)
         .map((tempDir) => fs.rm(tempDir, { recursive: true, force: true })),
+    );
+  });
+
+  it('reports every failed temp directory, including the configured volume permission error', async () => {
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      COMPILATION_TMP_DIR: '/work/mm-compile',
+      TMPDIR: '/tmp',
+    });
+    const service = createService();
+    const fallback = path.resolve(process.cwd(), 'tmp');
+    jest.spyOn(fs, 'mkdir').mockImplementation((candidate) => {
+      const code = candidate === '/work/mm-compile' ? 'EACCES' : 'EROFS';
+      return Promise.reject(new Error(`${code}: mkdir '${String(candidate)}'`));
+    });
+
+    await expect(service.resolveWritableTempRoot()).rejects.toThrow(
+      `No writable temporary directory is available for tester compilation. Attempted directories: /work/mm-compile: EACCES: mkdir '/work/mm-compile'; /tmp: EROFS: mkdir '/tmp'; ${fallback}: EROFS: mkdir '${fallback}'`,
+    );
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it('uses a writable configured volume when the root filesystem is read-only', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mm-compile-root-'));
+    tempDirs.push(tempDir);
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      COMPILATION_TMP_DIR: tempDir,
+    });
+    const service = createService();
+    const realMkdir = fs.mkdir.bind(fs);
+    jest.spyOn(fs, 'mkdir').mockImplementation((candidate, options) => {
+      if (candidate !== tempDir) {
+        return Promise.reject(new Error('EROFS: read-only file system'));
+      }
+      return realMkdir(candidate, options);
+    });
+    mockJarList({ exitCode: 0 });
+
+    await expect(service.resolveWritableTempRoot()).resolves.toBe(tempDir);
+    expect(await fs.readdir(tempDir)).toEqual([]);
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mm-compile-probe-.*\.sh$/),
+      [],
+      { env: process.env },
     );
   });
 

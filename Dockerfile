@@ -31,6 +31,14 @@ ARG SEED_DATA_ARG=""
 ENV SEED_DATA=$SEED_DATA_ARG
 ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x
 ENV NODE_ENV=production
+ENV COMPILATION_TMP_DIR=/work/mm-compile
+ENV MAVEN_OPTS="-Dmaven.repo.local=/work/.m2/repository"
+
+# ECS initializes the matching /work volume from this image, including ownership.
+# Both compilation workspaces and Maven's cache must be writable by USER app.
+RUN mkdir -p /work/mm-compile /work/.m2/repository \
+    && chown -R app:app /work
+VOLUME ["/work"]
 
 WORKDIR /app
 COPY --chown=app:app --from=build /app/dist ./dist

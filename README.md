@@ -6,8 +6,15 @@ NestJS service for managing marathon match scorer configuration, compiling teste
 
 Use Node.js 26.5.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
 The production image uses Alpine's dynamically linked Node.js package and
-patched system OpenSSL, runs as an unprivileged application user, and keeps a
-writable application home for Maven's runtime cache.
+patched system OpenSSL, and runs as the unprivileged `app` user (UID 10001).
+The image declares an app-owned `/work` volume for compilation workspaces and
+Maven's runtime cache. For ECS tasks with `readonlyRootFilesystem: true`, mount
+a writable task volume at `/work`; the path must match the Dockerfile's `VOLUME`
+so ECS initializes its contents and ownership from the image. A root-owned
+volume with mode `0755` prevents the app user from creating compilation files.
+The image defaults to `COMPILATION_TMP_DIR=/work/mm-compile` and
+`MAVEN_OPTS=-Dmaven.repo.local=/work/.m2/repository`. If `COMPILE_MAVEN_OPTS`
+overrides Maven options, include a repository path on the writable volume.
 
 ## Service base path
 
@@ -132,9 +139,15 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 | `COMPILE_MAVEN_OPTS`               | No                    | (auto-derived)                                                              | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap     |
 | `MVN_BINARY`                       | No                    | `mvn`                                                                       | Maven executable for tester compilation                                                                    |
 | `BOILERPLATE_DIR`                  | No                    | `<repo>/ecs-runner/boilerplate`                                             | Java boilerplate project copied for compilation                                                            |
-| `COMPILATION_TMP_DIR`              | No                    | Auto-discovery (`TMPDIR`, `/dev/shm` on Linux, `os.tmpdir()`, `<repo>/tmp`) | Writable temp root used for compile workspaces; set to `/dev/shm` to keep workspace on memory-backed tmpfs |
+| `COMPILATION_TMP_DIR`              | No                    | Image: `/work/mm-compile`; otherwise `TMPDIR`, `os.tmpdir()`, `<repo>/tmp` | Writable, executable temp root used for compile workspaces; owned by the application user |
 | `PG_BOSS_COMPILE_TEAM_SIZE`        | No                    | `1`                                                                         | Number of pg-boss compile workers processing jobs in parallel                                              |
 | `PG_BOSS_COMPILE_TEAM_CONCURRENCY` | No                    | `1`                                                                         | Per-worker concurrency for compile jobs                                                                    |
+
+When all compilation temp directories fail, `compilationError` includes each
+attempted path and its error. Check the configured path first: `EACCES` indicates
+insufficient permissions, while `EROFS` indicates a read-only filesystem. The
+last fallback (`/app/tmp` in the image) can report `ENOENT` even when an earlier
+candidate failed because the writable volume was owned by the wrong user.
 
 ### ECS launch configuration
 
