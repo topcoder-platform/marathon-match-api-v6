@@ -4637,7 +4637,7 @@ packages:
     resolution: {integrity: sha512-U6QpVRyCGHva435KoNWy9PRoi2IFYCgtEhq9nmrPPpbRacPs9IH4aJ3gbrFC8dPcXvdSZ4XXfXT5Fshbp2MtlQ==}
 
   tc-core-library-js@https://codeload.github.com/topcoder-platform/tc-core-library-js/tar.gz/323567bc50e433ae488b656f9f94e821ebaf3062:
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/topcoder-platform/tc-core-library-js/tar.gz/323567bc50e433ae488b656f9f94e821ebaf3062}
+    resolution: {gitHosted: true, integrity: sha512-yI3OCoVJjnaXorhGSF2Lyok5DOeDulDRSKWQlojWzJRcyklE/dP1nIn9rnblUAwlu6GDcEZWNeS9S/fHS7ny/Q==, tarball: https://codeload.github.com/topcoder-platform/tc-core-library-js/tar.gz/323567bc50e433ae488b656f9f94e821ebaf3062}
     version: 3.0.1
     engines: {node: '>= 14'}
 
