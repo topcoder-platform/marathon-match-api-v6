@@ -1,0 +1,63 @@
+name: Trivy Scanner
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - dev
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  trivy-scan:
+    name: Trivy SAST and SCA
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java and cache Maven dependencies
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+          cache-dependency-path: "**/pom.xml"
+
+      - name: Populate the local Maven repository for offline analysis
+        shell: bash
+        run: |
+          while IFS= read -r -d '' pom_file; do
+            mvn --batch-mode --no-transfer-progress \
+              --settings .github/maven-settings.xml \
+              --file "$pom_file" \
+              dependency:resolve
+          done < <(find . -type f -name pom.xml -not -path './.git/*' -print0)
+
+      - name: Run Trivy scanner in repo mode
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_OFFLINE_SCAN: "true"
+        with:
+          version: "v0.73.0"
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH,MEDIUM,UNKNOWN"
+          limit-severities-for-sarif: true
+          scanners: vuln,secret,misconfig,license
+          github-pat: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: "trivy-results.sarif"

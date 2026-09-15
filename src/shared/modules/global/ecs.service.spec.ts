@@ -4,7 +4,13 @@ import {
   ListTasksCommand,
   RunTaskCommand,
   StopTaskCommand,
+  waitUntilTasksStopped,
 } from '@aws-sdk/client-ecs';
+
+jest.mock('@aws-sdk/client-ecs', () => ({
+  ...jest.requireActual('@aws-sdk/client-ecs'),
+  waitUntilTasksStopped: jest.fn(),
+}));
 
 jest.mock('./prisma.service', () => ({
   PrismaService: class PrismaService {},
@@ -28,6 +34,7 @@ describe('EcsService', () => {
     const prisma = {
       submissionRunnerLog: {
         upsert: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -99,6 +106,9 @@ describe('EcsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (waitUntilTasksStopped as jest.Mock).mockResolvedValue({
+      state: 'SUCCESS',
+    });
     process.env = {
       ...originalEnv,
       AWS_REGION: 'us-east-1',
@@ -429,7 +439,7 @@ describe('EcsService', () => {
     ).toBe(false);
   });
 
-  it('launches scorer tasks when active task listing is not permitted', async () => {
+  it('retains the inspection fallback for launches without a member identity', async () => {
     const { service, m2mService, prisma, send } = createService();
     m2mService.getM2MToken.mockResolvedValue('launch-token');
     send.mockImplementation((command) => {
@@ -480,7 +490,7 @@ describe('EcsService', () => {
       baseTaskConfig,
       basePhaseConfig,
       undefined,
-      { memberId: 'member-1' },
+      {},
     );
 
     expect(result.taskId).toBe('task-123');
@@ -595,5 +605,286 @@ describe('EcsService', () => {
     expect(environmentByName.get('PHASE_NUMBER_OF_TESTS')).toBe('5000');
     expect(environmentByName.get('REVIEW_ID')).toBe('review-1');
     expect(environmentByName.has('DEBUG_LOG_FULL_ACCESS_TOKEN')).toBe(false);
+  });
+
+  it('cancels the active scorer tasks a member still has running on a challenge', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve(
+          command.input.desiredStatus === 'RUNNING'
+            ? {
+                taskArns: [
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+                  'arn:aws:ecs:us-east-1:123456789012:task/cluster/other-member-task',
+                ],
+              }
+            : { taskArns: [] },
+        );
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return Promise.resolve({
+          tasks: [
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+              submissionId: 'old-submission',
+            }),
+            activeTask({
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/other-member-task',
+              memberId: 'member-2',
+              submissionId: 'other-member-submission',
+            }),
+          ],
+        });
+      }
+      if (command instanceof StopTaskCommand) {
+        return Promise.resolve({});
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    const cancelledTasks = await service.cancelMemberScorerTasks({
+      challengeId: 'challenge-1',
+      submissionId: 'new-submission',
+      memberId: 'member-1',
+      taskDefinitionName: 'mm-ecs-runner',
+    });
+
+    expect(cancelledTasks).toEqual([
+      {
+        submissionId: 'old-submission',
+        taskArn: 'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+        taskId: 'old-task',
+        phaseConfigType: 'PROVISIONAL',
+      },
+    ]);
+
+    const stopCommands = send.mock.calls
+      .map((call) => call[0] as unknown)
+      .filter(
+        (command): command is StopTaskCommand =>
+          command instanceof StopTaskCommand,
+      );
+    expect(stopCommands).toHaveLength(1);
+    expect(stopCommands[0].input.task).toBe(
+      'arn:aws:ecs:us-east-1:123456789012:task/cluster/old-task',
+    );
+  });
+
+  it('rejects cancellation when active scorer task inspection is not permitted', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.reject(
+          Object.assign(
+            new Error('User is not authorized to perform: ecs:ListTasks'),
+            {
+              name: 'AccessDeniedException',
+            },
+          ),
+        );
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await expect(
+      service.cancelMemberScorerTasks({
+        challengeId: 'challenge-1',
+        submissionId: 'new-submission',
+        memberId: 'member-1',
+        taskDefinitionName: 'mm-ecs-runner',
+      }),
+    ).rejects.toThrow('not authorized');
+  });
+
+  it('waits for a stopping duplicate instead of reusing a task that is shutting down', async () => {
+    const { service, prisma, send } = createService();
+    prisma.submissionRunnerLog.findMany.mockResolvedValue([
+      { taskArn: 'stopping-task', submissionId: 'submission-1' },
+    ]);
+    send.mockImplementation(async (command) => {
+      if (command instanceof ListTasksCommand) return { taskArns: [] };
+      if (command instanceof DescribeTasksCommand) {
+        return {
+          tasks: [
+            {
+              ...activeTask({ taskArn: 'stopping-task' }),
+              desiredStatus: 'STOPPED',
+            },
+          ],
+        };
+      }
+      if (command instanceof RunTaskCommand) {
+        expect(waitUntilTasksStopped).toHaveBeenCalled();
+        return { tasks: [{ taskArn: 'replacement-task' }] };
+      }
+      if (command instanceof DescribeTaskDefinitionCommand)
+        return { taskDefinition: {} };
+      throw new Error('Unexpected ECS request');
+    });
+    const result = await service.launchScorerTask(
+      'challenge-1',
+      'submission-1',
+      baseTaskConfig,
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+    expect(result.taskArn).toBe('replacement-task');
+    expect(result.reusedExistingTask).not.toBe(true);
+  });
+
+  it('refuses a member launch when task inspection is denied', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValue(new Error('AccessDeniedException: ecs:ListTasks'));
+
+    await expect(
+      service.launchScorerTask(
+        'challenge-1',
+        'new-submission',
+        baseTaskConfig,
+        basePhaseConfig,
+        undefined,
+        { memberId: 'member-1' },
+      ),
+    ).rejects.toThrow('AccessDeniedException');
+    expect(
+      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
+    ).toBe(false);
+  });
+
+  it.each([false, true])(
+    'persists cancellation before stopping a discovered task; failure=%s',
+    async (fails) => {
+      const { service, send } = createService();
+      const events: string[] = [];
+      send.mockImplementation(async (command) => {
+        if (command instanceof ListTasksCommand)
+          return { taskArns: ['old-task'] };
+        if (command instanceof DescribeTasksCommand) {
+          return {
+            tasks: [
+              activeTask({
+                taskArn: 'old-task',
+                submissionId: 'old-submission',
+              }),
+            ],
+          };
+        }
+        if (command instanceof StopTaskCommand) {
+          events.push('stop');
+          return {};
+        }
+        throw new Error('Unexpected ECS request');
+      });
+      const beforeStop = jest.fn(async () => {
+        events.push('persist');
+        if (fails) throw new Error('Review API unavailable');
+      });
+      const operation = service.cancelMemberScorerTasks(
+        {
+          challengeId: 'challenge-1',
+          memberId: 'member-1',
+          submissionId: 'new-submission',
+          taskDefinitionName: 'mm-ecs-runner',
+        },
+        beforeStop,
+      );
+
+      if (fails) {
+        await expect(operation).rejects.toThrow('Review API unavailable');
+        expect(events).toEqual(['persist']);
+        expect(waitUntilTasksStopped).not.toHaveBeenCalled();
+      } else {
+        await expect(operation).resolves.toHaveLength(1);
+        expect(events).toEqual(['persist', 'stop']);
+        expect(waitUntilTasksStopped).toHaveBeenCalledWith(
+          expect.objectContaining({ maxWaitTime: 120 }),
+          { cluster: 'cluster-1', tasks: ['old-task'] },
+        );
+      }
+    },
+  );
+
+  it('recovers a legacy runner from persisted ARNs before ListTasks has caught up', async () => {
+    const { service, prisma, send } = createService();
+    prisma.submissionRunnerLog.findMany.mockResolvedValue([
+      { taskArn: 'known-old-task', submissionId: 'old-submission' },
+    ]);
+    const legacyTask = activeTask({
+      taskArn: 'known-old-task',
+      submissionId: 'old-submission',
+    });
+    legacyTask.overrides.containerOverrides[0].environment =
+      legacyTask.overrides.containerOverrides[0].environment.filter(
+        (entry) => entry.name !== 'MEMBER_ID',
+      );
+    send.mockImplementation(async (command) => {
+      if (command instanceof ListTasksCommand) return { taskArns: [] };
+      if (command instanceof DescribeTasksCommand)
+        return { tasks: [legacyTask] };
+      if (command instanceof StopTaskCommand) return {};
+      throw new Error('Unexpected ECS request');
+    });
+
+    const result = await service.cancelMemberScorerTasks({
+      challengeId: 'challenge-1',
+      memberId: 'member-1',
+      submissionId: 'new-submission',
+      memberSubmissionIds: ['new-submission', 'old-submission'],
+      taskDefinitionName: 'mm-ecs-runner',
+    });
+    expect(result).toEqual([
+      expect.objectContaining({ submissionId: 'old-submission' }),
+    ]);
+    expect(prisma.submissionRunnerLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          challengeId: 'challenge-1',
+          cluster: 'cluster-1',
+          submissionId: { in: ['new-submission', 'old-submission'] },
+        },
+      }),
+    );
+  });
+
+  it('retains a stopping task and blocks replacement until ECS confirms shutdown', async () => {
+    const { service, send } = createService();
+    const oldTask = {
+      ...activeTask({ taskArn: 'old-task', submissionId: 'old-submission' }),
+      desiredStatus: 'STOPPED',
+    };
+    (waitUntilTasksStopped as jest.Mock).mockRejectedValue(
+      new Error('shutdown not confirmed'),
+    );
+    send.mockImplementation(async (command) => {
+      if (command instanceof ListTasksCommand) {
+        return {
+          taskArns:
+            command.input.desiredStatus === 'STOPPED' ? ['old-task'] : [],
+        };
+      }
+      if (command instanceof DescribeTasksCommand) return { tasks: [oldTask] };
+      if (command instanceof StopTaskCommand) return {};
+      throw new Error('Replacement launched before shutdown');
+    });
+
+    await expect(
+      service.launchScorerTask(
+        'challenge-1',
+        'new-submission',
+        baseTaskConfig,
+        basePhaseConfig,
+        undefined,
+        { memberId: 'member-1' },
+      ),
+    ).rejects.toThrow('shutdown not confirmed');
+    expect(
+      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
+    ).toBe(false);
   });
 });

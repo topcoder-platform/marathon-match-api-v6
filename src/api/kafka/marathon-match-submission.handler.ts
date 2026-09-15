@@ -7,6 +7,7 @@ import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-ur
 import { M2MService } from 'src/shared/modules/global/m2m.service';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 import { PrismaService } from 'src/shared/modules/global/prisma.service';
+import { withMemberScorerLock } from 'src/shared/modules/global/member-scorer-lock';
 import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
@@ -45,9 +46,24 @@ interface OpenPhaseResolution {
   phaseIdentifiers: string[];
 }
 
+interface CleanMemberSubmission {
+  submissionId: string;
+  submittedDate?: string;
+  sortTimestamp: number;
+  sequence: number;
+  memberSubmissionIds?: string[];
+}
+
 interface SkippedSubmissionScoringConfig {
   reviewScorecardId?: string | null;
 }
+
+/**
+ * Terminal test statuses used when scoring stops before a score is produced.
+ * `CANCELLED` marks a run that was intentionally superseded, so it is not
+ * reported to members as a scoring failure.
+ */
+type TerminalTestStatus = 'CANCELLED' | 'FAILED';
 
 interface SkippedSubmissionScoringPayload {
   submissionId: string;
@@ -56,6 +72,7 @@ interface SkippedSubmissionScoringPayload {
   scorecardId?: string;
   reason: string;
   details?: Record<string, unknown>;
+  testStatus?: TerminalTestStatus;
 }
 
 interface SkippedReviewSummationPayload {
@@ -130,7 +147,8 @@ export class MarathonMatchSubmissionHandler
    * envelope (`{ topic, payload }`) and direct payload publish formats.
    * @returns Resolves when the message is fully handled.
    * @throws Error When required fields are missing, config is missing, challenge API
-   * lookup fails, tester compilation is not successful, or ECS task launch fails.
+   * lookup/dispatch locking fails, tester compilation is not successful, or ECS
+   * task launch fails. Newest lookup and replacement are serialized per member.
    */
   async handle(message: MarathonMatchSubmissionKafkaMessage): Promise<void> {
     try {
@@ -149,192 +167,20 @@ export class MarathonMatchSubmissionHandler
       const submissionId = (submissionPayload.submissionId ?? '').trim();
       const challengeId = (submissionPayload.challengeId ?? '').trim();
       const memberId = (submissionPayload.memberId ?? '').trim();
-      if (!submissionId || !challengeId) {
+      if (!submissionId || !challengeId || !memberId) {
         throw new Error(
-          'Missing required message fields: submissionId and challengeId are required.',
+          'Missing required message fields: submissionId, challengeId, and memberId are required.',
         );
       }
 
-      const config = await this.prisma.marathonMatchConfig.findUnique({
-        where: { challengeId },
-        include: { phaseConfigs: true, tester: true },
-      });
-
-      if (!config) {
-        throw new Error(
-          `Marathon match config not found for challenge ${challengeId}.`,
-        );
-      }
-
-      if (config.active === false) {
-        await this.markSubmissionScoringSkipped(
-          submissionId,
+      await withMemberScorerLock(challengeId, memberId, () =>
+        this.scoreSubmission(
+          submissionPayload,
           challengeId,
-          'Marathon Match scoring skipped because the challenge configuration is inactive.',
-          config,
-          { configId: config.id },
-        );
-        this.logger.log(
-          `Marathon match config ${config.id} is inactive. Skipping submission ${submissionId}.`,
-        );
-        return;
-      }
-
-      const openPhaseResolution =
-        await this.getOpenPhaseResolution(challengeId);
-      if (openPhaseResolution.phaseIdentifiers.length === 0) {
-        await this.markSubmissionScoringSkipped(
           submissionId,
-          challengeId,
-          'Marathon Match scoring skipped because the challenge has no open scoring phase.',
-          config,
-          { configId: config.id },
-        );
-        this.logger.log(
-          `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
-        );
-        return;
-      }
-
-      const matchingPhaseConfigs = this.findMatchingPhaseConfigs(
-        config.phaseConfigs,
-        openPhaseResolution.phaseIdentifiers,
+          memberId,
+        ),
       );
-      if (matchingPhaseConfigs.length === 0) {
-        await this.markSubmissionScoringSkipped(
-          submissionId,
-          challengeId,
-          'Marathon Match scoring skipped because no configured phase matches the open challenge phase.',
-          config,
-          {
-            configId: config.id,
-            openPhaseIds: openPhaseResolution.phaseIds,
-            openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
-          },
-        );
-        this.logger.log({
-          message:
-            'No configured marathon match phase for open challenge phases',
-          challengeId,
-          submissionId,
-          openPhaseIds: openPhaseResolution.phaseIds,
-          openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
-        });
-        return;
-      }
-
-      if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
-        throw new Error(
-          `Tester ${config.testerId} for config ${config.id} is not ready. Current compilation status: ${config.tester.compilationStatus}.`,
-        );
-      }
-
-      const submissionApiBaseUrl = resolveSubmissionApiBaseUrl({
-        configuredUrl: config.submissionApiUrl,
-        fallbackApiBaseUrl: this.challengeApiBaseUrl,
-        environmentUrls: [this.challengeApiBaseUrl],
-      });
-
-      const token = await this.m2mService.getM2MToken();
-      if (!token) {
-        throw new Error(
-          'Unable to get M2M token for submission virus scan preflight.',
-        );
-      }
-
-      const submission = await this.fetchSubmissionById(
-        token,
-        submissionApiBaseUrl,
-        submissionId,
-      );
-      if (!this.isSubmissionCleanForScoring(submission)) {
-        const skippedPhaseTasks: Array<Record<string, unknown>> = [];
-        for (const matchingPhaseConfig of matchingPhaseConfigs) {
-          const reason = `Marathon Match ${matchingPhaseConfig.configType} scoring skipped because the submission has not passed virus scanning.`;
-          await this.upsertSkippedReviewSummation(token, {
-            submissionId,
-            challengeId,
-            testPhase: matchingPhaseConfig.configType,
-            reason,
-            details: {
-              configId: config.id,
-              phaseConfigId: matchingPhaseConfig.id,
-              virusScan: submission?.virusScan ?? null,
-            },
-            scorecardId: config.reviewScorecardId?.trim() || undefined,
-          });
-          skippedPhaseTasks.push({
-            configType: matchingPhaseConfig.configType,
-            phaseId: matchingPhaseConfig.phaseId,
-            phaseConfigId: matchingPhaseConfig.id,
-          });
-        }
-
-        this.logger.log({
-          message:
-            'Skipped Marathon Match submission scoring because submission is not virus-scanned.',
-          challengeId,
-          submissionId,
-          virusScan: submission?.virusScan ?? null,
-          skippedPhaseTasks,
-        });
-        return;
-      }
-
-      const launchedPhaseTasks: Array<Record<string, unknown>> = [];
-      for (const matchingPhaseConfig of matchingPhaseConfigs) {
-        const launchResult = await this.ecsService.launchScorerTask(
-          config.challengeId,
-          submissionId,
-          {
-            taskDefinitionName: config.taskDefinitionName,
-            taskDefinitionVersion: config.taskDefinitionVersion,
-          },
-          {
-            configType: matchingPhaseConfig.configType,
-            startSeed: matchingPhaseConfig.startSeed,
-            numberOfTests: matchingPhaseConfig.numberOfTests,
-          },
-          undefined,
-          { memberId },
-        );
-        this.logSubmissionRunnerMapping(
-          challengeId,
-          submissionId,
-          matchingPhaseConfig.configType,
-          launchResult,
-        );
-        launchedPhaseTasks.push({
-          configType: matchingPhaseConfig.configType,
-          phaseId: matchingPhaseConfig.phaseId,
-          phaseConfigId: matchingPhaseConfig.id,
-          taskArn: launchResult.taskArn,
-          taskId: launchResult.taskId,
-          logGroup: launchResult.logGroup ?? null,
-          logStreamPrefix: launchResult.logStreamPrefix ?? null,
-          logStreamName: launchResult.logStreamName ?? null,
-          cloudWatchLogsConsoleUrl:
-            launchResult.cloudWatchLogsConsoleUrl ?? null,
-        });
-      }
-
-      this.logger.log({
-        message: 'Marathon match submission event processed successfully',
-        challengeId,
-        submissionId,
-        openPhaseIds: openPhaseResolution.phaseIds,
-        openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
-        matchedPhaseIds: matchingPhaseConfigs.map(
-          (matchingPhaseConfig) => matchingPhaseConfig.phaseId,
-        ),
-        matchedPhaseConfigIds: matchingPhaseConfigs.map(
-          (matchingPhaseConfig) => matchingPhaseConfig.id,
-        ),
-        matchedPhaseConfigTypes: matchingPhaseConfigs.map(
-          (matchingPhaseConfig) => matchingPhaseConfig.configType,
-        ),
-        launchedPhaseTasks,
-      });
     } catch (error) {
       const resolvedError =
         error instanceof Error ? error : new Error(String(error));
@@ -349,6 +195,285 @@ export class MarathonMatchSubmissionHandler
       );
       throw resolvedError;
     }
+  }
+
+  /**
+   * Dispatches one validated submission while its member database lock is held.
+   * @param submissionPayload Event payload supplying fallback submission time.
+   * @param challengeId Validated challenge ID.
+   * @param submissionId Validated submission ID.
+   * @param memberId Validated submitter ID.
+   * @returns Resolves after skipping stale work or launching the newest clean run.
+   * @throws Error when configuration, downstream APIs, cancellation, or launch fails.
+   */
+  private async scoreSubmission(
+    submissionPayload: MarathonMatchSubmissionEventPayload,
+    challengeId: string,
+    submissionId: string,
+    memberId: string,
+  ): Promise<void> {
+    const config = await this.prisma.marathonMatchConfig.findUnique({
+      where: { challengeId },
+      include: { phaseConfigs: true, tester: true },
+    });
+
+    if (!config) {
+      throw new Error(
+        `Marathon match config not found for challenge ${challengeId}.`,
+      );
+    }
+
+    if (config.active === false) {
+      await this.markSubmissionScoringSkipped(
+        submissionId,
+        challengeId,
+        'Marathon Match scoring skipped because the challenge configuration is inactive.',
+        config,
+        { configId: config.id },
+      );
+      this.logger.log(
+        `Marathon match config ${config.id} is inactive. Skipping submission ${submissionId}.`,
+      );
+      return;
+    }
+
+    const openPhaseResolution = await this.getOpenPhaseResolution(challengeId);
+    if (openPhaseResolution.phaseIdentifiers.length === 0) {
+      await this.markSubmissionScoringSkipped(
+        submissionId,
+        challengeId,
+        'Marathon Match scoring skipped because the challenge has no open scoring phase.',
+        config,
+        { configId: config.id },
+      );
+      this.logger.log(
+        `Challenge ${challengeId} has no open phase. Skipping submission ${submissionId}.`,
+      );
+      return;
+    }
+
+    const matchingPhaseConfigs = this.findMatchingPhaseConfigs(
+      config.phaseConfigs,
+      openPhaseResolution.phaseIdentifiers,
+    );
+    if (matchingPhaseConfigs.length === 0) {
+      await this.markSubmissionScoringSkipped(
+        submissionId,
+        challengeId,
+        'Marathon Match scoring skipped because no configured phase matches the open challenge phase.',
+        config,
+        {
+          configId: config.id,
+          openPhaseIds: openPhaseResolution.phaseIds,
+          openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
+        },
+      );
+      this.logger.log({
+        message: 'No configured marathon match phase for open challenge phases',
+        challengeId,
+        submissionId,
+        openPhaseIds: openPhaseResolution.phaseIds,
+        openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
+      });
+      return;
+    }
+
+    if (config.tester.compilationStatus !== CompilationStatus.SUCCESS) {
+      throw new Error(
+        `Tester ${config.testerId} for config ${config.id} is not ready. Current compilation status: ${config.tester.compilationStatus}.`,
+      );
+    }
+
+    const submissionApiBaseUrl = resolveSubmissionApiBaseUrl({
+      configuredUrl: config.submissionApiUrl,
+      fallbackApiBaseUrl: this.challengeApiBaseUrl,
+      environmentUrls: [this.challengeApiBaseUrl],
+    });
+
+    const token = await this.m2mService.getM2MToken();
+    if (!token) {
+      throw new Error(
+        'Unable to get M2M token for submission virus scan preflight.',
+      );
+    }
+
+    const submission = await this.fetchSubmissionById(
+      token,
+      submissionApiBaseUrl,
+      submissionId,
+    );
+    if (!this.isSubmissionCleanForScoring(submission)) {
+      const skippedPhaseTasks: Array<Record<string, unknown>> = [];
+      for (const matchingPhaseConfig of matchingPhaseConfigs) {
+        const reason = `Marathon Match ${matchingPhaseConfig.configType} scoring skipped because the submission has not passed virus scanning.`;
+        await this.upsertSkippedReviewSummation(token, {
+          submissionId,
+          challengeId,
+          testPhase: matchingPhaseConfig.configType,
+          reason,
+          details: {
+            configId: config.id,
+            phaseConfigId: matchingPhaseConfig.id,
+            virusScan: submission?.virusScan ?? null,
+          },
+          scorecardId: config.reviewScorecardId?.trim() || undefined,
+        });
+        skippedPhaseTasks.push({
+          configType: matchingPhaseConfig.configType,
+          phaseId: matchingPhaseConfig.phaseId,
+          phaseConfigId: matchingPhaseConfig.id,
+        });
+      }
+
+      this.logger.log({
+        message:
+          'Skipped Marathon Match submission scoring because submission is not virus-scanned.',
+        challengeId,
+        submissionId,
+        virusScan: submission?.virusScan ?? null,
+        skippedPhaseTasks,
+      });
+      return;
+    }
+
+    const newestCleanSubmission = await this.fetchNewestCleanMemberSubmission(
+      token,
+      submissionApiBaseUrl,
+      challengeId,
+      memberId,
+      {
+        ...submission,
+        id: submissionId,
+        memberId,
+        challengeId,
+        submittedDate:
+          this.asString(submission?.submittedDate) ??
+          this.asString(submissionPayload.submittedDate),
+        virusScan: true,
+      },
+    );
+
+    if (
+      newestCleanSubmission &&
+      newestCleanSubmission.submissionId !== submissionId
+    ) {
+      await this.cancelInFlightMemberScoring(token, {
+        challengeId,
+        submissionId: newestCleanSubmission.submissionId,
+        memberId,
+        memberSubmissionIds: newestCleanSubmission.memberSubmissionIds,
+        configId: config.id,
+        taskDefinitionName: config.taskDefinitionName,
+        reviewScorecardId: config.reviewScorecardId,
+      });
+
+      const cancelledPhaseTasks: Array<Record<string, unknown>> = [];
+      for (const matchingPhaseConfig of matchingPhaseConfigs) {
+        const testPhase = this.normalizeTestPhase(
+          matchingPhaseConfig.configType,
+        );
+        const reason = `Marathon Match ${testPhase} scoring cancelled because this submission was superseded by a newer solution before dispatch.`;
+        await this.upsertSkippedReviewSummation(token, {
+          submissionId,
+          challengeId,
+          testPhase,
+          reason,
+          testStatus: 'CANCELLED',
+          details: {
+            configId: config.id,
+            memberId,
+            replacementSubmissionId: newestCleanSubmission.submissionId,
+            replacementSubmittedDate:
+              newestCleanSubmission.submittedDate ?? null,
+          },
+          scorecardId: config.reviewScorecardId?.trim() || undefined,
+        });
+        cancelledPhaseTasks.push({
+          configType: matchingPhaseConfig.configType,
+          phaseId: matchingPhaseConfig.phaseId,
+          phaseConfigId: matchingPhaseConfig.id,
+        });
+      }
+
+      this.logger.log({
+        message:
+          'Skipped stale Marathon Match submission event because a newer clean member submission exists.',
+        challengeId,
+        memberId,
+        submissionId,
+        replacementSubmissionId: newestCleanSubmission.submissionId,
+        replacementSubmittedDate: newestCleanSubmission.submittedDate ?? null,
+        cancelledPhaseTasks,
+      });
+      return;
+    }
+
+    await this.cancelInFlightMemberScoring(token, {
+      challengeId,
+      submissionId,
+      memberId,
+      memberSubmissionIds: newestCleanSubmission?.memberSubmissionIds,
+      configId: config.id,
+      taskDefinitionName: config.taskDefinitionName,
+      reviewScorecardId: config.reviewScorecardId,
+    });
+
+    const launchedPhaseTasks: Array<Record<string, unknown>> = [];
+    for (const matchingPhaseConfig of matchingPhaseConfigs) {
+      const launchResult = await this.ecsService.launchScorerTask(
+        config.challengeId,
+        submissionId,
+        {
+          taskDefinitionName: config.taskDefinitionName,
+          taskDefinitionVersion: config.taskDefinitionVersion,
+        },
+        {
+          configType: matchingPhaseConfig.configType,
+          startSeed: matchingPhaseConfig.startSeed,
+          numberOfTests: matchingPhaseConfig.numberOfTests,
+        },
+        undefined,
+        {
+          memberId,
+          stopSupersededMemberTasks: false,
+        },
+      );
+      this.logSubmissionRunnerMapping(
+        challengeId,
+        submissionId,
+        matchingPhaseConfig.configType,
+        launchResult,
+      );
+      launchedPhaseTasks.push({
+        configType: matchingPhaseConfig.configType,
+        phaseId: matchingPhaseConfig.phaseId,
+        phaseConfigId: matchingPhaseConfig.id,
+        taskArn: launchResult.taskArn,
+        taskId: launchResult.taskId,
+        logGroup: launchResult.logGroup ?? null,
+        logStreamPrefix: launchResult.logStreamPrefix ?? null,
+        logStreamName: launchResult.logStreamName ?? null,
+        cloudWatchLogsConsoleUrl: launchResult.cloudWatchLogsConsoleUrl ?? null,
+      });
+    }
+
+    this.logger.log({
+      message: 'Marathon match submission event processed successfully',
+      challengeId,
+      submissionId,
+      openPhaseIds: openPhaseResolution.phaseIds,
+      openPhaseIdentifiers: openPhaseResolution.phaseIdentifiers,
+      matchedPhaseIds: matchingPhaseConfigs.map(
+        (matchingPhaseConfig) => matchingPhaseConfig.phaseId,
+      ),
+      matchedPhaseConfigIds: matchingPhaseConfigs.map(
+        (matchingPhaseConfig) => matchingPhaseConfig.id,
+      ),
+      matchedPhaseConfigTypes: matchingPhaseConfigs.map(
+        (matchingPhaseConfig) => matchingPhaseConfig.configType,
+      ),
+      launchedPhaseTasks,
+    });
   }
 
   /**
@@ -420,6 +545,109 @@ export class MarathonMatchSubmissionHandler
     );
 
     return this.extractSubmissionRecord(response.data);
+  }
+
+  /**
+   * Finds the newest virus-clean submission for a challenge/member before ECS
+   * orchestration. Submission scan events can be published or consumed out of
+   * submission order, so this authoritative lookup prevents an older event from
+   * stopping and replacing the scorer for a newer solution.
+   *
+   * @param token M2M token for submission-api-v6.
+   * @param submissionApiUrl Configured submission-api-v6 base URL.
+   * @param challengeId Challenge whose member submissions are compared.
+   * @param memberId Member whose most recent clean submission is required.
+   * @param currentSubmission Current clean submission used as a safe fallback.
+   * @returns Newest clean member submission plus verified member submission IDs
+   * for recovering runner task ARNs, or undefined when no candidate exists.
+   * @throws Error when submission-api-v6 rejects the member submission lookup.
+   */
+  private async fetchNewestCleanMemberSubmission(
+    token: string,
+    submissionApiUrl: string,
+    challengeId: string,
+    memberId: string,
+    currentSubmission: Record<string, unknown>,
+  ): Promise<CleanMemberSubmission | undefined> {
+    const url = `${this.buildSubmissionApiBaseUrl(
+      submissionApiUrl,
+    )}/submissions`;
+    const params: Record<string, string | number> = {
+      challengeId,
+      memberId,
+      orderBy: 'desc',
+      page: 1,
+      perPage: 100,
+      sortBy: 'submittedDate',
+      type: 'CONTEST_SUBMISSION',
+    };
+    const response = await this.callExternalApi(
+      {
+        operation: 'submission-api.find-member-submissions',
+        method: 'GET',
+        url,
+        challengeId,
+        params,
+      },
+      () =>
+        firstValueFrom(
+          this.httpService.get(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            params,
+          }),
+        ),
+    );
+
+    const submissions = this.extractSubmissionArray(response.data);
+    submissions.push(currentSubmission);
+
+    const candidatesById = new Map<string, CleanMemberSubmission>();
+    for (const [sequence, submission] of submissions.entries()) {
+      const candidateSubmissionId =
+        this.asString(submission.submissionId) ?? this.asString(submission.id);
+      if (
+        !candidateSubmissionId ||
+        candidatesById.has(candidateSubmissionId) ||
+        this.parseBooleanFlag(submission.virusScan) !== true
+      ) {
+        continue;
+      }
+
+      const candidateChallengeId = this.asString(submission.challengeId);
+      const candidateMemberId = this.asString(submission.memberId);
+      if (
+        (candidateChallengeId && candidateChallengeId !== challengeId) ||
+        (candidateMemberId && candidateMemberId !== memberId)
+      ) {
+        continue;
+      }
+
+      const submittedDate =
+        this.asString(submission.submittedDate) ??
+        this.asString(submission.receivedDate) ??
+        this.asString(submission.receivedAt) ??
+        this.asString(submission.createdAt) ??
+        this.asString(submission.updatedAt);
+      candidatesById.set(candidateSubmissionId, {
+        submissionId: candidateSubmissionId,
+        submittedDate,
+        sortTimestamp: this.toTimestamp(submittedDate),
+        sequence,
+      });
+    }
+
+    const newest = Array.from(candidatesById.values()).sort((left, right) => {
+      if (left.sortTimestamp !== right.sortTimestamp) {
+        return right.sortTimestamp - left.sortTimestamp;
+      }
+
+      return left.sequence - right.sequence;
+    })[0];
+    return newest
+      ? { ...newest, memberSubmissionIds: Array.from(candidatesById.keys()) }
+      : undefined;
   }
 
   /**
@@ -561,6 +789,81 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
+   * Cancels superseded scorer tasks for this member on the challenge so only
+   * the newest submission's configured phase tasks consume scorer capacity.
+   * @param token M2M token for review-api.
+   * @param input New submission identity plus challenge scoring configuration.
+   * @returns Resolves after cancellations are persisted and ECS confirms shutdown.
+   * @throws Error when ECS cancellation or review-api persistence fails.
+   * Superseded submissions are marked `CANCELLED` rather than `FAILED` so they
+   * do not stay in the member-facing preparing state after their scorer stops.
+   */
+  private async cancelInFlightMemberScoring(
+    token: string,
+    input: {
+      challengeId: string;
+      submissionId: string;
+      memberId: string;
+      memberSubmissionIds?: string[];
+      configId: string;
+      taskDefinitionName: string;
+      reviewScorecardId?: string | null;
+    },
+  ): Promise<void> {
+    if (!input.memberId) {
+      this.logger.log({
+        message:
+          'Skipping Marathon Match member scorer cancellation because the submission event has no member ID.',
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+      });
+      return;
+    }
+
+    const cancelledTasks = await this.ecsService.cancelMemberScorerTasks(
+      {
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+        memberId: input.memberId,
+        memberSubmissionIds: input.memberSubmissionIds,
+        taskDefinitionName: input.taskDefinitionName,
+      },
+      async (cancelledTask) => {
+        const testPhase = this.normalizeTestPhase(
+          cancelledTask.phaseConfigType,
+        );
+        await this.upsertSkippedReviewSummation(token, {
+          submissionId: cancelledTask.submissionId,
+          challengeId: input.challengeId,
+          testPhase,
+          reason: `Marathon Match ${testPhase} scoring cancelled because the member submitted a newer solution.`,
+          testStatus: 'CANCELLED',
+          details: {
+            configId: input.configId,
+            memberId: input.memberId,
+            replacementSubmissionId: input.submissionId,
+            cancelledTaskArn: cancelledTask.taskArn,
+            cancelledTaskId: cancelledTask.taskId,
+          },
+          scorecardId: input.reviewScorecardId?.trim() || undefined,
+        });
+      },
+    );
+
+    if (cancelledTasks.length === 0) {
+      return;
+    }
+
+    this.logger.log({
+      message: 'Cancelled in-flight Marathon Match scoring for member',
+      challengeId: input.challengeId,
+      memberId: input.memberId,
+      replacementSubmissionId: input.submissionId,
+      cancelledTasks,
+    });
+  }
+
+  /**
    * Persists a terminal failed phase summation when a configured submission
    * cannot be dispatched and would otherwise remain queued forever.
    * @param submissionId Submission ID from the Kafka event.
@@ -640,8 +943,9 @@ export class MarathonMatchSubmissionHandler
   }
 
   /**
-   * Builds a failed phase review summation payload for skipped dispatch.
-   * @param input Submission and skip context to persist.
+   * Builds a terminal phase review summation payload for skipped or cancelled
+   * dispatch.
+   * @param input Submission, terminal status, and skip/cancel context to persist.
    * @returns Review summation payload accepted by review-api-v6.
    */
   private buildSkippedReviewSummationPayload(
@@ -650,10 +954,11 @@ export class MarathonMatchSubmissionHandler
     const now = new Date().toISOString();
     const reviewTypeId = process.env.REVIEW_TYPE_ID?.trim();
     const normalizedPhase = this.normalizeTestPhase(input.testPhase);
+    const testStatus = input.testStatus ?? 'FAILED';
     const testProgressDetails: Record<string, unknown> = {
       message: input.reason,
       progress: 1,
-      status: 'FAILED',
+      status: testStatus,
       updatedAt: now,
     };
     const metadata: Record<string, unknown> = {
@@ -662,7 +967,7 @@ export class MarathonMatchSubmissionHandler
       marathonMatchScoringSkipReason: input.reason,
       testProgress: 1,
       testProgressDetails,
-      testStatus: 'FAILED',
+      testStatus,
       testType: normalizedPhase,
     };
 
@@ -1316,6 +1621,51 @@ export class MarathonMatchSubmissionHandler
     }
 
     return Object.keys(direct).length > 0 ? direct : undefined;
+  }
+
+  /**
+   * Extracts submission arrays from direct and paginated submission-api
+   * response variants. A direct submission object is returned as a one-item
+   * array so test doubles and legacy API responses remain compatible.
+   *
+   * @param data Raw submission-api response body.
+   * @returns Submission records found in the response.
+   */
+  private extractSubmissionArray(data: unknown): Record<string, unknown>[] {
+    if (Array.isArray(data)) {
+      return data.map((entry) => this.asRecord(entry));
+    }
+
+    const direct = this.asRecord(data);
+    const directData = direct.data;
+    if (Array.isArray(directData)) {
+      return directData.map((entry) => this.asRecord(entry));
+    }
+
+    const directResult = direct.result;
+    if (Array.isArray(directResult)) {
+      return directResult.map((entry) => this.asRecord(entry));
+    }
+
+    const dataRecord = this.asRecord(directData);
+    if (Array.isArray(dataRecord.data)) {
+      return dataRecord.data.map((entry) => this.asRecord(entry));
+    }
+
+    const resultRecord = this.asRecord(directResult);
+    for (const candidate of [
+      resultRecord.data,
+      resultRecord.content,
+      resultRecord.items,
+    ]) {
+      if (Array.isArray(candidate)) {
+        return candidate.map((entry) => this.asRecord(entry));
+      }
+    }
+
+    return this.asString(direct.id) || this.asString(direct.submissionId)
+      ? [direct]
+      : [];
   }
 
   /**

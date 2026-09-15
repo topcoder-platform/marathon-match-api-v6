@@ -4,7 +4,17 @@ NestJS service for managing marathon match scorer configuration, compiling teste
 
 ## Development runtime
 
-Use Node.js 26.5.0 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+Use Node.js 26.5.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+The production image uses Alpine's dynamically linked Node.js package and
+patched system OpenSSL, and runs as the unprivileged `app` user (UID 10001).
+The image declares an app-owned `/work` volume for compilation workspaces and
+Maven's runtime cache. For ECS tasks with `readonlyRootFilesystem: true`, mount
+a writable task volume at `/work`; the path must match the Dockerfile's `VOLUME`
+so ECS initializes its contents and ownership from the image. A root-owned
+volume with mode `0755` prevents the app user from creating compilation files.
+The image defaults to `COMPILATION_TMP_DIR=/work/mm-compile` and
+`MAVEN_OPTS=-Dmaven.repo.local=/work/.m2/repository`. If `COMPILE_MAVEN_OPTS`
+overrides Maven options, include a repository path on the writable volume.
 
 ## Service base path
 
@@ -129,9 +139,15 @@ When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submi
 | `COMPILE_MAVEN_OPTS`               | No                    | (auto-derived)                                                              | Compile-worker specific `MAVEN_OPTS`; if unset, falls back to `MAVEN_OPTS` and auto-appends `-Xmx` cap     |
 | `MVN_BINARY`                       | No                    | `mvn`                                                                       | Maven executable for tester compilation                                                                    |
 | `BOILERPLATE_DIR`                  | No                    | `<repo>/ecs-runner/boilerplate`                                             | Java boilerplate project copied for compilation                                                            |
-| `COMPILATION_TMP_DIR`              | No                    | Auto-discovery (`TMPDIR`, `/dev/shm` on Linux, `os.tmpdir()`, `<repo>/tmp`) | Writable temp root used for compile workspaces; set to `/dev/shm` to keep workspace on memory-backed tmpfs |
+| `COMPILATION_TMP_DIR`              | No                    | Image: `/work/mm-compile`; otherwise `TMPDIR`, `os.tmpdir()`, `<repo>/tmp` | Writable, executable temp root used for compile workspaces; owned by the application user |
 | `PG_BOSS_COMPILE_TEAM_SIZE`        | No                    | `1`                                                                         | Number of pg-boss compile workers processing jobs in parallel                                              |
 | `PG_BOSS_COMPILE_TEAM_CONCURRENCY` | No                    | `1`                                                                         | Per-worker concurrency for compile jobs                                                                    |
+
+When all compilation temp directories fail, `compilationError` includes each
+attempted path and its error. Check the configured path first: `EACCES` indicates
+insufficient permissions, while `EROFS` indicates a read-only filesystem. The
+last fallback (`/app/tmp` in the image) can report `ENOENT` even when an earlier
+candidate failed because the writable volume was owned by the wrong user.
 
 ### ECS launch configuration
 
@@ -181,11 +197,11 @@ Optional debug vars (set on API service env to be forwarded to runner):
 
 The ECS task still needs trusted outbound access to fetch challenge config, download submission artifacts, upload artifacts, and post the scoring callback. Untrusted tester/submission execution is therefore split from that bootstrap logic inside the container:
 
-- The container starts as `root`. Do not override the ECS task-definition `user`; the trusted runner needs root only to drop submitted solution commands to `scorer`.
+- The container starts as the non-root `runner-parent` user (uid `10000`). Do not override the ECS task-definition `user`; the entrypoint rejects other UIDs. Narrow `root:runner` mode `4750` setuid helpers fork and immediately drop tester commands to `runner` (uid `10001`) and submitted solution commands to `scorer` (uid `10002`), while their supervisors return to the invoking non-root UID with only timeout-signalling capability. The scorer account is not in group `runner` and cannot invoke either privileged helper directly.
 - The trusted parent runner holds `ACCESS_TOKEN`, performs network calls, and never loads untrusted submission code directly.
 - The parent launches a separate child JVM through `mm-runner-isolate` with a scrubbed environment, so submission processes do not inherit the bearer token or other runner env vars.
-- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are kept runner-owned mode `0400`, so submitted code cannot read or modify them from `/tmp`.
-- Standard generic-runner seed execution asks `mm-scorer-isolate` to reset scorer-owned writable state before and after each test case. The cleanup helper only scans fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and only removes entries owned by the scorer UID.
+- Generic submitted solution commands run through `mm-scorer-isolate` as the separate non-root `scorer` user. Downloaded tester JARs and serialized scorer config are parent-owned, runner-group-readable mode `0440`, so submitted code cannot read or modify them; the config is deleted before tester code executes.
+- Standard generic-runner seed execution asks `mm-scorer-isolate` to reset scorer-owned writable state before and after each test case. The cleanup helper accepts no path argument, scans only fixed writable roots such as `/tmp`, `/var/tmp`, `/dev/shm`, and the scorer home, and only removes entries owned by the scorer UID. Descriptor-relative no-follow operations prevent a scorer-controlled symlink swap from redirecting the privileged traversal.
 - Generic submitted solution commands also run under a filesystem allowlist that permits runtime/toolchain reads, `/proc/self/maps` for glibc/Mono stack introspection, and scorer temp writes but does not permit reading infrastructure paths such as `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables.
 - Native wrappers block `io_uring` and creation of non-`AF_UNIX` sockets for submitted solution processes and their fork/exec children, so submissions cannot open live outbound network connections.
 - Standard Topcoder Marathon testers run through the generic runner flow, which creates the callback score payload from trusted runner code. Custom tester `runTester(...)` result maps remain supported for advanced cases.

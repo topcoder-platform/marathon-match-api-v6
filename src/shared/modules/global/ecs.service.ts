@@ -7,6 +7,7 @@ import {
   RunTaskCommand,
   StopTaskCommand,
   Task,
+  waitUntilTasksStopped,
 } from '@aws-sdk/client-ecs';
 import { PhaseConfigType } from '@prisma/client';
 import { LoggerService } from './logger.service';
@@ -44,6 +45,22 @@ export interface MarathonMatchScorerTaskLaunchOptions {
   validationSubmissionDownloadUrl?: string;
 }
 
+export interface CancelMemberScorerTasksInput {
+  challengeId: string;
+  submissionId: string;
+  memberId: string;
+  taskDefinitionName: string;
+  /** Authoritative member submission IDs used to recover recently launched tasks. */
+  memberSubmissionIds?: string[];
+}
+
+export interface CancelledScorerTask {
+  submissionId: string;
+  taskArn: string;
+  taskId: string;
+  phaseConfigType?: string;
+}
+
 interface ActiveScorerTask {
   taskArn: string;
   taskId: string;
@@ -63,6 +80,12 @@ interface PersistSubmissionRunnerLogInput {
   submissionId: string;
   scoringPhase: MarathonMatchScoringPhase;
   launchResult: MarathonMatchScorerTaskLaunchResult;
+}
+
+interface KnownMemberSubmissions {
+  challengeId: string;
+  memberId: string;
+  submissionIds: string[];
 }
 
 /**
@@ -98,7 +121,8 @@ export class EcsService {
    * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and Auth0 M2M settings
    * used by the runner to refresh tokens during long scoring tasks. Optional
    * ECS_SCORER_MAX_CONCURRENT_TASKS controls the global pending/running scorer
-   * task cap when the role can list active ECS tasks and defaults to 20.
+   * task cap and defaults to 20. Member launches require ECS inspection access;
+   * launches without a member retain the legacy inspection fallback.
    * @throws Error when required ENV vars are missing, token fetch fails, the scorer task cap is reached
    * after active task lookup succeeds, or ECS launch/cancellation fails.
    */
@@ -138,12 +162,23 @@ export class EcsService {
 
     try {
       return await this.runWithScorerLaunchLock(async () => {
-        const activeTasks = await this.listActiveScorerTasksIfPermitted(
-          cluster,
-          taskDefinitionName,
-          containerName,
-        );
-        const launchableActiveTasks = activeTasks
+        const activeTasks = memberId
+          ? await this.listActiveScorerTasks(
+              cluster,
+              taskDefinitionName,
+              containerName,
+              {
+                challengeId,
+                memberId,
+                submissionIds: [submissionId],
+              },
+            )
+          : await this.listActiveScorerTasksIfPermitted(
+              cluster,
+              taskDefinitionName,
+              containerName,
+            );
+        let launchableActiveTasks = activeTasks
           ? shouldStopSupersededMemberTasks
             ? await this.stopSupersededMemberScorerTasks(cluster, activeTasks, {
                 challengeId,
@@ -162,7 +197,21 @@ export class EcsService {
             scoringPhase.configType,
           );
 
-          if (duplicateTask) {
+          if (duplicateTask?.desiredStatus?.toUpperCase() === 'STOPPED') {
+            // A task already shutting down cannot satisfy a retry of this run.
+            await waitUntilTasksStopped(
+              {
+                client: this.ecsClient,
+                maxWaitTime: 120,
+                minDelay: 1,
+                maxDelay: 5,
+              },
+              { cluster, tasks: [duplicateTask.taskArn] },
+            );
+            launchableActiveTasks = launchableActiveTasks.filter(
+              (task) => task.taskArn !== duplicateTask.taskArn,
+            );
+          } else if (duplicateTask) {
             const launchResult = await this.buildLaunchResultFromActiveTask(
               duplicateTask,
               taskDefinition,
@@ -593,20 +642,38 @@ export class EcsService {
   }
 
   /**
-   * Lists active scorer tasks for the configured task family and container.
+   * Lists active and stopping scorer tasks for the configured task family/container.
+   * Known task ARNs from the runner log bridge ECS ListTasks propagation delays.
    * @param cluster ECS cluster name or ARN.
    * @param taskDefinitionName Task definition family configured for scoring.
    * @param containerName Runner container name whose overrides identify scorer tasks.
+   * @param knownMember Verified member submissions for durable task lookup.
    * @returns Active scorer task summaries parsed from ECS task overrides.
+   * @throws Error when database or ECS inspection fails; member dispatch fails closed.
    */
   private async listActiveScorerTasks(
     cluster: string,
     taskDefinitionName: string,
     containerName: string,
+    knownMember?: KnownMemberSubmissions,
   ): Promise<ActiveScorerTask[]> {
     const taskArns = new Set<string>();
+    const knownTasks = knownMember?.submissionIds.length
+      ? await this.prisma.submissionRunnerLog.findMany({
+          where: {
+            challengeId: knownMember.challengeId,
+            submissionId: { in: knownMember.submissionIds },
+            cluster,
+          },
+          select: { taskArn: true, submissionId: true },
+        })
+      : [];
+    const knownSubmissionsByTask = new Map(
+      knownTasks.map((task) => [task.taskArn, task.submissionId]),
+    );
+    knownTasks.forEach((task) => taskArns.add(task.taskArn));
 
-    for (const desiredStatus of ['PENDING', 'RUNNING'] as const) {
+    for (const desiredStatus of ['RUNNING', 'STOPPED'] as const) {
       let nextToken: string | undefined;
       do {
         const response = await this.ecsClient.send(
@@ -648,6 +715,15 @@ export class EcsService {
           containerName,
         );
         if (activeTask) {
+          if (
+            knownMember &&
+            activeTask.challengeId === knownMember.challengeId &&
+            activeTask.submissionId ===
+              knownSubmissionsByTask.get(activeTask.taskArn)
+          ) {
+            // Legacy runners may predate the MEMBER_ID override.
+            activeTask.memberId ??= knownMember.memberId;
+          }
           activeTasks.push(activeTask);
         }
       }
@@ -739,14 +815,13 @@ export class EcsService {
   }
 
   /**
-   * Determines whether an ECS task has already begun or completed shutdown.
+   * Determines whether an ECS task has actually completed shutdown.
    * @param task ECS task description.
-   * @returns True when the task should no longer count against launch capacity.
+   * @returns True only for lastStatus STOPPED; desiredStatus alone is insufficient.
    */
   private isStoppedTaskStatus(task: Task): boolean {
-    const desiredStatus = task.desiredStatus?.trim().toUpperCase();
     const lastStatus = task.lastStatus?.trim().toUpperCase();
-    return desiredStatus === 'STOPPED' || lastStatus === 'STOPPED';
+    return lastStatus === 'STOPPED';
   }
 
   /**
@@ -769,6 +844,55 @@ export class EcsService {
   }
 
   /**
+   * Cancels a member's scorer tasks for superseded challenge submissions while
+   * preserving separately configured phase tasks for the newest submission.
+   * @param input Challenge, new submission, member, and task definition family.
+   * @param beforeStop Persists cancellation before a task can disappear.
+   * @returns Cancelled tasks after ECS confirms their shutdown.
+   * @throws Error when configuration, inspection, persistence, stop, or shutdown
+   * confirmation fails. A replacement must not launch on an unverified result.
+   * The Kafka handler uses beforeStop to mark scoring cancelled before shutdown;
+   * returned task identities support dispatch logging.
+   */
+  async cancelMemberScorerTasks(
+    input: CancelMemberScorerTasksInput,
+    beforeStop?: (task: CancelledScorerTask) => Promise<void>,
+  ): Promise<CancelledScorerTask[]> {
+    const memberId = input.memberId?.trim();
+    const taskDefinitionName = input.taskDefinitionName?.trim();
+    if (!memberId || !taskDefinitionName) {
+      return [];
+    }
+
+    const cluster = this.getRequiredEnv('ECS_CLUSTER');
+    const containerName = this.getRequiredEnv('ECS_CONTAINER_NAME');
+
+    return this.runWithScorerLaunchLock(async () => {
+      const activeTasks = await this.listActiveScorerTasks(
+        cluster,
+        taskDefinitionName,
+        containerName,
+        {
+          challengeId: input.challengeId,
+          memberId,
+          submissionIds: input.memberSubmissionIds ?? [],
+        },
+      );
+
+      return this.stopMemberScorerTasks(
+        cluster,
+        activeTasks,
+        {
+          challengeId: input.challengeId,
+          submissionId: input.submissionId,
+          memberId,
+        },
+        beforeStop,
+      );
+    });
+  }
+
+  /**
    * Stops older active scorer tasks for the same challenge/member before the
    * new submission is launched.
    * @param cluster ECS cluster name or ARN.
@@ -786,18 +910,56 @@ export class EcsService {
       return activeTasks;
     }
 
-    const supersededTasks = activeTasks.filter(
-      (task) =>
-        task.challengeId === input.challengeId &&
-        task.memberId === memberId &&
-        task.submissionId !== input.submissionId,
+    const stoppedTasks = await this.stopMemberScorerTasks(
+      cluster,
+      activeTasks,
+      {
+        challengeId: input.challengeId,
+        submissionId: input.submissionId,
+        memberId,
+      },
     );
 
-    if (supersededTasks.length === 0) {
+    if (stoppedTasks.length === 0) {
       return activeTasks;
     }
 
+    const stoppedTaskArns = new Set(stoppedTasks.map((task) => task.taskArn));
+    return activeTasks.filter((task) => !stoppedTaskArns.has(task.taskArn));
+  }
+
+  /**
+   * Stops the member's active scorer tasks for other submissions on a challenge.
+   * @param cluster ECS cluster name or ARN.
+   * @param activeTasks Currently active scorer tasks.
+   * @param input Challenge, superseding submission, and member identity.
+   * @param beforeStop Optional cancellation persistence called before StopTask.
+   * @returns Tasks confirmed stopped, keyed by superseded submission.
+   * @throws Error if persistence, StopTask, or shutdown confirmation fails.
+   */
+  private async stopMemberScorerTasks(
+    cluster: string,
+    activeTasks: ActiveScorerTask[],
+    input: { challengeId: string; submissionId: string; memberId: string },
+    beforeStop?: (task: CancelledScorerTask) => Promise<void>,
+  ): Promise<CancelledScorerTask[]> {
+    const supersededTasks = activeTasks.filter(
+      (task) =>
+        Boolean(task.submissionId) &&
+        task.challengeId === input.challengeId &&
+        task.memberId === input.memberId &&
+        task.submissionId !== input.submissionId,
+    );
+
+    const cancelledTasks: CancelledScorerTask[] = [];
     for (const task of supersededTasks) {
+      const cancelledTask = {
+        submissionId: task.submissionId as string,
+        taskArn: task.taskArn,
+        taskId: task.taskId,
+        phaseConfigType: task.phaseConfigType,
+      };
+      await beforeStop?.(cancelledTask);
       await this.ecsClient.send(
         new StopTaskCommand({
           cluster,
@@ -808,18 +970,23 @@ export class EcsService {
       this.logger.log({
         message: 'Stopped superseded ECS scorer task',
         challengeId: input.challengeId,
-        memberId,
+        memberId: input.memberId,
         supersededSubmissionId: task.submissionId,
         replacementSubmissionId: input.submissionId,
         taskArn: task.taskArn,
         taskId: task.taskId,
       });
+      cancelledTasks.push(cancelledTask);
     }
 
-    const stoppedTaskArns = new Set(
-      supersededTasks.map((task) => task.taskArn),
-    );
-    return activeTasks.filter((task) => !stoppedTaskArns.has(task.taskArn));
+    if (cancelledTasks.length) {
+      await waitUntilTasksStopped(
+        { client: this.ecsClient, maxWaitTime: 120, minDelay: 1, maxDelay: 5 },
+        { cluster, tasks: cancelledTasks.map((task) => task.taskArn) },
+      );
+    }
+
+    return cancelledTasks;
   }
 
   /**

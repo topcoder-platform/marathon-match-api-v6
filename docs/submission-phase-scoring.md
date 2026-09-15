@@ -12,6 +12,8 @@ Before enabling live scoring, confirm:
 - ECS cluster and task definition are available for the scorer runner
 - `marathon-match-api-v6` environment variables are configured for Kafka, ECS, Challenge API, Review API, and Marathon Match API URLs
 - M2M credentials are configured so the service and ECS runner can call downstream APIs
+- Member scoring requires `ecs:ListTasks`, `ecs:DescribeTasks`, and `ecs:StopTask`
+  in addition to launch permissions; inspection failures now fail closed.
 
 ## Flow
 
@@ -32,6 +34,7 @@ sequenceDiagram
 
   K->>C: Submission event envelope
   C->>H: handle(payload)
+  H->>DB: Acquire challenge/member session advisory lock
   H->>DB: Load marathonMatchConfig + tester + phaseConfigs
 
   alt Config missing or inactive
@@ -46,9 +49,12 @@ sequenceDiagram
       alt Tester compilationStatus != SUCCESS
         H-->>C: Throw error
       else Tester ready
+        H->>SA: Read newest clean member submissions
+        H->>ECS: Resolve existing tasks from ECS and persisted runner ARNs
+        ECS->>RA: Persist CANCELLED before stopping superseded tasks
+        ECS->>F: StopTask and wait for lastStatus STOPPED
         loop Once per matching phase config
           H->>ECS: Check active scorer tasks for dedupe/cap
-          ECS->>F: Stop older same-member task when superseded
           H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
           ECS->>F: RunTask with env overrides
           F->>MM: GET /challenge/:id
@@ -68,6 +74,7 @@ sequenceDiagram
     end
   end
 
+  H->>DB: Close lock connection on success or failure
   C->>C: Commit offset on success or skip
   Note over C: On retry exhaustion, publish to DLQ when enabled and then commit.
 ```
@@ -80,7 +87,27 @@ Kafka access uses `@platformatic/kafka` 2.8.0 with a default 10 MiB aggregate Fe
 
 ## Scorer task launch limits
 
-Before each `RunTask`, `EcsService.launchScorerTask(...)` lists pending/running scorer tasks for the configured ECS task family. It skips duplicate active launches for the same challenge, submission, and phase config type; stops older active tasks for the same challenge/member when a newer submission arrives; and enforces `ECS_SCORER_MAX_CONCURRENT_TASKS` before launching another task. The cap defaults to `20`.
+Before each `RunTask`, `EcsService.launchScorerTask(...)` inspects tasks whose
+desired status is `RUNNING` or `STOPPED`, retaining every task whose actual
+`lastStatus` is not `STOPPED`. ECS uses desired `RUNNING` for pending launches too.
+It skips duplicate active launches for the same challenge, submission, and phase;
+a duplicate already stopping must finish shutdown before replacement. It enforces
+`ECS_SCORER_MAX_CONCURRENT_TASKS`, which defaults to `20`.
+
+Submission dispatch holds a dedicated PostgreSQL session advisory lock for the
+challenge/member through its newest-clean-submission lookup, cancellation, and
+launch. This serializes rapid events even on separate API replicas. Known runner
+ARNs for verified member submissions supplement `ListTasks`, including legacy
+tasks without `MEMBER_ID`. Cancellation is persisted before `StopTask`; failure to
+persist leaves the old task discoverable for retry. Shutdown must be confirmed
+within 120 seconds before replacement can start. Failed inspection, persistence,
+or shutdown confirmation aborts dispatch and reaches Kafka retry/DLQ handling.
+Cancelling a submission therefore cannot silently leave it in Preparing.
+
+`StopTask` can return while a container is still shutting down, so desired
+`STOPPED` is not proof that it has exited. See the
+[AWS StopTask contract](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html)
+and [ListTasks status filters](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_ListTasks.html).
 
 When the cap is reached, the handler throws before calling `RunTask`. Kafka retry/backoff then provides back-pressure instead of committing the offset and creating unbounded ECS work.
 
@@ -91,8 +118,8 @@ The ECS task keeps trusted network access only on the trusted parent runner proc
 - a scrubbed environment that does not include `ACCESS_TOKEN`
 - socket creation limited to `AF_UNIX`, which prevents live outbound network connections from the submission itself
 - a filesystem allowlist that permits runtime/toolchain reads and scorer temp writes without exposing `/etc/hostname`, `/etc/resolv.conf`, `/proc/self/cgroup`, `/proc/self/mounts`, or proc network tables
-- runner-owned mode `0400` tester JAR files, preventing submitted code from reading or modifying those `/tmp` inputs
-- a runner-owned mode `0400` scorer config handoff file that is deleted before tester or submitted solution code executes
+- parent-owned, runner-group-readable mode `0440` tester JAR files, preventing submitted code from reading or modifying those `/tmp` inputs
+- a parent-owned, runner-group-readable mode `0440` scorer config handoff file created inside the shared workspace and deleted before tester or submitted solution code executes
 - callback review payloads created by the trusted runner's generic Marathon flow, or by a custom tester `runTester(...)` result map when a tester opts into that advanced path
 
 ## Observability
@@ -101,7 +128,7 @@ Runner task logs are written to CloudWatch using the submission runner log strea
 
 `GET /v6/marathon-match/submissions/:submissionId/runner-logs`
 
-For `PROVISIONAL` and `SYSTEM` scoring, the runner writes progress to the phase review summation metadata through `POST /v6/marathon-match/internal/scoring-progress`. Review API exposes this as `reviewSummation.metadata.testProcess` (`provisional` or `system`), `reviewSummation.metadata.testProgress` (`0` to `1`), and `reviewSummation.metadata.testStatus` (`IN PROGRESS`, `SUCCESS`, or `FAILED`) when metadata is included in the response. In-progress summations keep a neutral placeholder score and must be rendered as unavailable based on `testStatus`; only explicit scorer or skipped-scoring failures use `FAILED` progress and the failed-score sentinel. Completed scoring with timed-out or crashed testcases keeps those counts in `testProgressDetails.failedTests` while reporting `testStatus = SUCCESS`. SYSTEM timeout failures also include `reviewSummation.metadata.timed_out = true`.
+For `PROVISIONAL` and `SYSTEM` scoring, the runner writes progress to the phase review summation metadata through `POST /v6/marathon-match/internal/scoring-progress`. Review API exposes this as `reviewSummation.metadata.testProcess` (`provisional` or `system`), `reviewSummation.metadata.testProgress` (`0` to `1`), and `reviewSummation.metadata.testStatus` (`IN PROGRESS`, `SUCCESS`, `FAILED`, or `CANCELLED`) when metadata is included in the response. In-progress summations keep a neutral placeholder score and must be rendered as unavailable based on `testStatus`; only explicit scorer or skipped-scoring failures use `FAILED` progress and the failed-score sentinel. Superseded scoring uses terminal `CANCELLED`, and its placeholder aggregate must not be displayed as a score. Late scorer callbacks cannot revive a cancelled summation. Completed scoring with timed-out or crashed testcases keeps those counts in `testProgressDetails.failedTests` while reporting `testStatus = SUCCESS`. SYSTEM timeout failures also include `reviewSummation.metadata.timed_out = true`.
 
 For generic runner artifacts, only EXAMPLE scoring uploads the member-visible public artifact. Its public `output.txt` includes each testcase ordinal, actual seed, seed score, runtime, runner/tester errors, and submitted-solution stderr, while submitted-solution stdout and compilation diagnostics stay out of that file. The separate `compile_log.txt` file preserves compilation output. Every generic scoring phase uploads private internal artifacts: `reviews.json` includes `compilationOutput`, per-test score details with testcase ordinals and actual seeds, and top-level `testScores`; callback metadata keeps member-visible testcase ordinals only, compile and execution logs are preserved as `compile_log.txt`, `execution-{submissionId}.log`, and optional `error-{submissionId}.log`, and captured submitted-solution output is split into `stdout/{seed}.txt` and `stderr/{seed}.txt` files for each actual seed. PROVISIONAL and SYSTEM scoring do not publish competitor-visible artifacts.
 

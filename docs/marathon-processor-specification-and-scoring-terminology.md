@@ -1,6 +1,6 @@
 # Marathon Processor Specification and Scoring Terminology
 
-Last verified: May 29, 2026
+Last verified: September 1, 2026
 
 This article describes how Topcoder Marathon Match submissions are compiled, executed, scored, and reported by the current Marathon Match processor.
 
@@ -27,12 +27,12 @@ Supported source extensions are:
 | Extension   | Language / runtime                                                           |
 | ----------- | ---------------------------------------------------------------------------- |
 | `.cpp`      | C++23 / GNU++23 using G++ 14.2.0                                             |
-| `.java`     | Java 11 using Temurin OpenJDK 11.0.31+11 and `javac --release 11`            |
+| `.java`     | Java 11 language/API target using OpenJDK 17 and `javac --release 11`         |
 | `.py`       | Python 3.12                                                                  |
 | `.cs`       | C# using Mono                                                                |
 | `.cs_net10` | C# using .NET 10 / C# 14                                                     |
 | `.cs_net7`  | C# using .NET 7 / C# 11                                                      |
-| `.rs`       | Rust 2024 edition using `rustc 1.96.0` stable as last verified               |
+| `.rs`       | Rust 2024 edition using `rustc 1.98.0` stable as last verified               |
 
 The runner normalizes the selected source file into a temporary compile workspace before building or executing it.
 
@@ -50,8 +50,8 @@ g++ -std=gnu++23 -O3 -march=x86-64 -mtune=generic Solution.cpp -o Solution
 
 ### Java
 
-Java submissions are compiled with Temurin OpenJDK `javac 11.0.31` and
-executed on the Java 11 runtime:
+Java submissions are compiled with Ubuntu OpenJDK 17 using the Java 11
+language and API target, then executed on the OpenJDK 17 runtime:
 
 ```bash
 javac --release 11 Solution.java
@@ -63,7 +63,7 @@ isolated JVM without invoking `main`. This startup check makes Java static
 initializers part of the compile phase so hangs or class-load failures are
 reported through `compile_log.txt` under the configured compile timeout.
 
-The ECS runner image includes the Java 11 JDK, so Java source submissions can be compiled by the same runner task that executes the tester. The explicit `--release 11` flag makes the supported source and API level visible in compile artifacts.
+The ECS runner image includes the OpenJDK 17 JDK, so Java source submissions can be compiled by the same runner task that executes the tester. The explicit `--release 11` flag preserves the supported Java 11 source and API contract independently of the maintained runtime version.
 
 ### Python
 
@@ -76,14 +76,14 @@ python3 Solution.py
 ### Rust
 
 Rust submissions use the `.rs` extension and are compiled as a single source
-file with `rustc 1.96.0` stable as last verified:
+file with `rustc 1.98.0` stable as last verified:
 
 ```bash
 rustc --edition=2024 -O Solution.rs -o Solution
 RUST_BACKTRACE=1 ./Solution
 ```
 
-The ECS runner installs Rust through `rustup` with `RUSTUP_TOOLCHAIN=stable`, so the exact compiler patch version advances when the runner image is rebuilt. As of the verification date above, the stable channel resolves to `rustc 1.96.0`.
+The ECS runner installs Rust through `rustup` with `RUSTUP_TOOLCHAIN=stable`, so the exact compiler patch version advances when the runner image is rebuilt. As of the verification date above, the stable channel resolves to `rustc 1.98.0`.
 Rust submissions are executed with `RUST_BACKTRACE=1` inside the ECS runner so panic diagnostics include a backtrace in captured stderr.
 
 ### C# with Mono
@@ -111,6 +111,12 @@ Compile and test timeouts are configured per Marathon Match challenge.
 - `compileTimeout` controls submission compilation timeout.
 - For Java submissions, `compileTimeout` also covers class startup and static
   initializer checks performed after `javac`.
+- The ECS runner enforces `compileTimeout` plus an internal 10 second buffer.
+  Fargate does not guarantee an exact platform for every task, so a submission
+  that compiles just inside the configured limit during provisional testing
+  could otherwise fail compilation during system testing. Compile artifacts and
+  run metadata keep reporting the configured `compileTimeout`, which is the
+  limit announced to members.
 - `testTimeout` controls the per-seed measured submitted-solution execution timeout. Runner setup, initial tester input writes, and artifact IO before the tester starts its timed section are outside this limit; a timed-out seed reports the configured limit as its runtime.
 - `systemTestTimeout` controls the total SYSTEM scoring timeout per submission. It defaults to 24 hours and causes the API to stop a still-active ECS runner and write a failed SYSTEM summation with `metadata.timed_out = true`.
 - `POST /v6/marathon-match/challenge/:challengeId/rerun/system` restarts existing non-cancelled SYSTEM reviews with the current `testTimeout`, `systemTestTimeout`, SYSTEM seed, and SYSTEM test count settings.
@@ -127,32 +133,33 @@ The default values supplied by `marathon-match-api-v6` are environment-configura
 
 The current processor runs as an ECS/Fargate task using the configured task definition revision for the challenge scorer. CPU and memory are controlled by that ECS task definition, not by a fixed EC2 instance type.
 
-The current runner image is based on Ubuntu 24.04 Noble and `eclipse-temurin:11-jdk-noble`.
+The current runner image is based directly on Ubuntu 24.04 Noble and installs the Ubuntu OpenJDK 17 packages.
 
 Tool versions configured in the current runner image:
 
 | Tool             | Version                            |
 | ---------------- | ---------------------------------- |
-| Operating system | Ubuntu 24.04.4 LTS                 |
-| Java runtime     | Temurin OpenJDK 11, `11.0.31+11`   |
-| Java compiler    | `javac 11.0.31` with `--release 11` |
+| Operating system | Ubuntu 24.04 LTS                    |
+| Java runtime     | Ubuntu OpenJDK 17                   |
+| Java compiler    | OpenJDK 17 `javac` with `--release 11` |
 | GCC              | `14.2.0` via `gcc-14`              |
 | G++              | `14.2.0` via `g++-14`              |
 | Python           | `3.12.3`                           |
 | Mono runtime     | `6.8.0.105`                        |
 | Mono C# compiler | `mcs 6.8.0.105`                    |
-| .NET SDK         | `7.0.410` and `10.0.108`           |
-| Rust compiler    | `rustc 1.96.0`                     |
+| .NET toolchain   | .NET 10 SDK plus .NET 7.0.20 reference, host, and runtime packs |
+| Kotlin compiler  | `kotlinc 2.4.10`                   |
+| Rust compiler    | `rustc 1.98.0`                     |
 | Bash             | `5.2.21`                           |
 
 The runner image includes:
 
-- Java 11 JDK/runtime for the runner, testers, and Java submissions
+- OpenJDK 17 for the runner, testers, and Java submissions, with Java submissions compiled to the Java 11 language/API target
 - `g++` backed by GCC 14 for C++23 submissions
 - `python3` backed by Python 3.12 for Python submissions
 - `mono-devel`, `mcs`, and `mono` for Mono C# submissions
-- .NET 7 SDK for `.cs_net7` submissions
-- .NET 10 SDK for `.cs_net10` submissions
+- .NET 10 SDK for both `.cs_net7` and `.cs_net10` compilation, plus the .NET 7 reference, host, and runtime packs needed to publish and run `net7.0`
+- Kotlin 2.4.10 for standard `.kt` compilation; the unused main-kts scripting plugin is not installed
 - `rustc` from the Rust stable channel for `.rs` submissions
 - `zip` and `unzip` for artifact handling
 - native isolation helpers that scrub the tester child environment and run generic submitted solution commands as the restricted `scorer` user
@@ -170,9 +177,13 @@ The ECS runner itself expects Topcoder service environment variables and normall
 The following Dockerfile approximates the current runner toolchain:
 
 ```dockerfile
-FROM eclipse-temurin:11-jdk-noble
+FROM ubuntu:24.04
 
 ARG DOTNET_7_SDK_VERSION=7.0.410
+ARG DOTNET_7_SDK_SHA512=20b8e02979328e4c4a14493f7791ed419aabd0175233db80cd60e2c004b829b3e8301281ea86b27ba818372473accf5a6d553e5354c54917c8e84d25f5855caa
+ARG DOTNET_7_RUNTIME_VERSION=7.0.20
+ARG KOTLIN_VERSION=2.4.10
+ARG KOTLIN_COMPILER_SHA256=473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d
 
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
@@ -180,7 +191,8 @@ ENV RUSTUP_TOOLCHAIN=stable
 ENV PATH=/usr/local/cargo/bin:${PATH}
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         coreutils \
@@ -190,6 +202,7 @@ RUN apt-get update \
         gcc-14 \
         gzip \
         mono-devel \
+        openjdk-17-jdk-headless \
         procps \
         python3 \
         unzip \
@@ -198,10 +211,24 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
     && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
-    && wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
-    && bash /tmp/dotnet-install.sh --version "${DOTNET_7_SDK_VERSION}" --install-dir /usr/lib/dotnet --no-path \
-    && rm /tmp/dotnet-install.sh \
-    && rm -rf /var/lib/apt/lists/* \
+    && wget -q "https://builds.dotnet.microsoft.com/dotnet/Sdk/${DOTNET_7_SDK_VERSION}/dotnet-sdk-${DOTNET_7_SDK_VERSION}-linux-x64.tar.gz" -O /tmp/dotnet7.tar.gz \
+    && echo "${DOTNET_7_SDK_SHA512}  /tmp/dotnet7.tar.gz" | sha512sum --check --strict \
+    && mkdir -p /tmp/dotnet7 \
+    && tar -xzf /tmp/dotnet7.tar.gz -C /tmp/dotnet7 \
+    && for dotnet_path in \
+        "host/fxr/${DOTNET_7_RUNTIME_VERSION}" \
+        "packs/Microsoft.NETCore.App.Host.linux-x64/${DOTNET_7_RUNTIME_VERSION}" \
+        "packs/Microsoft.NETCore.App.Ref/${DOTNET_7_RUNTIME_VERSION}" \
+        "shared/Microsoft.NETCore.App/${DOTNET_7_RUNTIME_VERSION}"; do \
+        mkdir -p "/usr/lib/dotnet/$(dirname "${dotnet_path}")"; \
+        cp -a "/tmp/dotnet7/${dotnet_path}" "/usr/lib/dotnet/${dotnet_path}"; \
+    done \
+    && wget -q "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" -O /tmp/kotlin-compiler.zip \
+    && echo "${KOTLIN_COMPILER_SHA256}  /tmp/kotlin-compiler.zip" | sha256sum --check --strict \
+    && unzip -q /tmp/kotlin-compiler.zip -d /opt \
+    && rm /opt/kotlinc/lib/kotlin-main-kts.jar \
+    && ln -s /opt/kotlinc/bin/kotlinc /usr/local/bin/kotlinc \
+    && rm -rf /tmp/dotnet7 /tmp/dotnet7.tar.gz /tmp/kotlin-compiler.zip /var/lib/apt/lists/* \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
     && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
     && rustc --version >/dev/null
@@ -410,7 +437,7 @@ The ECS task parent process has trusted network access so it can:
 - upload artifacts
 - post scoring callbacks
 
-The tester runs in a separate isolated child JVM with a scrubbed environment that does not include the runner access token. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain runner-owned mode `0400` files that submitted code cannot read or modify. Submitted solution commands are also restricted to a filesystem allowlist that omits infrastructure-revealing `/etc` and `/proc` paths. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
+The trusted parent runs as non-root `runner-parent`, while the tester runs in a separate isolated child JVM as `runner` with a scrubbed environment that does not include the parent access token. A narrow setuid bridge changes only the tester UID and drops its supervisor back to the parent UID, preserving separate `/proc` ownership. Generic submitted solution commands run as the separate unprivileged `scorer` user, while tester JARs and scorer config files remain parent-owned, runner-group-readable mode `0440` files that submitted code cannot read or modify. Submitted solution commands are also restricted to a filesystem allowlist that omits infrastructure-revealing `/etc` and `/proc` paths. Socket creation is limited to `AF_UNIX`, which prevents live outbound network connections from the submitted solution.
 
 ## Multithreading and Resource Notes
 
