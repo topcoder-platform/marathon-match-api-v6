@@ -24,7 +24,9 @@ summations, and protected cancelled summations from late callbacks. The Septembe
   challenge/member PostgreSQL advisory lock shared by API replicas.
 - Fast successive events depended only on `ListTasks` immediately seeing the
   previous launch. Persisted runner ARNs for the member's verified submissions
-  now supplement listing, including legacy runner ownership recovery.
+  now supplement listing, including legacy runner ownership recovery. The
+  submission ID lookup includes rows whose virus-scan flag is absent from the
+  list response, while newest-scorer selection still requires a clean row.
 - Desired `STOPPED` was treated as completed shutdown. The replacement path now
   includes stopping tasks and waits for actual shutdown before launching, and
   never reuses a duplicate that is already stopping.

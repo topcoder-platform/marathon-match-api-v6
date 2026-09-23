@@ -98,7 +98,9 @@ Submission dispatch holds a dedicated PostgreSQL session advisory lock for the
 challenge/member through its newest-clean-submission lookup, cancellation, and
 launch. This serializes rapid events even on separate API replicas. Known runner
 ARNs for verified member submissions supplement `ListTasks`, including legacy
-tasks without `MEMBER_ID`. Cancellation is persisted before `StopTask`; failure to
+tasks without `MEMBER_ID`. The lookup retains member submission IDs even when a
+list row omits its virus-scan flag; the clean flag is required only to choose the
+newest submission to score. Cancellation is persisted before `StopTask`; failure to
 persist leaves the old task discoverable for retry. Shutdown must be confirmed
 within 120 seconds before replacement can start. Failed inspection, persistence,
 or shutdown confirmation aborts dispatch and reaches Kafka retry/DLQ handling.
