@@ -531,11 +531,22 @@ describe('MarathonMatchSubmissionHandler', () => {
       });
 
       m2mService.getM2MToken.mockResolvedValue('m2m-token');
-      httpService.get.mockImplementation((url: string) =>
-        url.includes('/reviewSummations')
-          ? of({ data: { data: [] } })
-          : of({ data: { id: 'submission-2', virusScan: true } }),
-      );
+      httpService.get.mockImplementation((url: string) => {
+        if (url.includes('/reviewSummations')) {
+          return of({ data: { data: [] } });
+        }
+        if (url.endsWith('/submissions/submission-2')) {
+          return of({ data: { id: 'submission-2', virusScan: true } });
+        }
+        return of({
+          data: {
+            data: [
+              { id: 'submission-2', virusScan: true },
+              { id: 'submission-1' },
+            ],
+          },
+        });
+      });
       httpService.post.mockReturnValue(of({ data: { id: 'summation-1' } }));
       if (fails) {
         httpService.post.mockReturnValue(
@@ -583,7 +594,7 @@ describe('MarathonMatchSubmissionHandler', () => {
           challengeId: 'challenge-1',
           submissionId: 'submission-2',
           memberId: 'member-1',
-          memberSubmissionIds: ['submission-2'],
+          memberSubmissionIds: ['submission-2', 'submission-1'],
           taskDefinitionName: 'mm-ecs-runner',
         },
         expect.any(Function),
