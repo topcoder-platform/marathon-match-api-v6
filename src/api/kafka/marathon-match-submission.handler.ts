@@ -558,8 +558,9 @@ export class MarathonMatchSubmissionHandler
    * @param challengeId Challenge whose member submissions are compared.
    * @param memberId Member whose most recent clean submission is required.
    * @param currentSubmission Current clean submission used as a safe fallback.
-   * @returns Newest clean member submission plus verified member submission IDs
-   * for recovering runner task ARNs, or undefined when no candidate exists.
+   * @returns Newest clean member submission plus verified member submission IDs,
+   * including list rows without a scan flag, for recovering runner task ARNs;
+   * undefined when no clean candidate exists.
    * @throws Error when submission-api-v6 rejects the member submission lookup.
    */
   private async fetchNewestCleanMemberSubmission(
@@ -604,14 +605,11 @@ export class MarathonMatchSubmissionHandler
     submissions.push(currentSubmission);
 
     const candidatesById = new Map<string, CleanMemberSubmission>();
+    const memberSubmissionIds = new Set<string>();
     for (const [sequence, submission] of submissions.entries()) {
       const candidateSubmissionId =
         this.asString(submission.submissionId) ?? this.asString(submission.id);
-      if (
-        !candidateSubmissionId ||
-        candidatesById.has(candidateSubmissionId) ||
-        this.parseBooleanFlag(submission.virusScan) !== true
-      ) {
+      if (!candidateSubmissionId) {
         continue;
       }
 
@@ -620,6 +618,14 @@ export class MarathonMatchSubmissionHandler
       if (
         (candidateChallengeId && candidateChallengeId !== challengeId) ||
         (candidateMemberId && candidateMemberId !== memberId)
+      ) {
+        continue;
+      }
+
+      memberSubmissionIds.add(candidateSubmissionId);
+      if (
+        candidatesById.has(candidateSubmissionId) ||
+        this.parseBooleanFlag(submission.virusScan) !== true
       ) {
         continue;
       }
@@ -646,7 +652,7 @@ export class MarathonMatchSubmissionHandler
       return left.sequence - right.sequence;
     })[0];
     return newest
-      ? { ...newest, memberSubmissionIds: Array.from(candidatesById.keys()) }
+      ? { ...newest, memberSubmissionIds: [...memberSubmissionIds] }
       : undefined;
   }
 
