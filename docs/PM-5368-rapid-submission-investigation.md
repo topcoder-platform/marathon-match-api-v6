@@ -63,3 +63,27 @@ events, duplicated events, two API replicas, another member, and transient Revie
 API failure. A stale event must never cancel B's scorer. Existing separately
 configured EXAMPLE/PROVISIONAL tasks for one submission remain supported; the
 replacement rule removes tasks for superseded submissions.
+
+## September 24 QA follow-up
+
+QA challenge `7599d6dd-50c6-4f9f-a243-c420f10b4881` still left the second
+submission in Preparing. For all three members tested, Review API and
+submission-api show the same pattern:
+
+- Only the older submission's EXAMPLE summation was written as `CANCELLED`, one
+  second after the newer submission arrived.
+- The older submission's EXAMPLE artifact was still uploaded.
+- Its PROVISIONAL task ran to completion.
+- The newer submission has no summations and no artifacts.
+
+The EXAMPLE task therefore never stopped, and the handler never reached the
+PROVISIONAL task or the replacement launch. This matches `StopTask` throwing on
+the first superseded task. The most likely cause is a missing `ecs:StopTask`
+grant on the API role. With `KAFKA_DLQ_ENABLED` unset, the consumer commits a
+failed event without retrying, so the newest submission was dropped.
+
+Cancellation is now best-effort. The handler logs per-task persistence,
+`StopTask`, and shutdown-confirmation failures, moves on to the remaining tasks,
+and always dispatches the newest submission. The API role still needs
+`ecs:StopTask` in each environment for the one-scorer-per-member limit to hold.
+Search the API logs for `Failed to stop superseded ECS scorer task` to confirm.

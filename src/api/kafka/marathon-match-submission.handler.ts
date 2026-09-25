@@ -799,8 +799,10 @@ export class MarathonMatchSubmissionHandler
    * the newest submission's configured phase tasks consume scorer capacity.
    * @param token M2M token for review-api.
    * @param input New submission identity plus challenge scoring configuration.
-   * @returns Resolves after cancellations are persisted and ECS confirms shutdown.
-   * @throws Error when ECS cancellation or review-api persistence fails.
+   * @returns Resolves after every superseded task has been attempted.
+   * @throws Error when ECS task inspection fails. Per-task persistence, StopTask,
+   * and shutdown confirmation failures are logged by EcsService so the newest
+   * submission is still dispatched.
    * Superseded submissions are marked `CANCELLED` rather than `FAILED` so they
    * do not stay in the member-facing preparing state after their scorer stops.
    */

@@ -13,7 +13,9 @@ Before enabling live scoring, confirm:
 - `marathon-match-api-v6` environment variables are configured for Kafka, ECS, Challenge API, Review API, and Marathon Match API URLs
 - M2M credentials are configured so the service and ECS runner can call downstream APIs
 - Member scoring requires `ecs:ListTasks`, `ecs:DescribeTasks`, and `ecs:StopTask`
-  in addition to launch permissions; inspection failures now fail closed.
+  in addition to launch permissions. Inspection failures fail closed; a missing
+  `ecs:StopTask` grant is logged and leaves superseded runs going, so the
+  one-scorer-per-member limit only holds once the grant is in place.
 
 ## Flow
 
@@ -52,7 +54,7 @@ sequenceDiagram
         H->>SA: Read newest clean member submissions
         H->>ECS: Resolve existing tasks from ECS and persisted runner ARNs
         ECS->>RA: Persist CANCELLED before stopping superseded tasks
-        ECS->>F: StopTask and wait for lastStatus STOPPED
+        ECS->>F: StopTask and wait up to 120s for lastStatus STOPPED (best-effort)
         loop Once per matching phase config
           H->>ECS: Check active scorer tasks for dedupe/cap
           H->>ECS: launchScorerTask(configId, submissionId, phaseConfig)
@@ -100,11 +102,23 @@ launch. This serializes rapid events even on separate API replicas. Known runner
 ARNs for verified member submissions supplement `ListTasks`, including legacy
 tasks without `MEMBER_ID`. The lookup retains member submission IDs even when a
 list row omits its virus-scan flag; the clean flag is required only to choose the
-newest submission to score. Cancellation is persisted before `StopTask`; failure to
-persist leaves the old task discoverable for retry. Shutdown must be confirmed
-within 120 seconds before replacement can start. Failed inspection, persistence,
-or shutdown confirmation aborts dispatch and reaches Kafka retry/DLQ handling.
-Cancelling a submission therefore cannot silently leave it in Preparing.
+newest submission to score. Failed inspection aborts dispatch and reaches Kafka
+retry/DLQ handling.
+
+Cancellation itself is best-effort, and every superseded task is attempted:
+
+- Cancellation is persisted as `CANCELLED` before `StopTask`. If persistence
+  fails, that task is logged and left running so its real result stays visible.
+- If `StopTask` fails (for example, the API role lacks `ecs:StopTask`), the error
+  is logged and the task stays marked cancelled. Late callbacks cannot revive it.
+- The handler waits up to 120 seconds for the stopped tasks to reach
+  `lastStatus = STOPPED`. If ECS has not confirmed by then, it logs a warning
+  and dispatches the replacement anyway.
+
+None of these failures abort dispatch. Kafka commits a failed event without
+retrying unless `KAFKA_DLQ_ENABLED=true`, so aborting would leave the newest
+submission in Preparing with no scorer. Tasks whose stop failed still count
+towards the global scorer cap.
 
 `StopTask` can return while a container is still shutting down, so desired
 `STOPPED` is not proof that it has exited. See the
