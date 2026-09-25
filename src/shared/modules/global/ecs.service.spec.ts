@@ -796,7 +796,8 @@ describe('EcsService', () => {
       );
 
       if (fails) {
-        await expect(operation).rejects.toThrow('Review API unavailable');
+        // The task keeps running rather than being stopped unrecorded.
+        await expect(operation).resolves.toEqual([]);
         expect(events).toEqual(['persist']);
         expect(waitUntilTasksStopped).not.toHaveBeenCalled();
       } else {
@@ -852,7 +853,7 @@ describe('EcsService', () => {
     );
   });
 
-  it('retains a stopping task and blocks replacement until ECS confirms shutdown', async () => {
+  it('dispatches the replacement when ECS does not confirm superseded shutdown in time', async () => {
     const { service, send } = createService();
     const oldTask = {
       ...activeTask({ taskArn: 'old-task', submissionId: 'old-submission' }),
@@ -870,7 +871,13 @@ describe('EcsService', () => {
       }
       if (command instanceof DescribeTasksCommand) return { tasks: [oldTask] };
       if (command instanceof StopTaskCommand) return {};
-      throw new Error('Replacement launched before shutdown');
+      if (command instanceof RunTaskCommand) {
+        return { tasks: [{ taskArn: 'new-task' }] };
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return { taskDefinition: {} };
+      }
+      throw new Error(`Unexpected command ${command.constructor.name}`);
     });
 
     await expect(
@@ -882,9 +889,145 @@ describe('EcsService', () => {
         undefined,
         { memberId: 'member-1' },
       ),
-    ).rejects.toThrow('shutdown not confirmed');
-    expect(
-      send.mock.calls.some(([command]) => command instanceof RunTaskCommand),
-    ).toBe(false);
+    ).resolves.toEqual(expect.objectContaining({ taskArn: 'new-task' }));
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replacementSubmissionId: 'new-submission',
+        taskArns: ['old-task'],
+        error: 'shutdown not confirmed',
+      }),
+    );
+  });
+
+  it('keeps cancelling the remaining superseded tasks when StopTask is denied for one', async () => {
+    // QA regression for PM-5368: a denied StopTask on the old EXAMPLE task
+    // aborted cancellation, so the old PROVISIONAL task kept running and the
+    // newest submission was never dispatched.
+    const { service, send } = createService();
+    const exampleTask = activeTask({
+      taskArn: 'old-example-task',
+      submissionId: 'old-submission',
+      phaseConfigType: 'EXAMPLE',
+    });
+    const provisionalTask = activeTask({
+      taskArn: 'old-provisional-task',
+      submissionId: 'old-submission',
+      phaseConfigType: 'PROVISIONAL',
+    });
+    send.mockImplementation(async (command) => {
+      if (command instanceof ListTasksCommand) {
+        return {
+          taskArns:
+            command.input.desiredStatus === 'RUNNING'
+              ? ['old-example-task', 'old-provisional-task']
+              : [],
+        };
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return { tasks: [exampleTask, provisionalTask] };
+      }
+      if (command instanceof StopTaskCommand) {
+        if (command.input.task === 'old-example-task') {
+          throw Object.assign(
+            new Error('User is not authorized to perform: ecs:StopTask'),
+            { name: 'AccessDeniedException' },
+          );
+        }
+        return {};
+      }
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    const beforeStop = jest.fn().mockResolvedValue(undefined);
+
+    const cancelledTasks = await service.cancelMemberScorerTasks(
+      {
+        challengeId: 'challenge-1',
+        submissionId: 'new-submission',
+        memberId: 'member-1',
+        taskDefinitionName: 'mm-ecs-runner',
+      },
+      beforeStop,
+    );
+
+    expect(beforeStop.mock.calls.map(([task]) => task.phaseConfigType)).toEqual(
+      ['EXAMPLE', 'PROVISIONAL'],
+    );
+    expect(cancelledTasks).toEqual([
+      expect.objectContaining({
+        taskArn: 'old-provisional-task',
+        phaseConfigType: 'PROVISIONAL',
+      }),
+    ]);
+    expect(waitUntilTasksStopped).toHaveBeenCalledWith(
+      expect.anything(),
+      { cluster: 'cluster-1', tasks: ['old-provisional-task'] },
+    );
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskArn: 'old-example-task',
+        error: 'User is not authorized to perform: ecs:StopTask',
+      }),
+    );
+  });
+
+  it('leaves a superseded task running when its cancellation cannot be persisted', async () => {
+    const { service, send } = createService();
+    const exampleTask = activeTask({
+      taskArn: 'old-example-task',
+      submissionId: 'old-submission',
+      phaseConfigType: 'EXAMPLE',
+    });
+    const provisionalTask = activeTask({
+      taskArn: 'old-provisional-task',
+      submissionId: 'old-submission',
+      phaseConfigType: 'PROVISIONAL',
+    });
+    send.mockImplementation(async (command) => {
+      if (command instanceof ListTasksCommand) {
+        return {
+          taskArns:
+            command.input.desiredStatus === 'RUNNING'
+              ? ['old-example-task', 'old-provisional-task']
+              : [],
+        };
+      }
+      if (command instanceof DescribeTasksCommand) {
+        return { tasks: [exampleTask, provisionalTask] };
+      }
+      if (command instanceof StopTaskCommand) return {};
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    const beforeStop = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('review-api unavailable'))
+      .mockResolvedValue(undefined);
+
+    const cancelledTasks = await service.cancelMemberScorerTasks(
+      {
+        challengeId: 'challenge-1',
+        submissionId: 'new-submission',
+        memberId: 'member-1',
+        taskDefinitionName: 'mm-ecs-runner',
+      },
+      beforeStop,
+    );
+
+    const stoppedTaskArns = send.mock.calls
+      .map(([command]) => command as unknown)
+      .filter(
+        (command): command is StopTaskCommand =>
+          command instanceof StopTaskCommand,
+      )
+      .map((command) => command.input.task);
+    expect(stoppedTaskArns).toEqual(['old-provisional-task']);
+    expect(cancelledTasks.map((task) => task.taskArn)).toEqual([
+      'old-provisional-task',
+    ]);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskArn: 'old-example-task',
+        error: 'review-api unavailable',
+      }),
+    );
   });
 });

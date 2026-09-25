@@ -124,7 +124,8 @@ export class EcsService {
    * task cap and defaults to 20. Member launches require ECS inspection access;
    * launches without a member retain the legacy inspection fallback.
    * @throws Error when required ENV vars are missing, token fetch fails, the scorer task cap is reached
-   * after active task lookup succeeds, or ECS launch/cancellation fails.
+   * after active task lookup succeeds, or ECS launch fails. Failing to stop a
+   * superseded member task is logged and does not block the launch.
    */
   async launchScorerTask(
     challengeId: string,
@@ -848,9 +849,11 @@ export class EcsService {
    * preserving separately configured phase tasks for the newest submission.
    * @param input Challenge, new submission, member, and task definition family.
    * @param beforeStop Persists cancellation before a task can disappear.
-   * @returns Cancelled tasks after ECS confirms their shutdown.
-   * @throws Error when configuration, inspection, persistence, stop, or shutdown
-   * confirmation fails. A replacement must not launch on an unverified result.
+   * @returns Tasks ECS accepted a stop request for, after waiting up to 120
+   * seconds for their shutdown.
+   * @throws Error when configuration or task inspection fails. Persistence,
+   * StopTask, and shutdown confirmation failures are logged per task instead, so
+   * one stuck superseded task cannot block the newest submission's dispatch.
    * The Kafka handler uses beforeStop to mark scoring cancelled before shutdown;
    * returned task identities support dispatch logging.
    */
@@ -930,12 +933,21 @@ export class EcsService {
 
   /**
    * Stops the member's active scorer tasks for other submissions on a challenge.
+   * Cancellation is best-effort: every superseded task is attempted, and a
+   * failure on one task never prevents the remaining tasks from being cancelled
+   * or the replacement submission from being dispatched. Kafka commits a failed
+   * event without retrying unless the DLQ is enabled, so aborting here would
+   * leave the newest submission unscored in Preparing.
    * @param cluster ECS cluster name or ARN.
    * @param activeTasks Currently active scorer tasks.
    * @param input Challenge, superseding submission, and member identity.
    * @param beforeStop Optional cancellation persistence called before StopTask.
-   * @returns Tasks confirmed stopped, keyed by superseded submission.
-   * @throws Error if persistence, StopTask, or shutdown confirmation fails.
+   * When it fails, that task is left running so its real result stays visible.
+   * @returns Tasks that ECS accepted a stop request for, keyed by superseded
+   * submission. Tasks whose persistence or StopTask failed are logged and omitted
+   * so launch capacity checks still count them as running.
+   * @throws Never for persistence, StopTask, or shutdown confirmation failures;
+   * each is logged instead.
    */
   private async stopMemberScorerTasks(
     cluster: string,
@@ -959,31 +971,76 @@ export class EcsService {
         taskId: task.taskId,
         phaseConfigType: task.phaseConfigType,
       };
-      await beforeStop?.(cancelledTask);
-      await this.ecsClient.send(
-        new StopTaskCommand({
-          cluster,
-          task: task.taskArn,
-          reason: `Superseded by newer Marathon Match submission ${input.submissionId} for challenge ${input.challengeId}.`,
-        }),
-      );
-      this.logger.log({
-        message: 'Stopped superseded ECS scorer task',
+      const logContext = {
         challengeId: input.challengeId,
         memberId: input.memberId,
         supersededSubmissionId: task.submissionId,
         replacementSubmissionId: input.submissionId,
+        phaseConfigType: task.phaseConfigType ?? null,
         taskArn: task.taskArn,
         taskId: task.taskId,
+      };
+
+      try {
+        await beforeStop?.(cancelledTask);
+      } catch (error) {
+        this.logger.error({
+          message:
+            'Failed to persist superseded scorer cancellation; leaving the task running so its result remains visible.',
+          ...logContext,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      try {
+        await this.ecsClient.send(
+          new StopTaskCommand({
+            cluster,
+            task: task.taskArn,
+            reason: `Superseded by newer Marathon Match submission ${input.submissionId} for challenge ${input.challengeId}.`,
+          }),
+        );
+      } catch (error) {
+        this.logger.error({
+          message:
+            'Failed to stop superseded ECS scorer task; it stays marked cancelled and the replacement is still dispatched. Check that the API role has ecs:StopTask.',
+          ...logContext,
+          cluster,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+
+      this.logger.log({
+        message: 'Stopped superseded ECS scorer task',
+        ...logContext,
       });
       cancelledTasks.push(cancelledTask);
     }
 
     if (cancelledTasks.length) {
-      await waitUntilTasksStopped(
-        { client: this.ecsClient, maxWaitTime: 120, minDelay: 1, maxDelay: 5 },
-        { cluster, tasks: cancelledTasks.map((task) => task.taskArn) },
-      );
+      try {
+        await waitUntilTasksStopped(
+          {
+            client: this.ecsClient,
+            maxWaitTime: 120,
+            minDelay: 1,
+            maxDelay: 5,
+          },
+          { cluster, tasks: cancelledTasks.map((task) => task.taskArn) },
+        );
+      } catch (error) {
+        this.logger.warn({
+          message:
+            'ECS did not confirm superseded scorer shutdown in time; dispatching the replacement anyway.',
+          challengeId: input.challengeId,
+          memberId: input.memberId,
+          replacementSubmissionId: input.submissionId,
+          taskArns: cancelledTasks.map((task) => task.taskArn),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     return cancelledTasks;
