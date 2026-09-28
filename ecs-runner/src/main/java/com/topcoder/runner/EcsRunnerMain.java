@@ -3246,6 +3246,9 @@ public class EcsRunnerMain {
      *
      * <p>The file is named with the actual seed value so operators can inspect a
      * specific seed directly inside the {@code *-internal} artifact zip.
+     * On POSIX filesystems, the tester-owned temporary file grants read access
+     * to the shared runner group before publication, allowing the separate
+     * non-root parent to archive it without exposing it to the scorer user.
      *
      * @param outputDirectory Reserved output directory, such as {@code stdout} or {@code stderr}.
      * @param seed Actual seed value for the testcase.
@@ -3275,6 +3278,18 @@ public class EcsRunnerMain {
             ".txt"
         );
         try {
+            PosixFileAttributeView permissions = Files.getFileAttributeView(
+                tempPath,
+                PosixFileAttributeView.class,
+                LinkOption.NOFOLLOW_LINKS
+            );
+            if (permissions != null) {
+                permissions.setPermissions(EnumSet.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.GROUP_READ
+                ));
+            }
             Files.write(
                 tempPath,
                 (outputText == null ? "" : outputText).getBytes(StandardCharsets.UTF_8)

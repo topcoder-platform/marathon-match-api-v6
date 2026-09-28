@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -445,6 +447,94 @@ public class EcsRunnerMainTest {
         assertEquals("error log\n", readZipEntry(zipPath, "error-submission-id.log"));
         assertEquals("compile log\n", readZipEntry(zipPath, "compile_log.txt"));
         Files.deleteIfExists(zipPath);
+    }
+
+    /**
+     * Verifies populated, empty, and null seed output remains group-readable for
+     * parent packaging while denying group writes and access by other users.
+     * @throws Exception when artifact creation, permission inspection, or ZIP reading fails.
+     */
+    @Test
+    public void seedOutputArtifactsAllowRunnerGroupReadWithoutOtherUserAccess()
+        throws Exception {
+        Path artifactsDir = createArtifactsDir();
+        Assume.assumeTrue(
+            Files.getFileStore(artifactsDir).supportsFileAttributeView("posix")
+        );
+        String[] outputs = { "captured output\n", "", null };
+        for (String directoryName : Arrays.asList("stdout", "stderr")) {
+            Path outputDir = invokePrepareReservedPrivateArtifactDirectory(
+                artifactsDir.resolve("private"),
+                directoryName
+            );
+            for (int seed = 0; seed < outputs.length; seed++) {
+                invokeWriteSeedOutputArtifact(outputDir, seed, outputs[seed]);
+                assertEquals(
+                    PosixFilePermissions.fromString("rw-r-----"),
+                    Files.getPosixFilePermissions(outputDir.resolve(seed + ".txt"))
+                );
+            }
+        }
+
+        Path zipPath = invokeCreateInternalArtifactZip(artifactsDir);
+        try {
+            for (String directoryName : Arrays.asList("stdout", "stderr")) {
+                for (int seed = 0; seed < outputs.length; seed++) {
+                    assertEquals(
+                        outputs[seed] == null ? "" : outputs[seed],
+                        readZipEntry(zipPath, directoryName + "/" + seed + ".txt")
+                    );
+                }
+            }
+        } finally {
+            Files.deleteIfExists(zipPath);
+        }
+    }
+
+    /**
+     * Verifies publishing group-readable output replaces a pre-existing symlink
+     * without changing its target's contents or owner-only permissions.
+     * @throws Exception when filesystem setup, artifact writing, or inspection fails.
+     */
+    @Test
+    public void seedOutputPermissionsDoNotFollowExistingTargetSymlink()
+        throws Exception {
+        Path artifactsDir = createArtifactsDir();
+        Assume.assumeTrue(
+            Files.getFileStore(artifactsDir).supportsFileAttributeView("posix")
+        );
+        Path outputDir = invokePrepareReservedPrivateArtifactDirectory(
+            artifactsDir.resolve("private"),
+            "stdout"
+        );
+        Path protectedFile = temporaryFolder.newFile("protected.txt").toPath();
+        Files.write(protectedFile, "private".getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(
+            protectedFile,
+            PosixFilePermissions.fromString("rw-------")
+        );
+        Path outputPath = outputDir.resolve("12345.txt");
+        Files.createSymbolicLink(outputPath, protectedFile);
+
+        invokeWriteSeedOutputArtifact(outputDir, 12345L, "captured output\n");
+
+        assertFalse(Files.isSymbolicLink(outputPath));
+        assertEquals(
+            "captured output\n",
+            new String(Files.readAllBytes(outputPath), StandardCharsets.UTF_8)
+        );
+        assertEquals(
+            PosixFilePermissions.fromString("rw-r-----"),
+            Files.getPosixFilePermissions(outputPath)
+        );
+        assertEquals(
+            "private",
+            new String(Files.readAllBytes(protectedFile), StandardCharsets.UTF_8)
+        );
+        assertEquals(
+            PosixFilePermissions.fromString("rw-------"),
+            Files.getPosixFilePermissions(protectedFile)
+        );
     }
 
     @Test
