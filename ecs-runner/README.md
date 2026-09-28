@@ -29,6 +29,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - Artifact previews and artifact zip uploads include only non-symlink regular files from the runner artifact directories. Submitted symlinks are ignored instead of being dereferenced by the trusted parent runner.
 - Submitted solution processes and their fork/exec children cannot use `io_uring` and can create only `AF_UNIX` sockets. These restrictions are kernel seccomp filters inherited across fork/exec, so clearing `LD_PRELOAD` in a spawned child process does not restore INET or INET6 socket access. Outbound network access from the submission itself is therefore blocked even though the parent runner still has the trusted egress it needs.
 - The child JVM runs standard Topcoder Marathon testers through the generic runner flow. Custom tester `runTester(...)` result maps remain supported for advanced cases, but standard testers do not need ECS-specific code.
+- Per-seed private `stdout` and `stderr` artifacts are tester-owned with mode `0640`: the shared `runner` group lets the non-root parent read and archive them, while the submitted `scorer` user has no access. Empty output files use the same permissions. Permissions are set on the temporary file before replacing the final seed path, preserving symlink protection.
 
 ## Recommended ECR naming and tags
 
