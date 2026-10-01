@@ -109,16 +109,21 @@ committed position, and recovery rebuilds the stream.
 
 ### Scoring completion email notifications
 
-When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. When `SYSTEM` scoring is complete for every latest member submission in the challenge, the service sends separate system-results emails with each member's final placement. Both template payloads include `scoringStatus` as `pass` or `fail`, and local notification markers prevent duplicate sends for duplicate scorer callbacks. The email `challengeName` is resolved from challenge-api-v6, not from the local Marathon Match scorer config name. The service resolves member identity from submission-api-v6 using the submission ID; if no handle is present, it uses the submission `userId` or `memberId` to call member-api-v6 `GET /members?userId={userId}` before publishing the email event.
+When both `EXAMPLE` and `PROVISIONAL` review summations are complete for a submission, the service sends one email event through Bus API topic `external.action.email`. A failed `PROVISIONAL` result also triggers this email without waiting for an example result. Terminal `FAILED` progress callbacks trigger the notification check even when progress is below 100% and the runner exits without a final result callback; cancelled runs do not count as completed results. Submission emails use `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` for `pass` and `SENDGRID_TEMPLATE_ID_SCORING_FAILED` for `fail`. If the selected template is unset, the service logs a warning and skips sending without reserving a notification; failures never fall back to the success template.
+
+When `SYSTEM` scoring is complete for every latest member submission in the challenge, the service sends separate system-results emails with each member's final placement. All template payloads include `scoringStatus` as `pass` or `fail`, and local notification markers prevent duplicate sends for duplicate scorer callbacks. The email `challengeName` is resolved from challenge-api-v6, not from the local Marathon Match scorer config name. The service resolves member identity from submission-api-v6 using the submission ID; if no handle is present, it uses the submission `userId` or `memberId` to call member-api-v6 `GET /members?userId={userId}` before publishing the email event.
 
 | Variable                                   | Required             | Default                           | Used for                                                            |
 | ------------------------------------------ | -------------------- | --------------------------------- | ------------------------------------------------------------------- |
-| `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE`    | Yes (to send emails) | None                              | SendGrid template ID for example/provisional completion emails      |
+| `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE`    | Yes (for success emails) | None                          | SendGrid template ID for successful example/provisional scoring     |
+| `SENDGRID_TEMPLATE_ID_SCORING_FAILED`      | Yes (for failure emails) | None                          | SendGrid template ID for failed example/provisional scoring         |
 | `SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS` | Yes (to send emails) | None                              | SendGrid template ID for system test result emails                  |
 | `MEMBER_API_URL`                           | No                   | `https://api.topcoder-dev.com/v6` | member-api-v6 base URL used to fetch the competitor email by handle |
 | `BUS_EVENTS_URL`                           | No                   | (derived)                         | Full Bus API event endpoint URL; overrides the base URL variables   |
 | `BUS_API_URL` / `BUSAPI_URL`               | No                   | `https://api.topcoder-dev.com/v5` | Bus API base URL used to publish `external.action.email` events     |
 | `TC_EMAIL_FROM_EMAIL` / `EMAIL_FROM`       | No                   | `no-reply@topcoder.com`           | Sender and reply-to address for the email payload                   |
+
+The failure template receives the same data fields as the success template: `memberHandle`, `submissionId`, `challengeName`, `challengeId`, `challengeUrl`, `challengeURL`, `scoringStatus` (`fail`), and `aggregateProvisionalScore` (`-1` for runner failures). Set `SENDGRID_TEMPLATE_ID_SCORING_FAILED` to the new SendGrid dynamic template ID to enable these emails.
 
 ### Marathon scoring integration
 
