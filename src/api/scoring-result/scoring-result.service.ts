@@ -527,6 +527,12 @@ export class ScoringResultService {
    * Processes one runner progress callback and creates or updates the phase review
    * summation with progress metadata. The review-api schema stores this Marathon
    * Match-specific state in `metadata.testProgress` and `metadata.testStatus`.
+   * Failed provisional progress also triggers a completion email because the
+   * runner can exit without sending a final scoring result callback.
+   * @param payload Runner progress, status, and submission context.
+   * @returns Resolves after progress is persisted and any failure email is evaluated.
+   * @throws NotFoundException When the Marathon Match config or validation run does not exist.
+   * @throws Error When authentication or review-api persistence fails.
    */
   async processScoringProgress(
     payload: ScoringProgressCallbackPayload,
@@ -582,6 +588,18 @@ export class ScoringResultService {
     });
 
     await this.upsertReviewSummation(token, normalizedPhase, reviewPayload);
+
+    if (
+      normalizedPhase === 'provisional' &&
+      payload.status === ScoringTestStatus.Failed
+    ) {
+      await this.notifyScoringCompletionEmailIfReady(
+        token,
+        { ...payload, score: reviewPayload.aggregateScore },
+        normalizedPhase,
+        config,
+      );
+    }
   }
 
   /**
@@ -1882,7 +1900,8 @@ export class ScoringResultService {
   }
 
   /**
-   * Sends scoring completion emails once the relevant phase result set is complete.
+   * Sends scoring completion emails once the relevant phase result set is complete
+   * or provisional scoring has failed.
    * Example/provisional emails are evaluated per callback submission; SYSTEM
    * emails are evaluated for all latest member submissions in the challenge.
    * @param token M2M token for downstream API calls.
@@ -1948,10 +1967,11 @@ export class ScoringResultService {
   /**
    * Resolves member and final example/provisional score values from the latest
    * persisted submission data after review summation writes complete.
+   * A failed provisional result is ready even if example scoring never completes.
    * @param token M2M token for submission-api-v6.
    * @param config Marathon Match config summary for the challenge.
    * @param submissionId Submission identifier to inspect.
-   * @returns Email details when both phases are complete, otherwise undefined.
+   * @returns Email details when provisional scoring failed or both phases are complete, otherwise undefined.
    */
   private async resolveSubmissionScoringCompletionDetails(
     token: string,
@@ -2017,7 +2037,10 @@ export class ScoringResultService {
       this.findPhaseReviewSummation(submission, 'provisional'),
     );
 
-    if (!exampleResult || !provisionalResult) {
+    if (
+      !provisionalResult ||
+      (!exampleResult && provisionalResult.status !== 'fail')
+    ) {
       return undefined;
     }
 
@@ -2029,7 +2052,7 @@ export class ScoringResultService {
       submissionId,
       ...memberIdentity,
       scoringStatus:
-        exampleResult.status === 'pass' && provisionalResult.status === 'pass'
+        exampleResult?.status === 'pass' && provisionalResult.status === 'pass'
           ? 'pass'
           : 'fail',
       aggregateProvisionalScore: provisionalResult.aggregateScore,
@@ -2390,7 +2413,8 @@ export class ScoringResultService {
 
   /**
    * Extracts a completed aggregate score and pass/fail status from a phase
-   * review summation.
+   * review summation. Explicit failures are terminal even below 100% progress;
+   * cancelled and in-progress scoring do not produce completion results.
    * @param reviewObject Review summation object returned by submission-api-v6.
    * @returns Phase scoring result when scoring is complete, otherwise undefined.
    */
@@ -2410,12 +2434,19 @@ export class ScoringResultService {
     }
 
     const testStatus = this.asString(metadata.testStatus)?.toUpperCase();
-    if (testStatus === ScoringTestStatus.InProgress) {
+    if (
+      testStatus === ScoringTestStatus.InProgress ||
+      testStatus === ScoringTestStatus.Cancelled
+    ) {
       return undefined;
     }
 
     const testProgress = this.toNumber(metadata.testProgress);
-    if (testProgress !== null && testProgress < 1) {
+    if (
+      testStatus !== ScoringTestStatus.Failed &&
+      testProgress !== null &&
+      testProgress < 1
+    ) {
       return undefined;
     }
 
@@ -3964,9 +3995,7 @@ export class ScoringResultService {
     )?.toUpperCase();
     if (
       incomingTestStatus !== ScoringTestStatus.Cancelled &&
-      existingReviews.some((review) =>
-        this.isCancelledReviewSummation(review),
-      )
+      existingReviews.some((review) => this.isCancelledReviewSummation(review))
     ) {
       this.logger.log({
         message:

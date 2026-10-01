@@ -352,7 +352,9 @@ GET /v6/marathon-match/submissions/:submissionId/runner-logs
 
 ## Notification Emails
 
-When both Example and Provisional scoring are complete for a submission, `marathon-match-api-v6` sends one Bus API event to topic `external.action.email` if `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` is configured. System scoring emails are held until every latest member submission in the challenge has a completed System review summation; then the service sends a separate Bus API event per member if `SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS` is configured.
+When both Example and Provisional scoring are complete for a submission, `marathon-match-api-v6` sends one Bus API event to topic `external.action.email`. A failed Provisional result is also ready for notification when Example scoring has not completed. Terminal failed Provisional progress callbacks trigger the notification check without requiring a final result callback or 100% progress. Cancelled and in-progress summations are not treated as completed results.
+
+Submission emails select `SENDGRID_TEMPLATE_ID_SCORING_COMPLETE` for `pass` and `SENDGRID_TEMPLATE_ID_SCORING_FAILED` for `fail`. Configure the latter with the new SendGrid dynamic template ID for failed tests. Missing or blank template IDs skip the corresponding email without reserving a notification; failure emails do not fall back to the success template. System scoring emails are held until every latest member submission in the challenge has a completed System review summation; then the service sends a separate Bus API event per member if `SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS` is configured.
 
 Both email payloads include:
 
@@ -362,7 +364,7 @@ Both email payloads include:
 - challenge URL in the form `https://topcoder.com/challenges/{challengeId}`
 - overall scoring status, either `pass` or `fail`
 
-The Example/Provisional completion payload also includes:
+The Example/Provisional success and failure templates receive the same data. The completion payload also includes:
 
 - aggregate provisional score after relative scoring updates
 

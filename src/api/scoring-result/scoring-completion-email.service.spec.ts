@@ -64,6 +64,7 @@ describe('ScoringCompletionEmailService', () => {
       BUS_API_URL: 'https://api.topcoder-dev.com/v5',
       MEMBER_API_URL: 'https://api.topcoder-dev.com/v6',
       SENDGRID_TEMPLATE_ID_SCORING_COMPLETE: 'sendgrid-template-id',
+      SENDGRID_TEMPLATE_ID_SCORING_FAILED: 'failed-template-id',
       SENDGRID_TEMPLATE_ID_SYSTEM_TEST_RESULTS: 'system-template-id',
       TC_EMAIL_FROM_EMAIL: 'no-reply@topcoder.com',
     };
@@ -184,6 +185,75 @@ describe('ScoringCompletionEmailService', () => {
     );
   });
 
+  it('sends failed scoring through the failure template without requiring the success template', async () => {
+    const { httpService, prisma, service } = createService();
+    delete process.env.SENDGRID_TEMPLATE_ID_SCORING_COMPLETE;
+    prisma.$queryRaw.mockResolvedValue([{ id: 'notification-1' }]);
+    httpService.get.mockReturnValue(
+      of({
+        data: { email: 'competitor@example.com', handle: 'competitor' },
+      }),
+    );
+    httpService.post.mockReturnValue(of({ status: 202 }));
+
+    await service.sendSubmissionScoringCompleteEmail('m2m-token', {
+      ...details,
+      scoringStatus: 'fail',
+      aggregateProvisionalScore: -1,
+    });
+
+    expect(httpService.post).toHaveBeenCalledTimes(1);
+    expect(httpService.post).toHaveBeenCalledWith(
+      'https://api.topcoder-dev.com/v5/bus/events',
+      expect.objectContaining({
+        topic: 'external.action.email',
+        payload: expect.objectContaining({
+          recipients: ['competitor@example.com'],
+          sendgrid_template_id: 'failed-template-id',
+          data: expect.objectContaining({
+            memberHandle: details.memberHandle,
+            submissionId: details.submissionId,
+            challengeId: details.challengeId,
+            challengeName: details.challengeName,
+            scoringStatus: 'fail',
+            aggregateProvisionalScore: -1,
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw.mock.calls[0][0].strings.join('')).toContain(
+      '"status" = \'SENT\'',
+    );
+  });
+
+  it.each([undefined, '', '   '])(
+    'skips failed email without reserving it when the failure template is %p',
+    async (templateId) => {
+      const { httpService, prisma, service } = createService();
+      if (templateId === undefined) {
+        delete process.env.SENDGRID_TEMPLATE_ID_SCORING_FAILED;
+      } else {
+        process.env.SENDGRID_TEMPLATE_ID_SCORING_FAILED = templateId;
+      }
+
+      await service.sendSubmissionScoringCompleteEmail('m2m-token', {
+        ...details,
+        scoringStatus: 'fail',
+        aggregateProvisionalScore: -1,
+      });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(httpService.get).not.toHaveBeenCalled();
+      expect(httpService.post).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('SENDGRID_TEMPLATE_ID_SCORING_FAILED'),
+      );
+    },
+  );
+
   it('sends one system results email through Bus API and marks the notification sent', async () => {
     const { httpService, prisma, service } = createService();
 
@@ -272,17 +342,23 @@ describe('ScoringCompletionEmailService', () => {
     );
   });
 
-  it('skips sending when a sent or active notification marker already exists', async () => {
-    const { httpService, prisma, service } = createService();
+  it.each(['pass', 'fail'] as const)(
+    'skips sending %s when a sent or active notification marker already exists',
+    async (scoringStatus) => {
+      const { httpService, prisma, service } = createService();
 
-    prisma.$queryRaw.mockResolvedValue([]);
+      prisma.$queryRaw.mockResolvedValue([]);
 
-    await expect(
-      service.sendSubmissionScoringCompleteEmail('m2m-token', details),
-    ).resolves.toBe(undefined);
+      await expect(
+        service.sendSubmissionScoringCompleteEmail('m2m-token', {
+          ...details,
+          scoringStatus,
+        }),
+      ).resolves.toBe(undefined);
 
-    expect(httpService.get).not.toHaveBeenCalled();
-    expect(httpService.post).not.toHaveBeenCalled();
-    expect(prisma.$executeRaw).not.toHaveBeenCalled();
-  });
+      expect(httpService.get).not.toHaveBeenCalled();
+      expect(httpService.post).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    },
+  );
 });
