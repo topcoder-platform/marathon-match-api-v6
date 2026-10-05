@@ -74,7 +74,7 @@ export class ScoringCompletionEmailService {
   ) {}
 
   /**
-   * Sends the completion email if the template is configured and this
+   * Sends the completion email using the success or failure template if configured and this
    * submission has not already produced a successful notification.
    * @param token M2M token used for member-api-v6 and Bus API calls.
    * @param details Submission, challenge, member, status, and provisional score values for the email.
@@ -84,10 +84,14 @@ export class ScoringCompletionEmailService {
     token: string,
     details: SubmissionScoringCompletionEmailDetails,
   ): Promise<void> {
-    const sendgridTemplateId = this.getSubmissionSendgridTemplateId();
+    const templateVariable =
+      details.scoringStatus === 'fail'
+        ? 'SENDGRID_TEMPLATE_ID_SCORING_FAILED'
+        : 'SENDGRID_TEMPLATE_ID_SCORING_COMPLETE';
+    const sendgridTemplateId = this.asString(process.env[templateVariable]);
     if (!sendgridTemplateId) {
       this.logger.warn(
-        'Skipping Marathon Match scoring completion email because SENDGRID_TEMPLATE_ID_SCORING_COMPLETE is not configured.',
+        `Skipping Marathon Match scoring completion email because ${templateVariable} is not configured.`,
       );
       return;
     }
@@ -217,14 +221,6 @@ export class ScoringCompletionEmailService {
         error: errorMessage,
       });
     }
-  }
-
-  /**
-   * Reads the SendGrid template ID for example/provisional completion notifications.
-   * @returns Configured SendGrid template ID, if present.
-   */
-  private getSubmissionSendgridTemplateId(): string | undefined {
-    return this.asString(process.env.SENDGRID_TEMPLATE_ID_SCORING_COMPLETE);
   }
 
   /**
