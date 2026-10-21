@@ -23,7 +23,8 @@
     "fixtures:mm:from-prod": "node scripts/create-mm-fixture-from-production.mjs",
     "test:mm:full": "node scripts/run-full-marathon-match-test.mjs",
     "db:migrate": "node dist/prisma/migrate.js",
-    "postinstall": "pnpm exec prisma generate"
+    "postinstall": "pnpm exec prisma generate",
+    "test:keycloak": "node --test test/keycloak-auth.test.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-logs": "^3.1090.0",
@@ -54,7 +55,7 @@
     "prisma": "7.9.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "tc-core-library-js": "topcoder-platform/tc-core-library-js#master"
+    "tc-core-library-js": "https://codeload.github.com/topcoder-platform/tc-core-library-js/tar.gz/c262f4aca971904f308085bdeaaed35cdf3cfa7d"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -127,6 +128,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/test-keycloak.setup.ts"
+    ]
   }
 }

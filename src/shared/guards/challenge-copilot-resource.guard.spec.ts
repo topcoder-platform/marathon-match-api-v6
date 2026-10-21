@@ -87,7 +87,7 @@ describe('ChallengeCopilotResourceGuard', () => {
           challengeId: 'challenge-1',
         },
         user: {
-          isMachine: true,
+          kind: 'service' as const, isMachine: true,
           scopes: [Scope.UpdateMarathonMatch],
           userId: 'machine-client',
         },

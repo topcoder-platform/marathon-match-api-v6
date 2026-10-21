@@ -118,7 +118,7 @@ export class EcsService {
    * @param launchOptions Optional submission owner metadata, cancellation controls, and validation-run routing.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
-   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and Auth0 M2M settings
+   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and explicit Keycloak M2M settings
    * used by the runner to refresh tokens during long scoring tasks. Optional
    * ECS_SCORER_MAX_CONCURRENT_TASKS controls the global pending/running scorer
    * task cap and defaults to 20. Member launches require ECS inspection access;
@@ -292,16 +292,17 @@ export class EcsService {
           runnerEnvironment,
           'DEBUG_LOG_ACCESS_TOKEN',
         );
-        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_URL');
-        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_AUDIENCE');
+        this.appendOptionalEnvOverride(runnerEnvironment, 'M2M_PROVIDER');
+        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_TOKEN_URL');
+        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_AUDIENCE');
         this.appendOptionalEnvOverride(
           runnerEnvironment,
-          'AUTH0_PROXY_SERVER_URL',
+          'KEYCLOAK_SCOPE',
         );
-        this.appendOptionalEnvOverride(runnerEnvironment, 'AUTH0_CLIENT_ID');
+        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_CLIENT_ID');
         this.appendOptionalEnvOverride(
           runnerEnvironment,
-          'AUTH0_CLIENT_SECRET',
+          'KEYCLOAK_CLIENT_SECRET',
         );
 
         const response = await this.ecsClient.send(

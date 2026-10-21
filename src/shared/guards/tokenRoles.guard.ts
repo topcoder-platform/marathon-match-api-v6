@@ -1,3 +1,5 @@
+import { auth, Principal } from 'tc-core-library-js';
+import { ALL_SCOPE_MAPPINGS } from '../enums/scopes.enum';
 import {
   Injectable,
   CanActivate,
@@ -17,6 +19,7 @@ import { isHealthCheckRequestUrl } from '../request/healthCheckRequest';
 export const ROLES_KEY = 'roles';
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
+/** Enforces member roles or exact machine scopes; documented all:* aliases are route policy. */
 @Injectable()
 export class TokenRolesGuard implements CanActivate {
   private readonly logger = LoggerService.forRoot(TokenRolesGuard.name);
@@ -26,6 +29,7 @@ export class TokenRolesGuard implements CanActivate {
     private jwtService: JwtService,
   ) {}
 
+  /** Evaluates route context; returns access or throws Unauthorized/ForbiddenException without changing principal claims. */
   canActivate(context: ExecutionContext): boolean {
     const handler = context.getHandler?.();
     const controllerClass = context.getClass?.();
@@ -94,7 +98,7 @@ export class TokenRolesGuard implements CanActivate {
       );
 
       // Check role-based access for regular users
-      if (normalizedRequiredRoles.length > 0) {
+      if (!user.isMachine && normalizedRequiredRoles.length > 0) {
         const normalizedUserRoles = this.normalizeUserRoles(user.roles);
 
         this.logger.log({
@@ -119,9 +123,10 @@ export class TokenRolesGuard implements CanActivate {
 
       // Check scope-based access for M2M tokens
       if (user.scopes && requiredScopes.length > 0) {
-        const hasScope = requiredScopes.some((scope) =>
-          user.scopes ? user.scopes.includes(scope) : false,
-        );
+        const acceptedScopes = requiredScopes.flatMap(scope => [scope,
+          ...Object.entries(ALL_SCOPE_MAPPINGS).filter(([, implied]) => implied.includes(scope)).map(([alias]) => alias),
+        ]);
+        const hasScope = auth.hasScopes(user as Principal, acceptedScopes, 'any');
 
         this.logger.log({
           message: 'Checking scope-based permissions',

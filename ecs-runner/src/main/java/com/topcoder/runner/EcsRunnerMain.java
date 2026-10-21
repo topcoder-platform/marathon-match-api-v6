@@ -1953,17 +1953,24 @@ public class EcsRunnerMain {
      * Builds the parent-runner token provider from ECS environment overrides.
      *
      * <p>The initial {@code ACCESS_TOKEN} keeps existing task launches working.
-     * Auth0 settings allow long-running scorer tasks to refresh M2M tokens before
-     * expiry or after a 401 response.
+     * Explicit Keycloak settings allow long-running scorer tasks to refresh M2M tokens before
+     * expiry or after a 401 response. Uses only the managed HTTPS facade whose
+     * server validates issued JWTs through tc-core-library-js.
+     * @param initialAccessToken Launch token verified by the parent API's shared core.
+     * @return A provider scoped to this runner's explicit credentials and grants.
+     * @throws IllegalArgumentException for absent opt-in or unsafe token endpoints.
      */
     private static AccessTokenProvider buildAccessTokenProvider(String initialAccessToken) {
+        if (!"keycloak".equals(getOptionalEnv("M2M_PROVIDER", ""))) {
+            throw new IllegalArgumentException("M2M_PROVIDER=keycloak is required for this runner.");
+        }
         return new AccessTokenProvider(
             initialAccessToken,
-            getOptionalEnv("AUTH0_URL", "http://localhost:4000/oauth/token"),
-            getOptionalEnv("AUTH0_AUDIENCE", "https://m2m.topcoder-dev.com/"),
-            getOptionalEnv("AUTH0_PROXY_SERVER_URL", ""),
-            getOptionalEnv("AUTH0_CLIENT_ID", ""),
-            getOptionalEnv("AUTH0_CLIENT_SECRET", "")
+            getOptionalEnv("KEYCLOAK_TOKEN_URL", ""),
+            getOptionalEnv("KEYCLOAK_AUDIENCE", ""),
+            getOptionalEnv("KEYCLOAK_SCOPE", ""),
+            getOptionalEnv("KEYCLOAK_CLIENT_ID", ""),
+            getOptionalEnv("KEYCLOAK_CLIENT_SECRET", "")
         );
     }
 
@@ -6354,72 +6361,99 @@ public class EcsRunnerMain {
      */
     private static class AccessTokenProvider {
         private String accessToken;
-        private final String auth0Url;
-        private final String auth0Audience;
-        private final String auth0ProxyServerUrl;
-        private final String auth0ClientId;
-        private final String auth0ClientSecret;
+        private final String keycloakTokenUrl;
+        private final String keycloakAudience;
+        private final String keycloakScope;
+        private final String keycloakClientId;
+        private final String keycloakClientSecret;
         private long expiresAtEpochSeconds;
 
+        /**
+         * Creates a provider for a trusted launch token and a fixed managed HTTPS endpoint.
+         * @param initialAccessToken Token supplied by the parent API.
+         * @param keycloakTokenUrl Managed Keycloak /m2m/token URL, with no credentials/query/fragment.
+         * @param keycloakAudience Approved API audience.
+         * @param keycloakScope Optional narrower approved scopes.
+         * @param keycloakClientId Workload client ID.
+         * @param keycloakClientSecret Workload secret, retained only in the trusted parent process.
+         * @throws IllegalArgumentException for missing credentials or unsafe endpoint configuration.
+         */
         AccessTokenProvider(
             String initialAccessToken,
-            String auth0Url,
-            String auth0Audience,
-            String auth0ProxyServerUrl,
-            String auth0ClientId,
-            String auth0ClientSecret
+            String keycloakTokenUrl,
+            String keycloakAudience,
+            String keycloakScope,
+            String keycloakClientId,
+            String keycloakClientSecret
         ) {
+            java.net.URI endpoint = java.net.URI.create(keycloakTokenUrl);
+            if (!"https".equals(endpoint.getScheme()) || isBlank(endpoint.getHost())
+                || endpoint.getUserInfo() != null || endpoint.getQuery() != null
+                || endpoint.getFragment() != null || !"/m2m/token".equals(endpoint.getPath())
+                || isBlank(keycloakAudience) || isBlank(keycloakClientId) || isBlank(keycloakClientSecret)) {
+                throw new IllegalArgumentException("Explicit managed Keycloak endpoint, audience and credentials are required.");
+            }
             this.accessToken = initialAccessToken;
-            this.auth0Url = auth0Url;
-            this.auth0Audience = auth0Audience;
-            this.auth0ProxyServerUrl = auth0ProxyServerUrl;
-            this.auth0ClientId = auth0ClientId;
-            this.auth0ClientSecret = auth0ClientSecret;
+            this.keycloakTokenUrl = keycloakTokenUrl;
+            this.keycloakAudience = keycloakAudience;
+            this.keycloakScope = keycloakScope;
+            this.keycloakClientId = keycloakClientId;
+            this.keycloakClientSecret = keycloakClientSecret;
             this.expiresAtEpochSeconds = extractJwtExpirationEpochSeconds(initialAccessToken);
         }
 
+        /** Returns a cached unexpired token or refreshes it using httpClient; throws on failed issuance and never uses Auth0. */
         synchronized String getToken(CloseableHttpClient httpClient) throws Exception {
             if (isBlank(accessToken)) {
                 return refreshToken(httpClient, "no cached access token");
             }
 
-            if (isTokenExpiringSoon() && canRefresh()) {
+            if (isTokenExpiringSoon()) {
                 return refreshToken(httpClient, "cached access token expires soon");
             }
 
             return accessToken;
         }
 
+        /** Returns whether this provider has complete Keycloak issuance configuration; takes no arguments and does not throw. */
         synchronized boolean canRefresh() {
             return !isBlank(resolveTokenUrl())
-                && !isBlank(auth0ClientId)
-                && !isBlank(auth0ClientSecret);
+                && !isBlank(keycloakClientId)
+                && !isBlank(keycloakClientSecret);
         }
 
+        /**
+         * Requests a new token from the managed facade and updates this credential-specific cache.
+         * @param httpClient Trusted parent HTTP transport; redirects are disabled for this request.
+         * @param reason Static diagnostic reason without token or secret data.
+         * @return Newly issued access token whose server-side validation used the shared core.
+         * @throws Exception for failed HTTP, malformed responses, or invalid expiration metadata.
+         */
         synchronized String refreshToken(CloseableHttpClient httpClient, String reason)
             throws Exception {
             if (!canRefresh()) {
                 throw new IllegalStateException(
                     "M2M token refresh is not configured for the ECS runner. "
-                        + "AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, and AUTH0_URL or "
-                        + "AUTH0_PROXY_SERVER_URL are required."
+                        + "KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, and KEYCLOAK_TOKEN_URL are required."
                 );
             }
 
             String tokenUrl = resolveTokenUrl();
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("grant_type", "client_credentials");
-            payload.put("client_id", auth0ClientId);
-            payload.put("client_secret", auth0ClientSecret);
-            if (!isBlank(auth0Url)) {
-                payload.put("auth0_url", auth0Url);
+            payload.put("client_id", keycloakClientId);
+            payload.put("client_secret", keycloakClientSecret);
+            if (!isBlank(keycloakScope)) {
+                payload.put("scope", keycloakScope);
             }
-            if (!isBlank(auth0Audience)) {
-                payload.put("audience", auth0Audience);
+            if (!isBlank(keycloakAudience)) {
+                payload.put("audience", keycloakAudience);
             }
 
             String payloadJson = OBJECT_MAPPER.writeValueAsString(payload);
             HttpPost request = new HttpPost(tokenUrl);
+            request.setConfig(org.apache.http.client.config.RequestConfig.custom()
+                .setRedirectsEnabled(false).setConnectTimeout(10000).setSocketTimeout(10000).build());
             request.setHeader("Content-Type", "application/json");
             request.setEntity(new StringEntity(payloadJson, StandardCharsets.UTF_8));
 
@@ -6441,8 +6475,6 @@ public class EcsRunnerMain {
                     throw new RuntimeException(
                         "Failed to refresh M2M token: HTTP "
                             + statusCode
-                            + " - "
-                            + truncate(responseBody, HTTP_BODY_PREVIEW_LIMIT)
                     );
                 }
 
@@ -6451,11 +6483,9 @@ public class EcsRunnerMain {
                     M2MTokenResponse.class
                 );
                 if (!isBlank(tokenResponse.getAccessToken())) {
+                    long expiry = resolveExpiryEpochSeconds(tokenResponse.getAccessToken(), tokenResponse.getExpiresIn());
                     accessToken = tokenResponse.getAccessToken();
-                    expiresAtEpochSeconds = resolveExpiryEpochSeconds(
-                        accessToken,
-                        tokenResponse.getExpiresIn()
-                    );
+                    expiresAtEpochSeconds = expiry;
                     logInfo(
                         "auth.token.refresh",
                         "Refreshed M2M access token; expiresAtEpochSeconds="
@@ -6468,10 +6498,7 @@ public class EcsRunnerMain {
 
                 if (!isBlank(tokenResponse.getError())) {
                     throw new RuntimeException(
-                        "Failed to refresh M2M token: "
-                            + tokenResponse.getError()
-                            + " "
-                            + safeLogValue(tokenResponse.getErrorDescription())
+                        "Managed Keycloak endpoint rejected the token request."
                     );
                 }
 
@@ -6481,28 +6508,34 @@ public class EcsRunnerMain {
             }
         }
 
+        /** Returns whether cached expiration is unknown or near expiry; used by getToken; does not throw. */
         private boolean isTokenExpiringSoon() {
-            return expiresAtEpochSeconds > 0
-                && Instant.now().getEpochSecond()
+            return expiresAtEpochSeconds <= 0
+                || Instant.now().getEpochSecond()
                     >= expiresAtEpochSeconds - TOKEN_REFRESH_SKEW_SECONDS;
         }
 
+        /** Returns the configured fixed managed token URL without fallback; takes no arguments and does not throw. */
         private String resolveTokenUrl() {
-            if (!isBlank(auth0ProxyServerUrl)) {
-                return auth0ProxyServerUrl;
-            }
-            return auth0Url;
+            return keycloakTokenUrl;
         }
 
+        /**
+         * Bounds cache lifetime using the managed response and JWT expiration metadata.
+         * Metadata is used for cache timing only; the HTTPS facade performs cryptographic validation.
+         * @param token Token returned by the fixed managed endpoint.
+         * @param expiresInSeconds Server-provided lifetime, at most 900 seconds.
+         * @return Bounded expiration time.
+         * @throws IllegalArgumentException for missing, excessive or expired metadata.
+         */
         private long resolveExpiryEpochSeconds(String token, Long expiresInSeconds) {
+            long now = Instant.now().getEpochSecond();
             long tokenExpiry = extractJwtExpirationEpochSeconds(token);
-            if (tokenExpiry > 0) {
-                return tokenExpiry;
+            if (expiresInSeconds == null || expiresInSeconds.longValue() <= 0L
+                || expiresInSeconds.longValue() > 900L || tokenExpiry <= now) {
+                throw new IllegalArgumentException("Invalid managed token expiration metadata.");
             }
-            if (expiresInSeconds != null && expiresInSeconds.longValue() > 0L) {
-                return Instant.now().getEpochSecond() + expiresInSeconds.longValue();
-            }
-            return 0L;
+            return Math.min(tokenExpiry, now + expiresInSeconds.longValue());
         }
 
         @SuppressWarnings("unchecked")
@@ -6538,7 +6571,7 @@ public class EcsRunnerMain {
     }
 
     /**
-     * Partial Auth0/proxy M2M token response.
+     * Partial managed Keycloak token response; error bodies are never logged.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class M2MTokenResponse {

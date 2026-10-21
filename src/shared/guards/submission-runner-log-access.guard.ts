@@ -1,3 +1,4 @@
+import { auth, Principal } from 'tc-core-library-js';
 import {
   CanActivate,
   ExecutionContext,
@@ -129,14 +130,11 @@ export class SubmissionRunnerLogAccessGuard implements CanActivate {
   /**
    * Checks whether the caller has a machine-token scope that authorizes runner log reads.
    * @param user Authenticated JWT payload.
-   * @returns `true` when the expanded scopes include read or all marathon-match access.
+   * @returns `true` when the exact verified scopes include read or all marathon-match access.
    * Used by `canActivate` to keep M2M authorization independent of resource checks.
    */
   private hasMarathonMatchReadScope(user: JwtUser): boolean {
-    return Array.isArray(user.scopes)
-      ? user.scopes.includes(Scope.ReadMarathonMatch) ||
-          user.scopes.includes(Scope.AllMarathonMatch)
-      : false;
+    return auth.hasScopes(user as unknown as Principal, [Scope.ReadMarathonMatch, Scope.AllMarathonMatch], 'any');
   }
 
   /**

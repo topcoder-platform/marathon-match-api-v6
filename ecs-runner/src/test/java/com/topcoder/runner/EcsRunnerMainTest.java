@@ -742,4 +742,55 @@ public class EcsRunnerMainTest {
             }
         }
     }
+    /** Creates a synthetic provider for endpoint-policy tests; returns a reflected instance or propagates reflection failures. */
+    private Object tokenProvider(String url) throws Exception {
+        Class<?> type = Class.forName("com.topcoder.runner.EcsRunnerMain$AccessTokenProvider");
+        Constructor<?> constructor = type.getDeclaredConstructor(String.class, String.class,
+            String.class, String.class, String.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance("", url, "https://api.example.test", "read:test", "m2m-test", "synthetic-secret");
+    }
+
+    /** Rejects unsafe or native endpoints before any credential request; no inputs or return, throws on test failure. */
+    @Test
+    public void keycloakProviderRequiresManagedHttpsEndpoint() throws Exception {
+        for (String url : Arrays.asList("http://keycloak.example.test/m2m/token",
+            "https://keycloak.example.test/realms/test/protocol/openid-connect/token",
+            "https://user:secret@keycloak.example.test/m2m/token",
+            "https://keycloak.example.test/m2m/token?redirect=bad")) {
+            try {
+                tokenProvider(url);
+                fail("Unsafe endpoint was accepted");
+            } catch (InvocationTargetException error) {
+                assertTrue(error.getCause() instanceof IllegalArgumentException);
+            }
+        }
+        assertNotNull(tokenProvider("https://keycloak.example.test/m2m/token"));
+    }
+
+    /** Ensures optional scopes cannot replace the configured token endpoint; no inputs or return, throws on reflection/assertion failures. */
+    @Test
+    public void keycloakProviderNeverUsesScopeAsProxyUrl() throws Exception {
+        Object provider = tokenProvider("https://keycloak.example.test/m2m/token");
+        Method method = provider.getClass().getDeclaredMethod("resolveTokenUrl");
+        method.setAccessible(true);
+        assertEquals("https://keycloak.example.test/m2m/token", method.invoke(provider));
+    }
+
+    /** Verifies unknown and excessive expiration metadata fails closed; no inputs or return, throws on assertion failures. */
+    @Test
+    public void keycloakProviderRejectsInvalidExpiration() throws Exception {
+        Object provider = tokenProvider("https://keycloak.example.test/m2m/token");
+        Method method = provider.getClass().getDeclaredMethod("resolveExpiryEpochSeconds", String.class, Long.class);
+        method.setAccessible(true);
+        for (Long seconds : Arrays.asList(null, 0L, 901L)) {
+            try {
+                method.invoke(provider, "invalid", seconds);
+                fail("Invalid expiration was accepted");
+            } catch (InvocationTargetException error) {
+                assertTrue(error.getCause() instanceof IllegalArgumentException);
+            }
+        }
+    }
+
 }

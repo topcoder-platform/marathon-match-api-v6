@@ -119,11 +119,11 @@ describe('EcsService', () => {
       MARATHON_MATCH_API_URL: 'https://api.example.com',
       REVIEW_TYPE_ID: 'review-type-1',
       ECS_SCORER_MAX_CONCURRENT_TASKS: '20',
-      AUTH0_URL: 'https://topcoder-dev.auth0.com/oauth/token',
-      AUTH0_AUDIENCE: 'https://m2m.topcoder-dev.com/',
-      AUTH0_PROXY_SERVER_URL: 'https://auth-proxy.topcoder-dev.com/oauth/token',
-      AUTH0_CLIENT_ID: 'runner-client-id',
-      AUTH0_CLIENT_SECRET: 'runner-client-secret',
+      KEYCLOAK_TOKEN_URL: 'https://keycloak.topcoder-dev.com/m2m/token',
+      KEYCLOAK_AUDIENCE: 'https://api.topcoder-dev.com',
+      KEYCLOAK_SCOPE: 'read:marathon-match update:marathon-match',
+      KEYCLOAK_CLIENT_ID: 'runner-client-id',
+      KEYCLOAK_CLIENT_SECRET: 'runner-client-secret',
     };
   });
 
@@ -588,17 +588,17 @@ describe('EcsService', () => {
     );
 
     expect(environmentByName.get('ACCESS_TOKEN')).toBe('launch-token');
-    expect(environmentByName.get('AUTH0_URL')).toBe(
-      'https://topcoder-dev.auth0.com/oauth/token',
+    expect(environmentByName.get('KEYCLOAK_TOKEN_URL')).toBe(
+      'https://keycloak.topcoder-dev.com/m2m/token',
     );
-    expect(environmentByName.get('AUTH0_AUDIENCE')).toBe(
-      'https://m2m.topcoder-dev.com/',
+    expect(environmentByName.get('KEYCLOAK_AUDIENCE')).toBe(
+      'https://api.topcoder-dev.com',
     );
-    expect(environmentByName.get('AUTH0_PROXY_SERVER_URL')).toBe(
-      'https://auth-proxy.topcoder-dev.com/oauth/token',
+    expect(environmentByName.get('KEYCLOAK_SCOPE')).toBe(
+      'read:marathon-match update:marathon-match',
     );
-    expect(environmentByName.get('AUTH0_CLIENT_ID')).toBe('runner-client-id');
-    expect(environmentByName.get('AUTH0_CLIENT_SECRET')).toBe(
+    expect(environmentByName.get('KEYCLOAK_CLIENT_ID')).toBe('runner-client-id');
+    expect(environmentByName.get('KEYCLOAK_CLIENT_SECRET')).toBe(
       'runner-client-secret',
     );
     expect(environmentByName.get('TEST_PHASE')).toBe('system');

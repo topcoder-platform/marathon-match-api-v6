@@ -88,7 +88,7 @@ describe('SubmissionRunnerLogService', () => {
         'submission-1',
         {},
         {
-          isMachine: true,
+          kind: 'service' as const, isMachine: true,
           userId: 'svc-client',
           scopes: ['read:marathon-match'],
         },

@@ -63,14 +63,6 @@ The service is configured via environment variables.
 | `AUTHORIZATION_SESSION_VALIDATION_ENABLED` | No                           | `true`                                  | Enables Identity API active-session validation for user JWTs |
 | `AUTHORIZATION_VALIDATION_URL`             | No                           | Derived from `https://api.topcoder(-dev).com` token issuers | Full Identity API `authorizations/1` URL used to reject logged-out user tokens |
 | `AUTHORIZATION_VALIDATION_TIMEOUT_MS`      | No                           | `3000`                                  | Timeout for active-session validation requests |
-| `AUTH0_ISSUER`           | No                           | `https://topcoder-dev.auth0.com/`       | Legacy JWT config field          |
-| `TOKEN_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | Legacy JWT config field          |
-| `AUTH0_URL`              | No                           | `http://localhost:4000/oauth/token`     | M2M token endpoint               |
-| `AUTH0_DOMAIN`           | No                           | `topcoder-dev.auth0.com`                | M2M config metadata              |
-| `AUTH0_AUDIENCE`         | No                           | `https://m2m.topcoder-dev.com/`         | M2M audience                     |
-| `AUTH0_PROXY_SERVER_URL` | No                           | (unset)                                 | Optional M2M proxy               |
-| `AUTH0_CLIENT_ID`        | Yes (for outbound API calls) | None                                    | M2M client ID                    |
-| `AUTH0_CLIENT_SECRET`    | Yes (for outbound API calls) | None                                    | M2M client secret                |
 
 ### Kafka consumer/producer
 
@@ -359,7 +351,7 @@ Important runtime behavior:
 Before live scoring, verify:
 
 - Kafka topic `marathonmatch.submission.received` is receiving events.
-- Service can fetch M2M token (`AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`).
+- Service can fetch M2M token (`KEYCLOAK_CLIENT_ID`/`KEYCLOAK_CLIENT_SECRET`).
 - ECS env vars are set (`ECS_CLUSTER`, `ECS_SUBNETS`, `ECS_SECURITY_GROUPS`, `ECS_CONTAINER_NAME`, `MARATHON_MATCH_API_URL`, `REVIEW_API_URL`, `REVIEW_TYPE_ID`).
 - Task definition referenced by `taskDefinitionName:taskDefinitionVersion` exists and contains the configured container name.
 
@@ -450,3 +442,8 @@ SYSTEM review scoring uses the same scorer pipeline after autopilot dispatches:
 ## Review phase scoring flow
 
 See [Review Phase Scoring](docs/review-phase-scoring.md) for the end-to-end review-phase sequence from review creation through challenge completion.
+
+## Keycloak migration branch
+
+Follow [explicit Keycloak configuration and rollout](docs/keycloak-m2m.md).
+Legacy Auth0 M2M configuration examples do not apply to this branch.

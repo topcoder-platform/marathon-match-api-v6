@@ -11,21 +11,14 @@ jest.mock('axios', () => ({
 }));
 
 jest.mock('tc-core-library-js', () => ({
-  middleware: {
-    jwtAuthenticator: jest.fn(),
-  },
+  auth: { createValidator: jest.fn() },
 }));
 
 describe('JwtService', () => {
   const originalEnv = process.env;
   // eslint-disable-next-line @typescript-eslint/unbound-method
   const mockAxiosGet = axios.get as jest.MockedFunction<typeof axios.get>;
-  const tcCoreMock: {
-    middleware: {
-      jwtAuthenticator: jest.Mock;
-    };
-  } = jest.requireMock('tc-core-library-js');
-  const mockJwtAuthenticator = tcCoreMock.middleware.jwtAuthenticator;
+  const mockCreateValidator = jest.requireMock('tc-core-library-js').auth.createValidator as jest.Mock;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -33,12 +26,14 @@ describe('JwtService', () => {
     delete process.env.AUTHORIZATION_VALIDATION_TIMEOUT_MS;
     process.env.AUTHORIZATION_SESSION_VALIDATION_ENABLED = 'true';
 
-    mockJwtAuthenticator.mockReset();
-    mockJwtAuthenticator.mockReturnValue((req: any, _res: any, next: any) => {
-      const token = String(req.headers.authorization).replace(/^Bearer /, '');
-      req.authUser = jwt.decode(token);
-      next();
-    });
+    mockCreateValidator.mockReset();
+    mockCreateValidator.mockReturnValue({ verify: jest.fn(async (token: string) => {
+      const payload = jwt.decode(token) as Record<string, unknown>;
+      return { ...payload, kind: payload.kind || 'user', isMachine: payload.kind === 'service',
+        roles: payload.kind === 'service' ? [] : payload.roles,
+        scopes: payload.kind === 'service' ? ['read:marathon-match'] : [],
+      };
+    }) });
     mockAxiosGet.mockReset();
   });
 
@@ -78,7 +73,7 @@ describe('JwtService', () => {
 
   it('validates active Identity API authorization for Topcoder user tokens', async () => {
     mockAxiosGet.mockResolvedValue({ status: 200 });
-    const token = createToken({});
+    const token = createToken({ scope: 'openid read:marathon-match' });
 
     await expect(createService().validateToken(token)).resolves.toMatchObject({
       userId: '123',
@@ -125,8 +120,10 @@ describe('JwtService', () => {
     );
   });
 
-  it('does not call Identity API for scoped M2M tokens', async () => {
+  it('does not call Identity API for verified service principals', async () => {
     const token = createToken({
+      kind: 'service',
+      userId: undefined,
       scope: 'read:marathon-match',
     });
 
