@@ -141,6 +141,7 @@ The `Scorer Settings` section controls the persisted Marathon Match config for t
 | `Test Timeout (ms)` | `testTimeout` | Timeout for tester execution. |
 | `Compile Timeout (ms)` | `compileTimeout` | Timeout for submission compilation inside the ECS runner. |
 | `System Test Timeout (ms)` | `systemTestTimeout` | Total SYSTEM scoring timeout per submission. Defaults to 24 hours; timed-out SYSTEM tasks are stopped and failed with `metadata.timed_out = true`. |
+| `Memory Limit (MB)` | `memoryLimit` | ECS scorer task memory in MiB. Defaults to `2048`, the memory every Marathon Match currently runs with. Must be a Fargate-supported size for the task definition CPU (for the 1 vCPU `mm-ecs-runner` task, `2048` to `8192` in `1024` increments). |
 | `Task Definition Name` | `taskDefinitionName` | ECS task definition family, for example `mm-ecs-runner`. |
 | `Task Definition Version` | `taskDefinitionVersion` | ECS task definition revision to run. |
 
@@ -238,6 +239,8 @@ At launch, the API injects container overrides including:
 - `PHASE_START_SEED` (decimal 64-bit integer string)
 - `PHASE_NUMBER_OF_TESTS`
 - `REVIEW_ID` for system-review callbacks when applicable
+
+When the scorer config has a `memoryLimit`, the API also sends it as the RunTask task-level `memory` override, so the task runs with that memory instead of the task definition value.
 
 To publish a new runner image, build and push the ECR image from `marathon-match-api-v6`, register a new ECS task definition revision, then update the scorer config to the new revision.
 

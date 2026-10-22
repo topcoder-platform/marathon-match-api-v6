@@ -30,6 +30,7 @@ describe('MarathonMatchConfigService', () => {
       post: jest.fn(),
     };
     const ecsService = {
+      getTaskDefinitionCpu: jest.fn(),
       launchScorerTask: jest.fn(),
     };
     const m2mService = {
@@ -134,6 +135,161 @@ describe('MarathonMatchConfigService', () => {
         process.env.DEFAULT_SYSTEM_TEST_TIMEOUT_MS = originalSystemTestTimeout;
       }
     }
+  });
+
+  it('defaults the scorer memory limit to the current 2048 MiB task memory', () => {
+    const originalReviewScorecardId = process.env.DEFAULT_REVIEW_SCORECARD_ID;
+    const originalMemoryLimit = process.env.DEFAULT_MEMORY_LIMIT_MB;
+    process.env.DEFAULT_REVIEW_SCORECARD_ID = 'scorecard-1';
+
+    try {
+      delete process.env.DEFAULT_MEMORY_LIMIT_MB;
+      expect(createService().service.getDefaults().memoryLimit).toBe(2048);
+
+      process.env.DEFAULT_MEMORY_LIMIT_MB = '4096';
+      expect(createService().service.getDefaults().memoryLimit).toBe(4096);
+    } finally {
+      if (originalReviewScorecardId === undefined) {
+        delete process.env.DEFAULT_REVIEW_SCORECARD_ID;
+      } else {
+        process.env.DEFAULT_REVIEW_SCORECARD_ID = originalReviewScorecardId;
+      }
+      if (originalMemoryLimit === undefined) {
+        delete process.env.DEFAULT_MEMORY_LIMIT_MB;
+      } else {
+        process.env.DEFAULT_MEMORY_LIMIT_MB = originalMemoryLimit;
+      }
+    }
+  });
+
+  it('rejects create requests when memoryLimit is unsupported for the task definition CPU', async () => {
+    const { service, ecsService, httpService, m2mService, prisma } =
+      createService();
+
+    m2mService.getM2MToken.mockResolvedValue('m2m-token');
+    prisma.tester.findUnique.mockResolvedValue({
+      id: 'tester-1',
+    });
+    httpService.get
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: '30000123',
+            phases: [],
+          },
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          data: {
+            id: 'scorecard-1',
+          },
+        }),
+      );
+    ecsService.getTaskDefinitionCpu.mockResolvedValue('1024');
+
+    await expect(
+      service.createConfig(
+        '30000123',
+        {
+          ...createConfigPayload(),
+          memoryLimit: 3000,
+        } as never,
+        {
+          isMachine: false,
+          userId: '40051399',
+        } as never,
+      ),
+    ).rejects.toThrow(
+      'memoryLimit 3000 MiB is not supported by Fargate for a task with 1024 CPU units.',
+    );
+
+    expect(ecsService.getTaskDefinitionCpu).toHaveBeenCalledWith(
+      'mm-runner',
+      '7',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('persists a Fargate-supported memoryLimit update and returns it', async () => {
+    const { service, ecsService, prisma } = createService();
+    const existingConfig = {
+      id: 'config-1',
+      challengeId: '30000123',
+      name: 'Bridge Runners',
+      active: false,
+      relativeScoringEnabled: true,
+      scoreDirection: ScoreDirection.MAXIMIZE,
+      submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+      reviewScorecardId: 'scorecard-1',
+      testerId: 'tester-1',
+      testTimeout: 90000,
+      compileTimeout: 120000,
+      systemTestTimeout: 86400000,
+      memoryLimit: null,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-02T00:00:00.000Z'),
+      createdBy: 'admin',
+      updatedBy: 'admin',
+      phaseConfigs: [],
+    };
+
+    prisma.marathonMatchConfig.findUnique
+      .mockResolvedValueOnce(existingConfig)
+      .mockResolvedValueOnce({ ...existingConfig, memoryLimit: 4096 });
+    prisma.$transaction.mockImplementation(
+      (callback: (tx: typeof prisma) => Promise<void>) => callback(prisma),
+    );
+    prisma.marathonMatchConfig.update.mockResolvedValue({});
+    ecsService.getTaskDefinitionCpu.mockResolvedValue('1024');
+
+    const result = await service.updateConfig(
+      '30000123',
+      { memoryLimit: 4096 },
+      {
+        isMachine: false,
+        userId: '40051399',
+      } as never,
+    );
+
+    expect(ecsService.getTaskDefinitionCpu).toHaveBeenCalledWith(
+      'mm-runner',
+      '7',
+    );
+    expect(prisma.marathonMatchConfig.update).toHaveBeenCalledWith({
+      where: { challengeId: '30000123' },
+      data: expect.objectContaining({ memoryLimit: 4096 }),
+    });
+    expect(result.memoryLimit).toBe(4096);
+  });
+
+  it('revalidates the saved memoryLimit when the task definition changes', async () => {
+    const { service, ecsService, prisma } = createService();
+
+    prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+      id: 'config-1',
+      challengeId: '30000123',
+      testerId: 'tester-1',
+      memoryLimit: 2048,
+      taskDefinitionName: 'mm-runner',
+      taskDefinitionVersion: '7',
+    });
+    ecsService.getTaskDefinitionCpu.mockResolvedValue('2048');
+
+    await expect(
+      service.updateConfig('30000123', { taskDefinitionVersion: '8' }, {
+        isMachine: false,
+        userId: '40051399',
+      } as never),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(ecsService.getTaskDefinitionCpu).toHaveBeenCalledWith(
+      'mm-runner',
+      '8',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('resolves legacy review scorecard ids when loading one config', async () => {
@@ -337,6 +493,7 @@ describe('MarathonMatchConfigService', () => {
       compileTimeout: 120000,
       taskDefinitionName: 'mm-runner',
       taskDefinitionVersion: '7',
+      memoryLimit: 4096,
       tester: {
         compilationStatus: CompilationStatus.SUCCESS,
       },
@@ -422,6 +579,7 @@ describe('MarathonMatchConfigService', () => {
       {
         taskDefinitionName: 'mm-runner',
         taskDefinitionVersion: '7',
+        memoryLimit: 4096,
       },
       {
         configType: PhaseConfigType.SYSTEM,

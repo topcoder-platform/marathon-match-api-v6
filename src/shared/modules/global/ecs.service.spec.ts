@@ -393,6 +393,121 @@ describe('EcsService', () => {
     );
   });
 
+  it('overrides scorer task memory with the configured memory limit', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve({ taskArns: [] });
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/memory-task',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({ taskDefinition: {} });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await service.launchScorerTask(
+      'challenge-1',
+      'submission-1',
+      { ...baseTaskConfig, memoryLimit: 4096 },
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+
+    const runCommand = send.mock.calls
+      .map((call) => call[0] as unknown)
+      .find(
+        (command): command is RunTaskCommand =>
+          command instanceof RunTaskCommand,
+      );
+    expect(runCommand?.input.taskDefinition).toBe('mm-ecs-runner:7');
+    expect(runCommand?.input.overrides?.memory).toBe('4096');
+    expect(runCommand?.input.overrides?.containerOverrides?.[0]?.name).toBe(
+      'tc-mm-runner',
+    );
+  });
+
+  it('keeps the task definition memory when no memory limit is configured', async () => {
+    const { service, send } = createService();
+    send.mockImplementation((command) => {
+      if (command instanceof ListTasksCommand) {
+        return Promise.resolve({ taskArns: [] });
+      }
+      if (command instanceof RunTaskCommand) {
+        return Promise.resolve({
+          tasks: [
+            {
+              taskArn:
+                'arn:aws:ecs:us-east-1:123456789012:task/cluster/default-memory-task',
+            },
+          ],
+        });
+      }
+      if (command instanceof DescribeTaskDefinitionCommand) {
+        return Promise.resolve({ taskDefinition: {} });
+      }
+
+      throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+
+    await service.launchScorerTask(
+      'challenge-1',
+      'submission-1',
+      { ...baseTaskConfig, memoryLimit: null },
+      basePhaseConfig,
+      undefined,
+      { memberId: 'member-1' },
+    );
+
+    const runCommand = send.mock.calls
+      .map((call) => call[0] as unknown)
+      .find(
+        (command): command is RunTaskCommand =>
+          command instanceof RunTaskCommand,
+      );
+    expect(runCommand?.input.overrides).not.toHaveProperty('memory');
+  });
+
+  it('reads task-level CPU from the scorer task definition', async () => {
+    const { service, send } = createService();
+    send.mockResolvedValue({ taskDefinition: { cpu: '1024', memory: '2048' } });
+
+    await expect(
+      service.getTaskDefinitionCpu('mm-ecs-runner', '7'),
+    ).resolves.toBe('1024');
+
+    const describeCommand = send.mock
+      .calls[0][0] as DescribeTaskDefinitionCommand;
+    expect(describeCommand).toBeInstanceOf(DescribeTaskDefinitionCommand);
+    expect(describeCommand.input.taskDefinition).toBe('mm-ecs-runner:7');
+  });
+
+  it('returns no task CPU when the task definition cannot be described', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValue(new Error('Unable to describe task definition.'));
+
+    await expect(
+      service.getTaskDefinitionCpu('mm-ecs-runner', '99'),
+    ).resolves.toBeUndefined();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Unable to resolve ECS task definition CPU',
+        taskDefinition: 'mm-ecs-runner:99',
+      }),
+    );
+  });
+
   it('blocks new launches when the global scorer task cap is reached', async () => {
     process.env.ECS_SCORER_MAX_CONCURRENT_TASKS = '1';
     const { service, m2mService, send } = createService();

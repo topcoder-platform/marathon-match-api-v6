@@ -66,6 +66,7 @@ model marathonMatchConfig {
   testTimeout           Int
   compileTimeout        Int
   systemTestTimeout     Int           @default(86400000)
+  memoryLimit           Int?
   taskDefinitionName    String
   taskDefinitionVersion String
   createdAt             DateTime      @default(now())

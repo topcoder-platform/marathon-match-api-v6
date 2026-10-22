@@ -17,6 +17,8 @@ import { PrismaService } from './prisma.service';
 interface MarathonMatchTaskConfig {
   taskDefinitionName: string;
   taskDefinitionVersion: string;
+  /** Optional task memory override in MiB; null/undefined keeps the task definition memory. */
+  memoryLimit?: number | null;
 }
 
 export interface MarathonMatchScoringPhase {
@@ -112,7 +114,9 @@ export class EcsService {
    * Launches a scorer task in ECS Fargate for a marathon match submission.
    * @param challengeId Challenge ID used by the ECS runner to load config endpoints.
    * @param submissionId Submission ID passed to the ECS container.
-   * @param mmConfig Task definition name and version from the marathonMatchConfig record.
+   * @param mmConfig Task definition name, version, and optional `memoryLimit` (MiB) from the
+   * marathonMatchConfig record. A positive `memoryLimit` is sent as the RunTask task-level
+   * memory override; otherwise the task definition memory is used.
    * @param scoringPhase Active phase settings used by the runner for flags and seed range.
    * @param reviewId Optional review-api review id that should be marked completed after callback processing.
    * @param launchOptions Optional submission owner metadata, cancellation controls, and validation-run routing.
@@ -143,6 +147,11 @@ export class EcsService {
     const reviewTypeId = this.getRequiredEnv('REVIEW_TYPE_ID');
     const taskDefinitionName = mmConfig.taskDefinitionName?.trim();
     const taskDefinitionVersion = mmConfig.taskDefinitionVersion?.trim();
+    const memoryLimit =
+      Number.isSafeInteger(mmConfig.memoryLimit) &&
+      Number(mmConfig.memoryLimit) > 0
+        ? Number(mmConfig.memoryLimit)
+        : undefined;
     const testPhase = this.mapConfigTypeToTestPhase(scoringPhase.configType);
     const memberId = launchOptions.memberId?.trim();
     const validationRunId = launchOptions.validationRunId?.trim();
@@ -317,6 +326,9 @@ export class EcsService {
               },
             },
             overrides: {
+              ...(memoryLimit !== undefined
+                ? { memory: String(memoryLimit) }
+                : {}),
               containerOverrides: [
                 {
                   name: containerName,
@@ -375,6 +387,7 @@ export class EcsService {
           submissionId,
           memberId: memberId ?? null,
           taskDefinition,
+          memoryLimit: memoryLimit ?? null,
           cluster,
           taskArn,
           taskId,
@@ -1251,6 +1264,39 @@ export class EcsService {
     }
 
     return arn.slice(slashIndex + 1);
+  }
+
+  /**
+   * Reads the task-level CPU units configured on an ECS task definition revision.
+   * Used by marathon match config saves to check that a `memoryLimit` override is a
+   * Fargate-supported size for the configured scorer task definition.
+   * @param taskDefinitionName Task definition family configured for scoring.
+   * @param taskDefinitionVersion Task definition revision configured for scoring.
+   * @returns Task CPU units such as `"1024"`, or `undefined` when the task definition
+   * has no task-level CPU or cannot be described. Describe failures are logged, not thrown.
+   */
+  async getTaskDefinitionCpu(
+    taskDefinitionName: string,
+    taskDefinitionVersion: string,
+  ): Promise<string | undefined> {
+    const taskDefinition = `${taskDefinitionName.trim()}:${taskDefinitionVersion.trim()}`;
+
+    try {
+      const response = await this.ecsClient.send(
+        new DescribeTaskDefinitionCommand({
+          taskDefinition,
+        }),
+      );
+
+      return response.taskDefinition?.cpu?.trim() || undefined;
+    } catch (error) {
+      this.logger.warn({
+        message: 'Unable to resolve ECS task definition CPU',
+        taskDefinition,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
   }
 
   /**

@@ -2,6 +2,10 @@ import { ApiProperty } from '@nestjs/swagger';
 import { PhaseConfigType, ScoreDirection } from '@prisma/client';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
+  MAX_SCORER_TASK_MEMORY_MIB,
+  MIN_SCORER_TASK_MEMORY_MIB,
+} from 'src/shared/config/scorer-task-memory.config';
+import {
   IsBoolean,
   IsEnum,
   IsInt,
@@ -9,6 +13,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Max,
   Min,
   registerDecorator,
   ValidateNested,
@@ -223,6 +228,19 @@ export class CreateMarathonMatchConfigDto {
   systemTestTimeout?: number;
 
   @ApiProperty({
+    description:
+      'ECS scorer task memory limit in MiB. Overrides the task definition memory for every scorer launch and must be a Fargate-supported value for the task definition CPU. Omit or send null to use the task definition memory.',
+    required: false,
+    nullable: true,
+    example: 2048,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(MIN_SCORER_TASK_MEMORY_MIB)
+  @Max(MAX_SCORER_TASK_MEMORY_MIB)
+  memoryLimit?: number | null;
+
+  @ApiProperty({
     description: 'ECS task definition name for submission execution',
     example: 'mm-submission-runner',
   })
@@ -376,6 +394,19 @@ export class UpdateMarathonMatchConfigDto {
   systemTestTimeout?: number;
 
   @ApiProperty({
+    description:
+      'ECS scorer task memory limit in MiB. Overrides the task definition memory for every scorer launch and must be a Fargate-supported value for the task definition CPU. Send null to clear the override and use the task definition memory.',
+    required: false,
+    nullable: true,
+    example: 2048,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(MIN_SCORER_TASK_MEMORY_MIB)
+  @Max(MAX_SCORER_TASK_MEMORY_MIB)
+  memoryLimit?: number | null;
+
+  @ApiProperty({
     description: 'ECS task definition name for submission execution',
     required: false,
     example: 'mm-submission-runner',
@@ -454,6 +485,13 @@ export class MarathonMatchDefaultsResponseDto {
     example: 86400000,
   })
   systemTestTimeout: number;
+
+  @ApiProperty({
+    description:
+      'Default ECS scorer task memory limit in MiB used to pre-fill new configs.',
+    example: 2048,
+  })
+  memoryLimit: number;
 
   @ApiProperty({
     description:
@@ -581,6 +619,14 @@ export class MarathonMatchConfigResponseDto {
     example: 86400000,
   })
   systemTestTimeout: number;
+
+  @ApiProperty({
+    description:
+      'ECS scorer task memory limit in MiB, or null when scorer tasks use the task definition memory.',
+    nullable: true,
+    example: 2048,
+  })
+  memoryLimit: number | null;
 
   @ApiProperty({
     description: 'ECS task definition name',
