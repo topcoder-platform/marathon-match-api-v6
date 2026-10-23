@@ -744,7 +744,7 @@ public class EcsRunnerMainTest {
     }
     /** Creates a synthetic provider for endpoint-policy tests; returns a reflected instance or propagates reflection failures. */
     private Object tokenProvider(String url) throws Exception {
-        Class<?> type = Class.forName("com.topcoder.runner.EcsRunnerMain$AccessTokenProvider");
+        Class<?> type = Class.forName("com.topcoder.runner.EcsRunnerMain$KeycloakAccessTokenProvider");
         Constructor<?> constructor = type.getDeclaredConstructor(String.class, String.class,
             String.class, String.class, String.class, String.class);
         constructor.setAccessible(true);
@@ -790,6 +790,111 @@ public class EcsRunnerMainTest {
             } catch (InvocationTargetException error) {
                 assertTrue(error.getCause() instanceof IllegalArgumentException);
             }
+        }
+    }
+
+    /** Invokes the runner's USE_KEYCLOAK parser; returns its decision or rethrows its exception. */
+    private boolean useKeycloak(String value) throws Exception {
+        Method method = EcsRunnerMain.class.getDeclaredMethod("useKeycloak", String.class);
+        method.setAccessible(true);
+        try {
+            return (Boolean) method.invoke(null, value);
+        } catch (InvocationTargetException error) {
+            throw (Exception) error.getCause();
+        }
+    }
+
+    /** Parses USE_KEYCLOAK like tc-core-library-js and fails fast on other values; throws on assertion failures. */
+    @Test
+    public void useKeycloakFollowsTheCoreParsingRule() throws Exception {
+        for (String value : Arrays.asList("true", "TRUE", " True ")) {
+            assertTrue(useKeycloak(value));
+        }
+        for (String value : Arrays.asList(null, "", "  ", "false", " FALSE ")) {
+            assertFalse(useKeycloak(value));
+        }
+        for (String value : Arrays.asList("yes", "1", "keycloak")) {
+            try {
+                useKeycloak(value);
+                fail("Invalid USE_KEYCLOAK value was accepted: " + value);
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("USE_KEYCLOAK"));
+            }
+        }
+    }
+
+    /** Creates a synthetic Auth0 provider; returns a reflected instance or propagates reflection failures. */
+    private Object auth0TokenProvider(String auth0Url, String proxyUrl) throws Exception {
+        Class<?> type = Class.forName("com.topcoder.runner.EcsRunnerMain$Auth0AccessTokenProvider");
+        Constructor<?> constructor = type.getDeclaredConstructor(String.class, String.class,
+            String.class, String.class, String.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance("", auth0Url, "https://m2m.example.test/", proxyUrl,
+            "auth0-runner", "synthetic-auth0-secret");
+    }
+
+    /** Uses AUTH0_PROXY_SERVER_URL when set and AUTH0_URL otherwise, as before Keycloak; throws on assertion failures. */
+    @Test
+    public void auth0ProviderPrefersProxyUrlLikeTheBaseRunner() throws Exception {
+        Object direct = auth0TokenProvider("http://localhost:4000/oauth/token", "");
+        Method method = direct.getClass().getDeclaredMethod("resolveTokenUrl");
+        method.setAccessible(true);
+        assertEquals("http://localhost:4000/oauth/token", method.invoke(direct));
+
+        Object proxied = auth0TokenProvider("https://tenant.example.test/oauth/token",
+            "https://proxy.example.test/token");
+        assertEquals("https://proxy.example.test/token", method.invoke(proxied));
+    }
+
+    /** Posts the pre-migration Auth0 grant (auth0_url, audience, no scope) and returns the issued token. */
+    @Test
+    public void auth0ProviderRefreshesWithThePreMigrationRequest() throws Exception {
+        final List<String> requests = new ArrayList<String>();
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+            new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/token", exchange -> {
+            requests.add(exchange.getRequestMethod() + " "
+                + new String(EcsRunnerMainTestStreams.readAll(exchange.getRequestBody()), StandardCharsets.UTF_8));
+            byte[] body = "{\"access_token\":\"auth0-issued\",\"expires_in\":3600}"
+                .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.start();
+        try (org.apache.http.impl.client.CloseableHttpClient client =
+                 org.apache.http.impl.client.HttpClients.createDefault()) {
+            String tokenUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/token";
+            Object provider = auth0TokenProvider("https://tenant.example.test/oauth/token", tokenUrl);
+            Method refresh = provider.getClass().getDeclaredMethod("refreshToken",
+                org.apache.http.impl.client.CloseableHttpClient.class, String.class);
+            refresh.setAccessible(true);
+
+            assertEquals("auth0-issued", refresh.invoke(provider, client, "test"));
+        } finally {
+            server.stop(0);
+        }
+
+        assertEquals(1, requests.size());
+        assertEquals("POST {\"grant_type\":\"client_credentials\",\"client_id\":\"auth0-runner\","
+            + "\"client_secret\":\"synthetic-auth0-secret\","
+            + "\"auth0_url\":\"https://tenant.example.test/oauth/token\","
+            + "\"audience\":\"https://m2m.example.test/\"}", requests.get(0));
+    }
+
+    /** Small stream helper for the local token endpoint; Java 8 has no InputStream.readAllBytes. */
+    private static final class EcsRunnerMainTestStreams {
+        /** Reads the stream fully; returns its bytes or propagates I/O errors. */
+        static byte[] readAll(InputStream input) throws java.io.IOException {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
         }
     }
 

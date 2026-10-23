@@ -21,6 +21,13 @@ import { LoggerService } from './logger.service';
 
 describe('EcsService', () => {
   const originalEnv = process.env;
+  const auth0RunnerEnvNames = [
+    'AUTH0_URL',
+    'AUTH0_AUDIENCE',
+    'AUTH0_PROXY_SERVER_URL',
+    'AUTH0_CLIENT_ID',
+    'AUTH0_CLIENT_SECRET',
+  ];
   const mockLogger = {
     log: jest.fn(),
     warn: jest.fn(),
@@ -124,6 +131,11 @@ describe('EcsService', () => {
       KEYCLOAK_SCOPE: 'read:marathon-match update:marathon-match',
       KEYCLOAK_CLIENT_ID: 'runner-client-id',
       KEYCLOAK_CLIENT_SECRET: 'runner-client-secret',
+      AUTH0_URL: 'https://topcoder-dev.auth0.com/oauth/token',
+      AUTH0_AUDIENCE: 'https://m2m.topcoder-dev.com/',
+      AUTH0_PROXY_SERVER_URL: 'https://auth-proxy.topcoder-dev.com/oauth/token',
+      AUTH0_CLIENT_ID: 'auth0-runner-client-id',
+      AUTH0_CLIENT_SECRET: 'auth0-runner-client-secret',
     };
   });
 
@@ -518,7 +530,13 @@ describe('EcsService', () => {
     );
   });
 
-  it('passes Auth0 refresh settings to the ECS runner for long system scoring callbacks', async () => {
+  /**
+   * Launch a SYSTEM scorer task with stubbed ECS calls and the current process.env.
+   * Returns the runner container's override environment keyed by name.
+   */
+  const launchSystemRunnerEnvironment = async (): Promise<
+    Map<string, string | undefined>
+  > => {
     const { service, m2mService, send } = createService();
     m2mService.getM2MToken.mockResolvedValue('launch-token');
     send.mockImplementation((command) => {
@@ -586,8 +604,15 @@ describe('EcsService', () => {
     const environmentByName = new Map(
       environment.map(({ name, value }) => [name, value]),
     );
+    return environmentByName;
+  };
+
+  it('passes Keycloak refresh settings to the ECS runner when USE_KEYCLOAK=true', async () => {
+    process.env.USE_KEYCLOAK = 'true';
+    const environmentByName = await launchSystemRunnerEnvironment();
 
     expect(environmentByName.get('ACCESS_TOKEN')).toBe('launch-token');
+    expect(environmentByName.get('USE_KEYCLOAK')).toBe('true');
     expect(environmentByName.get('KEYCLOAK_TOKEN_URL')).toBe(
       'https://keycloak.topcoder-dev.com/m2m/token',
     );
@@ -601,11 +626,45 @@ describe('EcsService', () => {
     expect(environmentByName.get('KEYCLOAK_CLIENT_SECRET')).toBe(
       'runner-client-secret',
     );
+    for (const name of auth0RunnerEnvNames) {
+      expect(environmentByName.has(name)).toBe(false);
+    }
     expect(environmentByName.get('TEST_PHASE')).toBe('system');
     expect(environmentByName.get('PHASE_NUMBER_OF_TESTS')).toBe('5000');
     expect(environmentByName.get('REVIEW_ID')).toBe('review-1');
     expect(environmentByName.has('DEBUG_LOG_FULL_ACCESS_TOKEN')).toBe(false);
   });
+
+  it.each([['false'], [undefined]])(
+    'passes the pre-migration Auth0 refresh settings to the ECS runner when USE_KEYCLOAK=%p',
+    async (value) => {
+      if (value === undefined) delete process.env.USE_KEYCLOAK;
+      else process.env.USE_KEYCLOAK = value;
+      const environmentByName = await launchSystemRunnerEnvironment();
+
+      expect(environmentByName.get('ACCESS_TOKEN')).toBe('launch-token');
+      expect(environmentByName.get('USE_KEYCLOAK')).toBe('false');
+      expect(environmentByName.get('AUTH0_URL')).toBe(
+        'https://topcoder-dev.auth0.com/oauth/token',
+      );
+      expect(environmentByName.get('AUTH0_AUDIENCE')).toBe(
+        'https://m2m.topcoder-dev.com/',
+      );
+      expect(environmentByName.get('AUTH0_PROXY_SERVER_URL')).toBe(
+        'https://auth-proxy.topcoder-dev.com/oauth/token',
+      );
+      expect(environmentByName.get('AUTH0_CLIENT_ID')).toBe(
+        'auth0-runner-client-id',
+      );
+      expect(environmentByName.get('AUTH0_CLIENT_SECRET')).toBe(
+        'auth0-runner-client-secret',
+      );
+      for (const name of [...environmentByName.keys()]) {
+        expect(name.startsWith('KEYCLOAK_')).toBe(false);
+      }
+      expect(environmentByName.get('TEST_PHASE')).toBe('system');
+    },
+  );
 
   it('cancels the active scorer tasks a member still has running on a challenge', async () => {
     const { service, send } = createService();

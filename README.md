@@ -63,6 +63,16 @@ The service is configured via environment variables.
 | `AUTHORIZATION_SESSION_VALIDATION_ENABLED` | No                           | `true`                                  | Enables Identity API active-session validation for user JWTs |
 | `AUTHORIZATION_VALIDATION_URL`             | No                           | Derived from `https://api.topcoder(-dev).com` token issuers | Full Identity API `authorizations/1` URL used to reject logged-out user tokens |
 | `AUTHORIZATION_VALIDATION_TIMEOUT_MS`      | No                           | `3000`                                  | Timeout for active-session validation requests |
+| `USE_KEYCLOAK`           | No                           | (unset = Auth0)                         | `true` = Keycloak M2M, unset/`false` = Auth0 M2M |
+| `KEYCLOAK_ISSUER`, `KEYCLOAK_AUDIENCE`, `KEYCLOAK_TOKEN_URL` | Yes when `USE_KEYCLOAK=true` | None | Keycloak M2M validation/issuance |
+| `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | Yes when `USE_KEYCLOAK=true` (for outbound API calls) | None | Keycloak M2M client |
+| `KEYCLOAK_SCOPE`         | No                           | (client defaults)                       | Optional Keycloak scope subset   |
+| `AUTH0_URL`              | No (Auth0 mode)              | `http://localhost:4000/oauth/token`     | M2M token endpoint               |
+| `AUTH0_DOMAIN`           | No                           | `topcoder-dev.auth0.com`                | M2M config metadata              |
+| `AUTH0_AUDIENCE`         | No (Auth0 mode)              | `https://m2m.topcoder-dev.com/`         | M2M audience                     |
+| `AUTH0_PROXY_SERVER_URL` | No (Auth0 mode)              | (unset)                                 | Optional M2M proxy               |
+| `AUTH0_CLIENT_ID`        | Yes when `USE_KEYCLOAK` is not `true` (for outbound API calls) | None | M2M client ID |
+| `AUTH0_CLIENT_SECRET`    | Yes when `USE_KEYCLOAK` is not `true` (for outbound API calls) | None | M2M client secret |
 
 ### Kafka consumer/producer
 
@@ -351,7 +361,7 @@ Important runtime behavior:
 Before live scoring, verify:
 
 - Kafka topic `marathonmatch.submission.received` is receiving events.
-- Service can fetch M2M token (`KEYCLOAK_CLIENT_ID`/`KEYCLOAK_CLIENT_SECRET`).
+- Service can fetch M2M token (`KEYCLOAK_CLIENT_ID`/`KEYCLOAK_CLIENT_SECRET` with `USE_KEYCLOAK=true`, otherwise `AUTH0_CLIENT_ID`/`AUTH0_CLIENT_SECRET`).
 - ECS env vars are set (`ECS_CLUSTER`, `ECS_SUBNETS`, `ECS_SECURITY_GROUPS`, `ECS_CONTAINER_NAME`, `MARATHON_MATCH_API_URL`, `REVIEW_API_URL`, `REVIEW_TYPE_ID`).
 - Task definition referenced by `taskDefinitionName:taskDefinitionVersion` exists and contains the configured container name.
 
@@ -446,4 +456,5 @@ See [Review Phase Scoring](docs/review-phase-scoring.md) for the end-to-end revi
 ## Keycloak migration branch
 
 Follow [explicit Keycloak configuration and rollout](docs/keycloak-m2m.md).
-Legacy Auth0 M2M configuration examples do not apply to this branch.
+`USE_KEYCLOAK=true` issues M2M tokens (API and ECS runner) from Keycloak (`KEYCLOAK_*`);
+unset or `false` keeps the Auth0 `AUTH0_*` settings, which is also the rollback path.

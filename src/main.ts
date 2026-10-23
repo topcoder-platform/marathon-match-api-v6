@@ -9,8 +9,37 @@ import { LoggerService } from './shared/modules/global/logger.service';
 import { Response } from 'express';
 import { isHealthCheckRequestUrl } from './shared/request/healthCheckRequest';
 import { buildCorsOrigin } from './shared/cors/cors-origin';
+import { auth } from 'tc-core-library-js';
 
 const API_PREFIX = '/v6/marathon-match'; // Service prefix for all routes
+
+/**
+ * Build the development M2M token request shown in the Swagger description.
+ *
+ * `USE_KEYCLOAK=true` shows the Keycloak managed endpoint and audience; unset or
+ * `false` shows the Auth0 tenant and audience this service used before the Keycloak
+ * migration, so the documented token is one this deployment's provider issues.
+ * Called once by `bootstrap` while building the Swagger document.
+ *
+ * @returns The indented curl example, ending with a newline.
+ * @throws TypeError when USE_KEYCLOAK is neither true nor false.
+ */
+function m2mTokenExample(): string {
+  const [url, audience] = auth.useKeycloak()
+    ? [
+        'https://keycloak.topcoder-dev.com/m2m/token',
+        'https://api.topcoder-dev.com',
+      ]
+    : [
+        'https://topcoder-dev.auth0.com/oauth/token',
+        'https://m2m.topcoder-dev.com/',
+      ];
+  return `    curl --request POST \\
+      --url ${url} \\
+      --header 'content-type: application/json' \\
+      --data '{"client_id":"your-client-id","client_secret":"your-client-secret","audience":"${audience}","grant_type":"client_credentials"}'
+`;
+}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -132,11 +161,7 @@ async function bootstrap() {
 
     To get an M2M token (example for development environment):
 
-    curl --request POST \\
-      --url https://keycloak.topcoder-dev.com/m2m/token \\
-      --header 'content-type: application/json' \\
-      --data '{"client_id":"your-client-id","client_secret":"your-client-secret","audience":"https://api.topcoder-dev.com","grant_type":"client_credentials"}'
-
+${m2mTokenExample()}
     `,
     )
     .setVersion('1.0')

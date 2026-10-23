@@ -10,6 +10,7 @@ import {
   waitUntilTasksStopped,
 } from '@aws-sdk/client-ecs';
 import { PhaseConfigType } from '@prisma/client';
+import { auth } from 'tc-core-library-js';
 import { LoggerService } from './logger.service';
 import { M2MService } from './m2m.service';
 import { PrismaService } from './prisma.service';
@@ -118,8 +119,9 @@ export class EcsService {
    * @param launchOptions Optional submission owner metadata, cancellation controls, and validation-run routing.
    * @returns ECS task launch details with task/log mapping metadata.
    * Required env vars: ECS_CLUSTER, ECS_CONTAINER_NAME, ECS_SUBNETS, ECS_SECURITY_GROUPS,
-   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and explicit Keycloak M2M settings
-   * used by the runner to refresh tokens during long scoring tasks. Optional
+   * AWS_REGION, MARATHON_MATCH_API_URL, REVIEW_TYPE_ID, and the M2M settings of the
+   * provider selected by USE_KEYCLOAK (KEYCLOAK_* when true, AUTH0_* otherwise), which the
+   * runner uses to refresh tokens during long scoring tasks. Optional
    * ECS_SCORER_MAX_CONCURRENT_TASKS controls the global pending/running scorer
    * task cap and defaults to 20. Member launches require ECS inspection access;
    * launches without a member retain the legacy inspection fallback.
@@ -292,18 +294,7 @@ export class EcsService {
           runnerEnvironment,
           'DEBUG_LOG_ACCESS_TOKEN',
         );
-        this.appendOptionalEnvOverride(runnerEnvironment, 'M2M_PROVIDER');
-        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_TOKEN_URL');
-        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_AUDIENCE');
-        this.appendOptionalEnvOverride(
-          runnerEnvironment,
-          'KEYCLOAK_SCOPE',
-        );
-        this.appendOptionalEnvOverride(runnerEnvironment, 'KEYCLOAK_CLIENT_ID');
-        this.appendOptionalEnvOverride(
-          runnerEnvironment,
-          'KEYCLOAK_CLIENT_SECRET',
-        );
+        this.appendM2MEnvOverrides(runnerEnvironment);
 
         const response = await this.ecsClient.send(
           new RunTaskCommand({
@@ -1174,6 +1165,47 @@ export class EcsService {
       return;
     }
     environment.push({ name: envName, value });
+  }
+
+  /**
+   * Adds the runner's token-refresh settings for the M2M provider this API selected.
+   *
+   * `USE_KEYCLOAK` is always sent as `true` or `false` (the `auth.useKeycloak()` result),
+   * so the runner and the API that minted its launch token always agree. Keycloak mode
+   * forwards `KEYCLOAK_TOKEN_URL`, `KEYCLOAK_AUDIENCE`, `KEYCLOAK_SCOPE`,
+   * `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET`; Auth0 mode forwards the
+   * pre-migration `AUTH0_URL`, `AUTH0_AUDIENCE`, `AUTH0_PROXY_SERVER_URL`,
+   * `AUTH0_CLIENT_ID` and `AUTH0_CLIENT_SECRET`. Only set values are forwarded, and the
+   * inactive provider's credentials are never sent. Used by `launchScorerTask`.
+   * @param environment ECS container override environment to append to.
+   * @throws TypeError when USE_KEYCLOAK is neither true nor false.
+   */
+  private appendM2MEnvOverrides(
+    environment: Array<{ name: string; value: string }>,
+  ): void {
+    const useKeycloak = auth.useKeycloak();
+    environment.push({
+      name: 'USE_KEYCLOAK',
+      value: useKeycloak ? 'true' : 'false',
+    });
+    const names = useKeycloak
+      ? [
+          'KEYCLOAK_TOKEN_URL',
+          'KEYCLOAK_AUDIENCE',
+          'KEYCLOAK_SCOPE',
+          'KEYCLOAK_CLIENT_ID',
+          'KEYCLOAK_CLIENT_SECRET',
+        ]
+      : [
+          'AUTH0_URL',
+          'AUTH0_AUDIENCE',
+          'AUTH0_PROXY_SERVER_URL',
+          'AUTH0_CLIENT_ID',
+          'AUTH0_CLIENT_SECRET',
+        ];
+    for (const name of names) {
+      this.appendOptionalEnvOverride(environment, name);
+    }
   }
 
   /**

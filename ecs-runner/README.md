@@ -103,15 +103,22 @@ Set these in the API service environment:
 - `MARATHON_MATCH_API_URL`
 - `REVIEW_TYPE_ID`
 - `MM_RUNNER_MAX_OUTPUT_BYTES` (optional, defaults to `10000000`; caps runner output and artifact archives before upload)
-- `M2M_PROVIDER=keycloak`
-- `KEYCLOAK_TOKEN_URL` (HTTPS managed `/m2m/token` endpoint)
-- `KEYCLOAK_AUDIENCE`
-- `KEYCLOAK_CLIENT_ID`
-- `KEYCLOAK_CLIENT_SECRET`
-- `KEYCLOAK_SCOPE` (optional)
+- `USE_KEYCLOAK` (`true` = Keycloak, unset/`false` = Auth0; any other value fails)
+- With `USE_KEYCLOAK=true`:
+  - `KEYCLOAK_TOKEN_URL` (HTTPS managed `/m2m/token` endpoint)
+  - `KEYCLOAK_AUDIENCE`
+  - `KEYCLOAK_CLIENT_ID`
+  - `KEYCLOAK_CLIENT_SECRET`
+  - `KEYCLOAK_SCOPE` (optional)
+- Otherwise (Auth0, as before the Keycloak migration):
+  - `AUTH0_URL`
+  - `AUTH0_AUDIENCE`
+  - `AUTH0_CLIENT_ID`
+  - `AUTH0_CLIENT_SECRET`
+  - `AUTH0_PROXY_SERVER_URL` (optional)
 - `DEBUG_LOG_ACCESS_TOKEN` (optional, set `true` to log only redacted token presence/length in runner logs)
 
-Long-running SYSTEM scorer tasks refresh their parent-runner M2M bearer token before expiry and retry once with a fresh token after an API `401`. The API injects the launch token plus the Keycloak settings above into the trusted parent runner. The isolated child JVM and submitted solution processes still receive a scrubbed environment and do not inherit `ACCESS_TOKEN`, `KEYCLOAK_CLIENT_SECRET`, or other runner env vars.
+Long-running SYSTEM scorer tasks refresh their parent-runner M2M bearer token before expiry and retry once with a fresh token after an API `401`. The API injects the launch token, `USE_KEYCLOAK` (`true`/`false`, the provider the API itself used), and only the active provider's settings above into the trusted parent runner through the RunTask container overrides. The runner parses `USE_KEYCLOAK` with the core's rule (trimmed, case-insensitive `true`; missing/empty/`false` = Auth0; anything else stops the runner). The isolated child JVM and submitted solution processes still receive a scrubbed environment and do not inherit `ACCESS_TOKEN`, `KEYCLOAK_CLIENT_SECRET`, `AUTH0_CLIENT_SECRET`, or other runner env vars.
 
 Keep `ECS_SECURITY_GROUPS` least-privilege. The scorer helper blocks untrusted submission egress, but the parent runner still needs trusted access to Marathon Match API and Submission API endpoints.
 
@@ -167,10 +174,14 @@ This compiles the native helper in no-user-drop test mode, runs a Python
 `ctypes` raw `socket` syscall probe under seccomp, and verifies that an
 `AF_INET` socket is denied while `AF_UNIX` socket pairs still work.
 
-The Java runner has no inbound JWT authorization. It obtains refreshed tokens only
-from the managed HTTPS facade, which uses the shared core to validate issued JWTs.
-The parent API verifies launch tokens through the same core. Runner JWT decoding is
-used only for cache timing, with a maximum 900-second lifetime. Redirects and Auth0
-fallback are disabled; provider response bodies and credentials are never logged.
-Deploy the runner image and API branch together at rollout. No DEV runner tasks
+The Java runner has no inbound JWT authorization. With `USE_KEYCLOAK=true` it obtains
+refreshed tokens only from the managed HTTPS facade, which uses the shared core to
+validate issued JWTs. The parent API verifies launch tokens through the same core.
+Runner JWT decoding is used only for cache timing, with a maximum 900-second lifetime.
+Redirects and Auth0 fallback are disabled; provider response bodies and credentials are
+never logged. With `USE_KEYCLOAK` unset or `false` the runner refreshes exactly as before
+the migration: it posts to `AUTH0_PROXY_SERVER_URL` (or `AUTH0_URL`) with `auth0_url` and
+`audience`, and failed refresh errors include the truncated Auth0 response body.
+Deploy the runner image and API branch together at rollout. An older runner image
+ignores `USE_KEYCLOAK` and needs the matching provider's names. No DEV runner tasks
 were launched or changed during this migration.
