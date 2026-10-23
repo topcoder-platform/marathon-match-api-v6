@@ -973,6 +973,7 @@ export class ScoringResultService {
         {
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
+          memoryLimit: config.memoryLimit,
         },
         {
           configType: systemPhaseConfig.configType,

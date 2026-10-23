@@ -426,6 +426,7 @@ export class MarathonMatchSubmissionHandler
         {
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
+          memoryLimit: config.memoryLimit,
         },
         {
           configType: matchingPhaseConfig.configType,
