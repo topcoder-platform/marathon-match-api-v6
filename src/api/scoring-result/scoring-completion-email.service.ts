@@ -1,3 +1,4 @@
+import { createBusApiClient, resolveBusEventsUrl } from 'tc-core-library-js';
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -419,7 +420,7 @@ export class ScoringCompletionEmailService {
   }
 
   /**
-   * Posts the email action payload to Topcoder Bus API.
+   * Posts the email action through the shared tc-core-library-js bus publisher.
    * @param token M2M token authorized for Bus API.
    * @param payload Email action payload.
    * @returns Resolves after Bus API accepts the event.
@@ -429,28 +430,13 @@ export class ScoringCompletionEmailService {
     token: string,
     payload: EventBusEmailPayload,
   ): Promise<void> {
-    const response = await firstValueFrom(
-      this.httpService.post(
-        this.buildBusEventsUrl(),
-        {
-          topic: 'external.action.email',
-          originator: 'marathon-match-api-v6',
-          timestamp: new Date().toISOString(),
-          'mime-type': 'application/json',
-          payload,
-        } satisfies EventBusMessage<EventBusEmailPayload>,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      ),
-    );
-
-    if (![200, 202, 204].includes(response.status)) {
-      throw new Error(`Bus API status code: ${response.status}`);
-    }
+    await createBusApiClient({
+      BUSAPI_URL: this.buildBusEventsUrl(),
+      getToken: () => Promise.resolve(token),
+    }).postEvent({
+      topic: 'external.action.email', originator: 'marathon-match-api-v6',
+      timestamp: new Date().toISOString(), 'mime-type': 'application/json', payload,
+    });
   }
 
   /**
@@ -592,16 +578,10 @@ export class ScoringCompletionEmailService {
       process.env.BUS_EVENTS_URL ||
       process.env.BUS_API_URL ||
       process.env.BUSAPI_URL ||
-      'https://api.topcoder-dev.com/v5'
+      'https://api.topcoder-dev.com/v6'
     ).replace(/\/+$/, '');
 
-    if (rawUrl.endsWith('/bus/events') || rawUrl.endsWith('/eventBus')) {
-      return rawUrl;
-    }
-    if (rawUrl.endsWith('/v5')) {
-      return `${rawUrl}/bus/events`;
-    }
-    return `${rawUrl}/v5/bus/events`;
+    return resolveBusEventsUrl(new URL(rawUrl).pathname === '/' ? `${rawUrl}/v6` : rawUrl);
   }
 
   /**

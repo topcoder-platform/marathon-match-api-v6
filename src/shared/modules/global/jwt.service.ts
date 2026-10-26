@@ -11,9 +11,7 @@ import { UserRole } from '../../enums/userRole.enum';
 import { AuthConfig } from '../../config/auth.config';
 import { LoggerService } from './logger.service';
 
-// tc-core-library-js is CommonJS only, import via require
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const tcCore = require('tc-core-library-js');
+import { createJwtVerifier, type JwtVerifier } from 'tc-core-library-js';
 
 export interface JwtUser {
   userId?: string;
@@ -47,21 +45,21 @@ export const isAdmin = (user: JwtUser): boolean => {
 
 @Injectable()
 export class JwtService implements OnModuleInit {
-  private static readonly SLOW_VALIDATION_WARNING_INTERVAL_MS = 5000;
-  private static readonly AUTHORIZATION_VALIDATION_TIMEOUT_MS = 3000;
+    private static readonly AUTHORIZATION_VALIDATION_TIMEOUT_MS = 3000;
   private static readonly TOPCODER_API_ISSUERS = new Set([
     'https://api.topcoder.com',
     'https://api.topcoder-dev.com',
   ]);
-  private jwtAuthenticator: any;
+  private verifier?: JwtVerifier;
   private readonly logger = LoggerService.forRoot('JwtService');
 
   /**
-   * Initialize the tc-core-library-js JWT authenticator
+   * Initialize the shared verifier; returns void and throws for invalid JWT configuration.
    */
   onModuleInit() {
     this.logger.log('Initializing tc-core JWT authenticator');
-    this.jwtAuthenticator = tcCore.middleware.jwtAuthenticator({
+    this.verifier = createJwtVerifier({
+      AUTH0_AUDIENCE: process.env.AUTH0_AUDIENCE || AuthConfig.jwt.audience,
       AUTH_SECRET: AuthConfig.authSecret,
       VALID_ISSUERS: AuthConfig.validIssuers,
     });
@@ -96,173 +94,22 @@ export class JwtService implements OnModuleInit {
     });
     try {
       // Use tc-core-library-js for JWT validation
-      const payload = await new Promise<any>((resolve, reject) => {
-        // Create a request object with the authorization header
-        const req = {
-          headers: {
-            authorization: `Bearer ${normalizedToken}`,
-          },
-        };
-
-        const waitLogger = setInterval(() => {
-          this.logger.warn({
-            message: 'Awaiting tc-core jwtAuthenticator callback',
-            tokenHash,
-            waitedMs: Date.now() - startedAt,
-            iss: tokenMetadata?.iss,
-            kid: tokenMetadata?.kid,
-          });
-        }, JwtService.SLOW_VALIDATION_WARNING_INTERVAL_MS);
-
-        const clearWaitLogger = () => {
-          clearInterval(waitLogger);
-        };
-
-        const sendUnauthorized = (
-          fallbackMessage: string,
-          detail?: unknown,
-          statusCode?: number,
-        ) => {
-          clearWaitLogger();
-          const detailMessage =
-            this.extractErrorMessage(detail) ?? fallbackMessage;
-          this.logger.error({
-            message: 'tc-core jwtAuthenticator reported unauthorized response',
-            tokenHash,
-            statusCode,
-            detailMessage,
-            detail: this.safeSerialize(detail),
-          });
-          return reject(new UnauthorizedException(detailMessage));
-        };
-
-        const res = {
-          status: (statusCode: number) => {
-            return {
-              json: (body?: unknown) =>
-                sendUnauthorized(
-                  this.extractErrorMessage(body) ??
-                    (statusCode === 403 ? 'Token expired' : 'Invalid token'),
-                  body,
-                  statusCode,
-                ),
-            };
-          },
-          json: (body?: unknown) =>
-            sendUnauthorized(
-              this.extractErrorMessage(body) ?? 'Invalid token',
-              body,
-            ),
-          send: (...args: any[]) => {
-            const statusCode =
-              typeof args[0] === 'number' ? args[0] : undefined;
-            return sendUnauthorized(
-              this.extractErrorMessage(
-                typeof statusCode === 'number' ? args[1] : args[0],
-              ) ?? (statusCode === 403 ? 'Token expired' : 'Invalid token'),
-              typeof statusCode === 'number' ? args[1] : args[0],
-              statusCode,
-            );
-          },
-        };
-
-        const next = (error?: any) => {
-          clearWaitLogger();
-          if (error) {
-            this.logger.error(
-              {
-                message: 'tc-core jwtAuthenticator rejected token',
-                tokenHash,
-                error: error instanceof Error ? error.message : String(error),
-              },
-              error instanceof Error ? error.stack : undefined,
-            );
-            return reject(new UnauthorizedException('Invalid token'));
-          }
-
-          // tc-core-library-js should have attached authUser to the request
-          const authUser = (req as any).authUser;
-
-          if (!authUser) {
-            return reject(new UnauthorizedException('Invalid token'));
-          }
-
-          resolve(authUser);
-        };
-
-        // Call the tc-core-library-js authenticator
-        try {
-          this.logger.log({
-            message: 'Invoking tc-core jwtAuthenticator',
-            tokenHash,
-            validIssuersPreview: validIssuers.slice(0, 5),
-            validIssuersProvided: validIssuers.length,
-          });
-          this.jwtAuthenticator(req, res, next);
-          this.logger.log({
-            message:
-              'tc-core jwtAuthenticator returned control, awaiting callback',
-            tokenHash,
-          });
-        } catch (invocationError) {
-          clearWaitLogger();
-          this.logger.error(
-            {
-              message: 'tc-core jwtAuthenticator threw synchronously',
-              tokenHash,
-              error:
-                invocationError instanceof Error
-                  ? invocationError.message
-                  : String(invocationError),
-            },
-            invocationError instanceof Error
-              ? invocationError.stack
-              : undefined,
-          );
-          return reject(new UnauthorizedException('Invalid token'));
-        }
-      });
+      if (!this.verifier) throw new Error('JWT verifier is not initialized');
+      const payload = await this.verifier.verify(normalizedToken);
 
       this.logger.log({
         message: 'Token decoded successfully',
         tokenHash,
         hasScopes: Boolean(payload?.scopes || payload?.scope),
       });
-      const user: JwtUser = { isMachine: false };
-
-      // Check for M2M token (has scopes)
-      if (payload.scopes || payload.scope) {
-        const scopeString =
-          payload.scope ||
-          (Array.isArray(payload.scopes)
-            ? payload.scopes.join(' ')
-            : payload.scopes);
-        const rawScopes =
-          typeof scopeString === 'string'
-            ? scopeString.split(' ')
-            : scopeString;
-        user.scopes = this.expandScopes(rawScopes);
-        user.userId = payload.sub || payload.userId;
-        user.isMachine = true;
-      } else {
-        // User token - extract roles, userId and handle
-        user.userId = payload.userId || payload.sub;
-        user.handle = payload.handle;
-        user.roles = payload.roles || [];
-
-        // Check for roles, userId and handle in custom claims
-        for (const key of Object.keys(payload)) {
-          if (key.endsWith('handle')) {
-            user.handle = payload[key] as string;
-          }
-          if (key.endsWith('userId')) {
-            user.userId = payload[key] as string;
-          }
-          if (key.endsWith('roles')) {
-            user.roles = payload[key] as UserRole[];
-          }
-        }
-      }
+      const id = payload.userId ?? payload.sub;
+      const user: JwtUser = {
+        userId: id === undefined ? undefined : String(id),
+        handle: payload.handle,
+        roles: payload.roles as UserRole[],
+        scopes: this.expandScopes(payload.scopes),
+        isMachine: payload.isMachine,
+      };
 
       await this.validateActiveUserSession(
         normalizedToken,
@@ -442,15 +289,11 @@ export class JwtService implements OnModuleInit {
   /**
    * Detects token payloads this service treats as M2M.
    * @param payload Decoded JWT payload from tc-core.
-   * @returns True when the token has machine markers or scope claims.
+   * @returns True only when the shared verifier classified a machine identity.
    * Used by active-session validation to avoid calling Identity API for M2M tokens.
    */
   private isMachineTokenPayload(payload: Record<string, unknown>): boolean {
-    return (
-      payload.isMachine === true ||
-      payload.gty === 'client-credentials' ||
-      Boolean(payload.scopes || payload.scope)
-    );
+    return payload.isMachine === true;
   }
 
   /**
