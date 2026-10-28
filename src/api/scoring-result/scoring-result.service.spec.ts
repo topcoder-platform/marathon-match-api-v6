@@ -1941,6 +1941,144 @@ describe('ScoringResultService', () => {
     },
   );
 
+  it.each([
+    {
+      name: 'does not send a fail email for the superseded cancelled submission',
+      submissionId: 'superseded-submission',
+      expectedEmail: undefined,
+    },
+    {
+      name: 'still sends the pass email for the replacement submission',
+      submissionId: 'replacement-submission',
+      expectedEmail: {
+        aggregateProvisionalScore: 10,
+        scoringStatus: 'pass',
+      },
+    },
+  ])(
+    'after a queued relative recompute $name',
+    async ({ submissionId, expectedEmail }) => {
+      const scoringCompletionEmailService = {
+        sendSubmissionScoringCompleteEmail: jest
+          .fn()
+          .mockResolvedValue(undefined),
+      };
+      const { service, m2mService, prisma } = createService(
+        scoringCompletionEmailService,
+      );
+      // Mirrors the cancellation marker the Kafka handler writes when a newer
+      // submission supersedes an in-flight scorer task.
+      const cancelledReview = (testType: 'example' | 'provisional') => ({
+        aggregateScore: -1,
+        isPassing: false,
+        ...(testType === 'example'
+          ? { isExample: true }
+          : { isProvisional: true }),
+        metadata: {
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Cancelled,
+          testType,
+        },
+      });
+      const completedReview = (
+        testType: 'example' | 'provisional',
+        aggregateScore: number,
+      ) => ({
+        aggregateScore,
+        isPassing: true,
+        ...(testType === 'example'
+          ? { isExample: true }
+          : { isProvisional: true }),
+        metadata: {
+          testProgress: 1,
+          testStatus: ScoringTestStatus.Success,
+          testType,
+        },
+      });
+
+      prisma.marathonMatchConfig.findUnique.mockResolvedValue({
+        challengeId: basePayload.challengeId,
+        name: 'Blocks',
+        submissionApiUrl: 'https://api.topcoder-dev.com/v6',
+        relativeScoringEnabled: true,
+        scoreDirection: ScoreDirection.MAXIMIZE,
+      });
+      m2mService.getM2MToken.mockResolvedValue('m2m-token');
+      jest
+        .spyOn(service as any, 'withRelativeScoringLock')
+        .mockImplementation(
+          async (
+            _challengeId: string,
+            _testPhase: string,
+            work: () => Promise<unknown>,
+          ) => work(),
+        );
+      jest
+        .spyOn(service as any, 'resolveScorecardId')
+        .mockResolvedValue('scorecard-1');
+      jest
+        .spyOn(service as any, 'recomputePersistedRelativeScoring')
+        .mockResolvedValue([
+          {
+            submissionId: 'replacement-submission',
+            payload: { aggregateScore: 10 },
+          },
+        ]);
+      const fetchChallengeSubmissionsSpy = jest
+        .spyOn(service as any, 'fetchChallengeSubmissions')
+        .mockResolvedValue([
+          {
+            id: 'superseded-submission',
+            memberHandle: 'competitor',
+            reviewSummation: [
+              cancelledReview('example'),
+              cancelledReview('provisional'),
+            ],
+          },
+          {
+            id: 'replacement-submission',
+            memberHandle: 'competitor',
+            reviewSummation: [
+              completedReview('example', 24),
+              completedReview('provisional', 10),
+            ],
+          },
+        ]);
+      jest
+        .spyOn(service as any, 'resolveChallengeName')
+        .mockResolvedValue('Blocks');
+
+      await expect(
+        service.recomputeQueuedRelativeScoring({
+          challengeId: basePayload.challengeId,
+          submissionId,
+          testPhase: 'provisional',
+          reviewTypeId: basePayload.reviewTypeId,
+          scorecardId: 'scorecard-1',
+          queuedAt: '2026-10-06T04:46:45.686Z',
+        }),
+      ).resolves.toBe(undefined);
+
+      expect(fetchChallengeSubmissionsSpy).toHaveBeenCalled();
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      if (expectedEmail) {
+        expect(
+          scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
+        ).toHaveBeenCalledWith('m2m-token', {
+          challengeId: basePayload.challengeId,
+          challengeName: 'Blocks',
+          submissionId,
+          memberHandle: 'competitor',
+          ...expectedEmail,
+        });
+      } else {
+        expect(
+          scoringCompletionEmailService.sendSubmissionScoringCompleteEmail,
+        ).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it('skips system scoring emails until all latest member summations are complete', async () => {
     const scoringCompletionEmailService = {
       sendSystemScoringCompleteEmail: jest.fn().mockResolvedValue(undefined),

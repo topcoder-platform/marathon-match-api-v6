@@ -128,10 +128,11 @@ The default values supplied by `marathon-match-api-v6` are environment-configura
 | `testTimeout`    |  `90000` ms |
 | `compileTimeout` | `120000` ms |
 | `systemTestTimeout` | `86400000` ms |
+| `memoryLimit` | `2048` MiB |
 
 ## Processing Server Specifications
 
-The current processor runs as an ECS/Fargate task using the configured task definition revision for the challenge scorer. CPU and memory are controlled by that ECS task definition, not by a fixed EC2 instance type.
+The current processor runs as an ECS/Fargate task using the configured task definition revision for the challenge scorer. CPU and memory are controlled by that ECS task definition, not by a fixed EC2 instance type. When the scorer config sets `memoryLimit`, the API sends it as the task-level memory override for each scorer launch.
 
 The current runner image is based directly on Ubuntu 24.04 Noble and installs the Ubuntu OpenJDK 17 packages.
 
@@ -443,7 +444,7 @@ The trusted parent runs as non-root `runner-parent`, while the tester runs in a 
 
 ## Multithreading and Resource Notes
 
-CPU and memory limits are controlled by the ECS task definition revision configured for the challenge.
+CPU and memory limits are controlled by the ECS task definition revision configured for the challenge. The scorer config `memoryLimit` (MiB) overrides the task definition memory when set.
 
 The generic runner executes the configured seeds sequentially. A submitted solution may create threads, but those threads share the CPU and memory allocated to the ECS task. Multithreading is therefore not guaranteed to improve scoring performance and can make local results less comparable to production if the local machine has different CPU allocation.
 

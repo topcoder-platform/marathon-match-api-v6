@@ -35,6 +35,10 @@ import {
   resolveSubmissionApiBaseUrl,
 } from 'src/shared/config/submission-api-url.config';
 import {
+  DEFAULT_SCORER_TASK_MEMORY_MIB,
+  getScorerTaskMemoryValidationError,
+} from 'src/shared/config/scorer-task-memory.config';
+import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
 } from 'src/shared/modules/global/ecs.service';
@@ -168,6 +172,10 @@ export class MarathonMatchConfigService {
     'DEFAULT_SYSTEM_TEST_TIMEOUT_MS',
     86400000,
   );
+  private readonly defaultMemoryLimit = this.getPositiveIntegerEnv(
+    'DEFAULT_MEMORY_LIMIT_MB',
+    DEFAULT_SCORER_TASK_MEMORY_MIB,
+  );
   private readonly scorecardIdLookupCache = new Map<string, string | null>();
 
   constructor(
@@ -181,7 +189,7 @@ export class MarathonMatchConfigService {
 
   /**
    * Retrieves configurable default values for new marathon match configs from environment variables.
-   * @returns Default review scorecard ID, test timeout, compile timeout, and optional task definition defaults mapped to `MarathonMatchDefaultsResponseDto`.
+   * @returns Default review scorecard ID, test timeout, compile timeout, system test timeout, scorer task memory limit (`DEFAULT_MEMORY_LIMIT_MB`, 2048 MiB when unset), and optional task definition defaults mapped to `MarathonMatchDefaultsResponseDto`.
    * @throws InternalServerErrorException When `DEFAULT_REVIEW_SCORECARD_ID` is not configured.
    */
   getDefaults(): MarathonMatchDefaultsResponseDto {
@@ -211,6 +219,7 @@ export class MarathonMatchConfigService {
         ? parsedCompileTimeout
         : 120000;
     const systemTestTimeout = this.defaultSystemTestTimeout;
+    const memoryLimit = this.defaultMemoryLimit;
     const submissionApiUrl = resolvePersistedSubmissionApiBaseUrl(
       undefined,
       this.challengeApiBaseUrl,
@@ -225,6 +234,7 @@ export class MarathonMatchConfigService {
       testTimeout,
       compileTimeout,
       systemTestTimeout,
+      memoryLimit,
       submissionApiUrl,
       taskDefinitionName,
       taskDefinitionVersion,
@@ -239,7 +249,7 @@ export class MarathonMatchConfigService {
    * @returns Created marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the referenced challenge or tester does not exist.
    * @throws ConflictException When a config already exists for the challenge.
-   * @throws BadRequestException When `challengeId` is invalid, `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, or a phase identifier does not exist on the challenge.
+   * @throws BadRequestException When `challengeId` is invalid, `reviewScorecardId` cannot be resolved by review-api, `memoryLimit` is not a Fargate-supported size for the task definition CPU, phase `startSeed` is outside the supported 64-bit range, or a phase identifier does not exist on the challenge.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async createConfig(
@@ -261,6 +271,11 @@ export class MarathonMatchConfigService {
       }
 
       await this.validateReviewScorecardId(body.reviewScorecardId);
+      await this.validateMemoryLimit(
+        body.memoryLimit,
+        body.taskDefinitionName,
+        body.taskDefinitionVersion,
+      );
 
       const phaseConfigs: MarathonMatchPhaseConfigInput[] = [
         { phase: body.example, configType: PhaseConfigType.EXAMPLE },
@@ -297,6 +312,7 @@ export class MarathonMatchConfigService {
             testTimeout: body.testTimeout,
             compileTimeout: body.compileTimeout,
             systemTestTimeout: body.systemTestTimeout,
+            memoryLimit: body.memoryLimit,
             taskDefinitionName: body.taskDefinitionName,
             taskDefinitionVersion: body.taskDefinitionVersion,
             createdBy: actor,
@@ -367,7 +383,7 @@ export class MarathonMatchConfigService {
    * @param user Authenticated user or machine token payload used for audit fields.
    * @returns Updated marathon match config mapped to `MarathonMatchConfigResponseDto`.
    * @throws NotFoundException When the config or updated tester does not exist.
-   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, phase `startSeed` is outside the supported 64-bit range, a phase identifier does not exist on the challenge, or tester-change rerun validation fails.
+   * @throws BadRequestException When `reviewScorecardId` cannot be resolved by review-api, the resulting `memoryLimit` is not a Fargate-supported size for the task definition CPU, phase `startSeed` is outside the supported 64-bit range, a phase identifier does not exist on the challenge, or tester-change rerun validation fails.
    * @throws InternalServerErrorException When the database operation fails.
    */
   async updateConfig(
@@ -403,6 +419,20 @@ export class MarathonMatchConfigService {
 
       if (body.reviewScorecardId) {
         await this.validateReviewScorecardId(body.reviewScorecardId);
+      }
+
+      if (
+        body.memoryLimit !== undefined ||
+        body.taskDefinitionName !== undefined ||
+        body.taskDefinitionVersion !== undefined
+      ) {
+        await this.validateMemoryLimit(
+          body.memoryLimit === undefined
+            ? existing.memoryLimit
+            : body.memoryLimit,
+          body.taskDefinitionName ?? existing.taskDefinitionName,
+          body.taskDefinitionVersion ?? existing.taskDefinitionVersion,
+        );
       }
 
       const actor = user.isMachine ? 'System' : (user.userId ?? null);
@@ -1082,6 +1112,7 @@ export class MarathonMatchConfigService {
         {
           taskDefinitionName: config.taskDefinitionName,
           taskDefinitionVersion: config.taskDefinitionVersion,
+          memoryLimit: config.memoryLimit,
         },
       );
 
@@ -1421,6 +1452,7 @@ export class MarathonMatchConfigService {
           {
             taskDefinitionName: config.taskDefinitionName,
             taskDefinitionVersion: config.taskDefinitionVersion,
+            memoryLimit: config.memoryLimit,
           },
           {
             configType: phaseConfigData.configType,
@@ -1934,7 +1966,7 @@ export class MarathonMatchConfigService {
    * Launches rerun scorer tasks in small batches so ECS RunTask requests remain below service throttling limits.
    * @param challengeId Challenge ID passed to each scorer task.
    * @param dispatchCandidates Submission and phase-config scorer launches in response order.
-   * @param mmConfig Task definition name and version from the marathon match config.
+   * @param mmConfig Task definition name, version, and optional memory limit (MiB) from the marathon match config.
    * @returns Settled launch results in the same order as `dispatchCandidates`.
    * @throws Does not throw for individual scorer launch failures; those are returned as rejected settled results.
    */
@@ -1944,6 +1976,7 @@ export class MarathonMatchConfigService {
     mmConfig: {
       taskDefinitionName: string;
       taskDefinitionVersion: string;
+      memoryLimit?: number | null;
     },
   ): Promise<PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[]> {
     const launchResults: PromiseSettledResult<MarathonMatchScorerTaskLaunchResult>[] =
@@ -2404,6 +2437,7 @@ export class MarathonMatchConfigService {
       compileTimeout: config.compileTimeout,
       systemTestTimeout:
         config.systemTestTimeout ?? this.defaultSystemTestTimeout,
+      memoryLimit: config.memoryLimit ?? null,
       taskDefinitionName: config.taskDefinitionName,
       taskDefinitionVersion: config.taskDefinitionVersion,
       example: mapPhaseByType(PhaseConfigType.EXAMPLE),
@@ -2414,6 +2448,48 @@ export class MarathonMatchConfigService {
       createdBy: config.createdBy,
       updatedBy: config.updatedBy,
     };
+  }
+
+  /**
+   * Verifies that a scorer task memory limit can be used as a Fargate task-level
+   * memory override for the configured ECS task definition. Validation is skipped
+   * when no memory limit is set, and is best-effort when the task definition CPU
+   * cannot be resolved from ECS.
+   * @param memoryLimit Requested task memory in MiB, or null/undefined for the task definition memory.
+   * @param taskDefinitionName ECS task definition family the scorer launches.
+   * @param taskDefinitionVersion ECS task definition revision the scorer launches.
+   * @throws BadRequestException When the memory limit is not supported by Fargate for the task definition CPU.
+   */
+  private async validateMemoryLimit(
+    memoryLimit: number | null | undefined,
+    taskDefinitionName: string,
+    taskDefinitionVersion: string,
+  ): Promise<void> {
+    if (memoryLimit === null || memoryLimit === undefined) {
+      return;
+    }
+
+    const taskCpu = await this.ecsService.getTaskDefinitionCpu(
+      taskDefinitionName,
+      taskDefinitionVersion,
+    );
+    if (!taskCpu) {
+      this.logger.warn({
+        message:
+          'Skipping Marathon Match memoryLimit Fargate validation because the task definition CPU could not be resolved.',
+        memoryLimit,
+        taskDefinition: `${taskDefinitionName}:${taskDefinitionVersion}`,
+      });
+      return;
+    }
+
+    const validationError = getScorerTaskMemoryValidationError(
+      memoryLimit,
+      taskCpu,
+    );
+    if (validationError) {
+      throw new BadRequestException(validationError);
+    }
   }
 
   /**

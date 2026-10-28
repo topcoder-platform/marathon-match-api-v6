@@ -15,6 +15,11 @@ volume with mode `0755` prevents the app user from creating compilation files.
 The image defaults to `COMPILATION_TMP_DIR=/work/mm-compile` and
 `MAVEN_OPTS=-Dmaven.repo.local=/work/.m2/repository`. If `COMPILE_MAVEN_OPTS`
 overrides Maven options, include a repository path on the writable volume.
+The image also creates an app-owned `/work/tmp` directory for deployments that
+set `TMPDIR`, `TMP`, and `TEMP` to `/work/tmp`. Point these variables only at
+directories that exist in the image. The startup `prisma migrate deploy`
+resolves the temp directory and exits with `ENOENT` if it is missing, which
+stops the task before the API starts.
 
 ## Service base path
 
@@ -137,6 +142,7 @@ The failure template receives the same data fields as the success template: `mem
 | `DEFAULT_TEST_TIMEOUT_MS`          | No                    | `90000`                                                                     | Default test timeout returned by `GET /challenge/defaults`                                                 |
 | `DEFAULT_COMPILE_TIMEOUT_MS`       | No                    | `120000`                                                                    | Default compile timeout returned by `GET /challenge/defaults`                                              |
 | `DEFAULT_SYSTEM_TEST_TIMEOUT_MS`   | No                    | `86400000`                                                                  | Default total SYSTEM scoring timeout returned by `GET /challenge/defaults`                                 |
+| `DEFAULT_MEMORY_LIMIT_MB`          | No                    | `2048`                                                                      | Default ECS scorer task memory limit (MiB) returned by `GET /challenge/defaults`                           |
 | `DEFAULT_TASK_DEFINITION_NAME`     | No                    | empty string                                                                | Default ECS task definition family returned by `GET /challenge/defaults`                                   |
 | `DEFAULT_TASK_DEFINITION_VERSION`  | No                    | empty string                                                                | Default ECS task definition revision returned by `GET /challenge/defaults`                                 |
 | `COMPILE_TIMEOUT_MS`               | No                    | `120000`                                                                    | Maven tester compilation timeout                                                                           |

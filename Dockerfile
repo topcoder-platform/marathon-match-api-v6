@@ -35,8 +35,10 @@ ENV COMPILATION_TMP_DIR=/work/mm-compile
 ENV MAVEN_OPTS="-Dmaven.repo.local=/work/.m2/repository"
 
 # ECS initializes the matching /work volume from this image, including ownership.
-# Both compilation workspaces and Maven's cache must be writable by USER app.
-RUN mkdir -p /work/mm-compile /work/.m2/repository \
+# Compilation workspaces, Maven's cache, and the TMPDIR/TMP/TEMP target
+# (/work/tmp in ECS config) must exist and be writable by USER app; Prisma's
+# startup migration resolves TMPDIR and exits if the directory is missing.
+RUN mkdir -p /work/mm-compile /work/.m2/repository /work/tmp \
     && chown -R app:app /work
 VOLUME ["/work"]
 
