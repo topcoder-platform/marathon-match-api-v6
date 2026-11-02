@@ -16,11 +16,12 @@ describe('ECS runner isolation image wiring', () => {
     expect(dockerfile).toMatch(
       /-DMM_INSTALL_SOCKET_FILTER=0\s+\\\s+-DMM_SUPERVISE_CHILD=1\s+\\\s+-DMM_DROP_SUPERVISOR_PRIVS=1\s+\\\s+-DMM_ISOLATED_UMASK=0007\s+\\\s+-o \/usr\/local\/bin\/mm-runner-isolate/,
     );
+    expect(dockerfile).toContain('addgroup -g 10001 runner');
     expect(dockerfile).toContain(
-      'useradd --create-home --uid 10000 --gid runner --shell /usr/sbin/nologin runner-parent',
+      'adduser -D -u 10000 -G runner -s /sbin/nologin runner-parent',
     );
     expect(dockerfile).toContain(
-      'useradd --create-home --uid 10001 --gid runner --shell /usr/sbin/nologin runner',
+      'adduser -D -u 10001 -G runner -s /sbin/nologin runner',
     );
     expect(dockerfile).toContain(
       'chown root:runner /usr/local/bin/mm-runner-isolate /usr/local/bin/mm-scorer-isolate',
@@ -35,6 +36,10 @@ describe('ECS runner isolation image wiring', () => {
     const dockerfile = readRepoFile('ecs-runner/Dockerfile');
     const helperSource = readRepoFile('ecs-runner/scripts/mm-net-isolate.c');
 
+    expect(dockerfile).toContain('addgroup -g 10002 scorer');
+    expect(dockerfile).toContain(
+      'adduser -D -u 10002 -G scorer -s /sbin/nologin scorer',
+    );
     expect(dockerfile).toMatch(
       /-DMM_ENABLE_ADMIN_MODES=1\s+\\\s+-DMM_SUPERVISE_CHILD=1\s+\\\s+-DMM_DROP_SUPERVISOR_PRIVS=1\s+\\\s+-DMM_ENABLE_FS_SANDBOX=1\s+\\\s+-o \/usr\/local\/bin\/mm-scorer-isolate/,
     );
