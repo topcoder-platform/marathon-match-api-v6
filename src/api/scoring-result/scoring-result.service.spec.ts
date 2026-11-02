@@ -1377,8 +1377,7 @@ describe('ScoringResultService', () => {
 
     const secondSubmissionPayload = upsertReviewSummationSpy.mock
       .calls[2][2] as
-      | { aggregateScore: number; submissionId: string }
-      | undefined;
+      { aggregateScore: number; submissionId: string } | undefined;
 
     expect(secondSubmissionPayload).toEqual(
       expect.objectContaining({

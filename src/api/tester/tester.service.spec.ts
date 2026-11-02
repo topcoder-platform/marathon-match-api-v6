@@ -159,7 +159,7 @@ describe('TesterService', () => {
     const result = await service.listTesters({
       page: 1,
       perPage: 20,
-    } as never);
+    });
 
     expect(result.testers).toEqual([testerSummary]);
     expect(prisma.tester.findMany).toHaveBeenCalledWith(
@@ -191,7 +191,7 @@ describe('TesterService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -230,7 +230,7 @@ describe('TesterService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -276,7 +276,7 @@ describe('TesterService', () => {
       {
         isMachine: false,
         userId: '40051399',
-      } as never,
+      },
     );
 
     expect(result).toEqual({
@@ -351,7 +351,7 @@ describe('TesterService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
 
@@ -388,7 +388,7 @@ describe('TesterService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
 

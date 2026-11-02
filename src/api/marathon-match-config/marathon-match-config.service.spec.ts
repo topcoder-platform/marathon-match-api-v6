@@ -194,11 +194,11 @@ describe('MarathonMatchConfigService', () => {
         {
           ...createConfigPayload(),
           memoryLimit: 3000,
-        } as never,
+        },
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toThrow(
       'memoryLimit 3000 MiB is not supported by Fargate for a task with 1024 CPU units.',
@@ -251,7 +251,7 @@ describe('MarathonMatchConfigService', () => {
       {
         isMachine: false,
         userId: '40051399',
-      } as never,
+      },
     );
 
     expect(ecsService.getTaskDefinitionCpu).toHaveBeenCalledWith(
@@ -279,10 +279,14 @@ describe('MarathonMatchConfigService', () => {
     ecsService.getTaskDefinitionCpu.mockResolvedValue('2048');
 
     await expect(
-      service.updateConfig('30000123', { taskDefinitionVersion: '8' }, {
-        isMachine: false,
-        userId: '40051399',
-      } as never),
+      service.updateConfig(
+        '30000123',
+        { taskDefinitionVersion: '8' },
+        {
+          isMachine: false,
+          userId: '40051399',
+        },
+      ),
     ).rejects.toThrow(BadRequestException);
 
     expect(ecsService.getTaskDefinitionCpu).toHaveBeenCalledWith(
@@ -338,7 +342,7 @@ describe('MarathonMatchConfigService', () => {
     const result = await service.getConfig('30000123', {
       isMachine: false,
       userId: '40051399',
-    } as never);
+    });
 
     expect(result.reviewScorecardId).toBe(
       'f6f937cb-3b71-43fd-8ecf-2f0d76db44db',
@@ -385,7 +389,7 @@ describe('MarathonMatchConfigService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toThrow(BadRequestException);
 
@@ -1050,7 +1054,7 @@ describe('MarathonMatchConfigService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toMatchObject({
       response: expect.objectContaining({
@@ -1163,7 +1167,7 @@ describe('MarathonMatchConfigService', () => {
         {
           isMachine: false,
           userId: '40051399',
-        } as never,
+        },
       ),
     ).rejects.toThrow(BadRequestException);
 
@@ -1253,7 +1257,7 @@ describe('MarathonMatchConfigService', () => {
       const rerunPromise = service.rerunLatestSubmissions(challengeId, {
         isMachine: false,
         userId: '40051399',
-      } as never);
+      });
 
       await flushPromises();
 
@@ -1342,7 +1346,7 @@ describe('MarathonMatchConfigService', () => {
       service.rerunLatestSubmissions('30000123', {
         isMachine: false,
         userId: '40051399',
-      } as never),
+      }),
     ).rejects.toThrow(BadRequestException);
 
     expect(httpService.get).toHaveBeenCalledTimes(1);
@@ -1575,7 +1579,7 @@ describe('MarathonMatchConfigService', () => {
       {
         isMachine: false,
         userId: '40051399',
-      } as never,
+      },
     );
 
     expect(prisma.phaseConfig.create).toHaveBeenCalledWith({
@@ -1606,14 +1610,10 @@ describe('MarathonMatchConfigService', () => {
     );
 
     await expect(
-      service.createConfig(
-        '30000999',
-        createConfigPayload() as never,
-        {
-          isMachine: false,
-          userId: '40051399',
-        } as never,
-      ),
+      service.createConfig('30000999', createConfigPayload() as never, {
+        isMachine: false,
+        userId: '40051399',
+      }),
     ).rejects.toThrow(NotFoundException);
 
     expect(prisma.tester.findUnique).not.toHaveBeenCalled();
@@ -1657,14 +1657,10 @@ describe('MarathonMatchConfigService', () => {
       );
 
     await expect(
-      service.createConfig(
-        '30000123',
-        createConfigPayload() as never,
-        {
-          isMachine: false,
-          userId: '40051399',
-        } as never,
-      ),
+      service.createConfig('30000123', createConfigPayload() as never, {
+        isMachine: false,
+        userId: '40051399',
+      }),
     ).rejects.toThrow(BadRequestException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -1717,14 +1713,10 @@ describe('MarathonMatchConfigService', () => {
       );
 
     await expect(
-      service.createConfig(
-        '30000123',
-        createConfigPayload() as never,
-        {
-          isMachine: false,
-          userId: '40051399',
-        } as never,
-      ),
+      service.createConfig('30000123', createConfigPayload() as never, {
+        isMachine: false,
+        userId: '40051399',
+      }),
     ).rejects.toThrow(ConflictException);
 
     expect(prismaErrorService.handleError).toHaveBeenCalledWith(

@@ -113,13 +113,9 @@ const checkForNestedUpdateCreateOps = (
 
       const nestedContainer = value as Record<string, any>;
       const nestedCreate = nestedContainer.create as
-        | object
-        | Array<object>
-        | undefined;
+        object | Array<object> | undefined;
       const nestedUpdate = nestedContainer.update as
-        | object
-        | Array<object>
-        | undefined;
+        object | Array<object> | undefined;
 
       if (nestedCreate) {
         // Nested creates should receive both createdBy and updatedBy fields.

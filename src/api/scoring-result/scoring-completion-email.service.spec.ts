@@ -1,5 +1,10 @@
 import { createBusApiClient } from 'tc-core-library-js';
-jest.mock('tc-core-library-js', () => ({ ...jest.requireActual('tc-core-library-js'), createBusApiClient: jest.fn() }));
+jest.mock('tc-core-library-js', () => ({
+  ...jest.requireActual<typeof import('tc-core-library-js')>(
+    'tc-core-library-js',
+  ),
+  createBusApiClient: jest.fn(),
+}));
 import { of, firstValueFrom } from 'rxjs';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 
@@ -41,10 +46,13 @@ describe('ScoringCompletionEmailService', () => {
       post: jest.fn(),
     };
     jest.mocked(createBusApiClient).mockImplementation((config) => ({
-      postEvent: async (event) => firstValueFrom(httpService.post(config.BUSAPI_URL!, event, {
-        headers: { Authorization: `Bearer ${await config.getToken!()}` },
-        timeout: config.timeoutMs,
-      })) as never,
+      postEvent: async (event) =>
+        firstValueFrom(
+          httpService.post(config.BUSAPI_URL!, event, {
+            headers: { Authorization: `Bearer ${await config.getToken!()}` },
+            timeout: config.timeoutMs,
+          }),
+        ) as never,
     }));
 
     const prisma = {

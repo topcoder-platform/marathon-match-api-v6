@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=26.5.1
+ARG NODE_VERSION=26.12.1
 ARG ALPINE_VERSION=3.24
 
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS build
@@ -15,7 +15,7 @@ COPY . .
 RUN npm install --global pnpm@${PNPM_VERSION}
 RUN pnpm install --frozen-lockfile
 RUN pnpm run lint
-RUN pnpm run build
+RUN pnpm run build && pnpm test --runInBand && pnpm test:dependency-compat
 RUN pnpm prune --prod
 RUN node node_modules/prisma/build/index.js generate
 

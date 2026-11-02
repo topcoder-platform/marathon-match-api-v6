@@ -47,10 +47,7 @@ export class KafkaModule {
     const saslUsername = process.env.KAFKA_SASL_USERNAME?.trim();
     const saslPassword = process.env.KAFKA_SASL_PASSWORD ?? '';
     const saslMechanism = process.env.KAFKA_SASL_MECHANISM as
-      | 'plain'
-      | 'scram-sha-256'
-      | 'scram-sha-512'
-      | undefined;
+      'plain' | 'scram-sha-256' | 'scram-sha-512' | undefined;
     const configuredBrokers = brokerListValue
       ?.split(',')
       .map((broker) => broker.trim())
