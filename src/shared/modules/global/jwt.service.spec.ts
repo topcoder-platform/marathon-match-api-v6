@@ -14,9 +14,10 @@ jest.mock('tc-core-library-js', () => ({ createJwtVerifier: jest.fn() }));
 
 describe('JwtService', () => {
   const originalEnv = process.env;
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+
   const mockAxiosGet = axios.get as jest.MockedFunction<typeof axios.get>;
-  const mockJwtVerifier = jest.requireMock('tc-core-library-js').createJwtVerifier as jest.Mock;
+  const mockJwtVerifier = jest.requireMock('tc-core-library-js')
+    .createJwtVerifier as jest.Mock;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -25,10 +26,18 @@ describe('JwtService', () => {
     process.env.AUTHORIZATION_SESSION_VALIDATION_ENABLED = 'true';
 
     mockJwtVerifier.mockReset();
-    mockJwtVerifier.mockReturnValue({ verify: async (token: string) => {
-      const payload = jwt.decode(token) as jwt.JwtPayload;
-      return { ...payload, roles: payload.roles ?? [], scopes: typeof payload.scope === 'string' ? payload.scope.split(' ') : [], isMachine: payload.gty === 'client-credentials' };
-    } });
+    mockJwtVerifier.mockReturnValue({
+      verify: async (token: string) => {
+        const payload = jwt.decode(token) as jwt.JwtPayload;
+        return {
+          ...payload,
+          roles: payload.roles ?? [],
+          scopes:
+            typeof payload.scope === 'string' ? payload.scope.split(' ') : [],
+          isMachine: payload.gty === 'client-credentials',
+        };
+      },
+    });
     mockAxiosGet.mockReset();
   });
 
@@ -119,7 +128,8 @@ describe('JwtService', () => {
     const token = createToken({
       scope: 'read:marathon-match',
       gty: 'client-credentials',
-      userId: undefined, roles: undefined,
+      userId: undefined,
+      roles: undefined,
     });
 
     await expect(createService().validateToken(token)).resolves.toMatchObject({

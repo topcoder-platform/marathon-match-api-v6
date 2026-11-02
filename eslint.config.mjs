@@ -35,4 +35,12 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
     },
   },
+  {
+    files: ['**/*.spec.ts'],
+    rules: {
+      // Async mocks model Promise APIs; Jest inspects method references without calling them.
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );

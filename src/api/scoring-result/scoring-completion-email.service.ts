@@ -31,14 +31,6 @@ export interface SystemScoringCompletionEmailDetails {
   placement: string;
 }
 
-interface EventBusMessage<T> {
-  topic: string;
-  originator: string;
-  timestamp: string;
-  'mime-type': string;
-  payload: T;
-}
-
 interface EventBusEmailPayload {
   from: string;
   replyTo: string;
@@ -434,8 +426,11 @@ export class ScoringCompletionEmailService {
       BUSAPI_URL: this.buildBusEventsUrl(),
       getToken: () => Promise.resolve(token),
     }).postEvent({
-      topic: 'external.action.email', originator: 'marathon-match-api-v6',
-      timestamp: new Date().toISOString(), 'mime-type': 'application/json', payload,
+      topic: 'external.action.email',
+      originator: 'marathon-match-api-v6',
+      timestamp: new Date().toISOString(),
+      'mime-type': 'application/json',
+      payload,
     });
   }
 
@@ -581,7 +576,9 @@ export class ScoringCompletionEmailService {
       'https://api.topcoder-dev.com/v6'
     ).replace(/\/+$/, '');
 
-    return resolveBusEventsUrl(new URL(rawUrl).pathname === '/' ? `${rawUrl}/v6` : rawUrl);
+    return resolveBusEventsUrl(
+      new URL(rawUrl).pathname === '/' ? `${rawUrl}/v6` : rawUrl,
+    );
   }
 
   /**

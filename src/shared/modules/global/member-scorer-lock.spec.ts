@@ -67,7 +67,7 @@ describe('member scorer dispatch lock', () => {
       'member-1',
       async () => undefined,
     );
-    const keys = client.query.mock.calls.map((call) => call[1]);
+    const keys = client.query.mock.calls.map((call): unknown => call[1]);
     expect(keys[0]).toEqual(keys[1]);
     expect(keys[0]).not.toEqual(keys[2]);
     expect(keys[0]).not.toEqual(keys[3]);

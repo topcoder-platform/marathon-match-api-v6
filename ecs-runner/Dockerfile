@@ -6,77 +6,47 @@ WORKDIR /workspace
 COPY pom.xml /workspace/pom.xml
 COPY boilerplate/src/ /workspace/src/
 COPY src/ /workspace/src/
-RUN mvn -B -ntp clean package -DskipTests
+RUN mvn -B -ntp clean package
 
 # Runtime stage
-FROM ubuntu:24.04
+FROM alpine:3.24
 
+# Only reference assemblies are retained for the legacy C# 11 / net7.0 target.
+# Execution uses the maintained .NET 10 runtime through explicit roll-forward.
 ARG DOTNET_7_SDK_VERSION=7.0.410
 ARG DOTNET_7_SDK_SHA512=20b8e02979328e4c4a14493f7791ed419aabd0175233db80cd60e2c004b829b3e8301281ea86b27ba818372473accf5a6d553e5354c54917c8e84d25f5855caa
-ARG DOTNET_7_RUNTIME_VERSION=7.0.20
+ARG DOTNET_7_REFERENCE_VERSION=7.0.20
 ARG KOTLIN_VERSION=2.4.10
 ARG KOTLIN_COMPILER_SHA256=473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d
 
-# Standard .kt compilation does not use the main-kts scripting plugin. The
-# upstream plugin currently embeds vulnerable plexus-utils 3.4.1, so omit it.
-ENV RUSTUP_HOME=/usr/local/rustup
-ENV CARGO_HOME=/usr/local/cargo
-ENV RUSTUP_TOOLCHAIN=stable
-ENV PATH=/usr/local/cargo/bin:${PATH}
-
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        bash \
-        ca-certificates \
-        coreutils \
-        dotnet-sdk-10.0 \
-        findutils \
-        g++-14 \
-        gcc-14 \
-        gzip \
-        mono-devel \
-        openjdk-17-jdk-headless \
-        procps \
-        python3 \
-        unzip \
-        wget \
-        zip \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140 \
-    && update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 140 \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash ca-certificates coreutils dotnet10-sdk \
+        findutils g++ gcc gzip linux-headers mono mono-dev musl-dev \
+        openjdk17-jdk procps python3 rust cargo unzip wget zip \
     && wget -q "https://builds.dotnet.microsoft.com/dotnet/Sdk/${DOTNET_7_SDK_VERSION}/dotnet-sdk-${DOTNET_7_SDK_VERSION}-linux-x64.tar.gz" -O /tmp/dotnet7.tar.gz \
     && echo "${DOTNET_7_SDK_SHA512}  /tmp/dotnet7.tar.gz" | sha512sum --check --strict \
-    && mkdir -p /tmp/dotnet7 \
-    && tar -xzf /tmp/dotnet7.tar.gz -C /tmp/dotnet7 \
-    && for dotnet_path in \
-        "host/fxr/${DOTNET_7_RUNTIME_VERSION}" \
-        "packs/Microsoft.NETCore.App.Host.linux-x64/${DOTNET_7_RUNTIME_VERSION}" \
-        "packs/Microsoft.NETCore.App.Ref/${DOTNET_7_RUNTIME_VERSION}" \
-        "shared/Microsoft.NETCore.App/${DOTNET_7_RUNTIME_VERSION}"; do \
-        mkdir -p "/usr/lib/dotnet/$(dirname "${dotnet_path}")"; \
-        cp -a "/tmp/dotnet7/${dotnet_path}" "/usr/lib/dotnet/${dotnet_path}"; \
-    done \
+    && tar -xzf /tmp/dotnet7.tar.gz -C /usr/lib/dotnet \
+        "./packs/Microsoft.NETCore.App.Ref/${DOTNET_7_REFERENCE_VERSION}" \
+    && rm /tmp/dotnet7.tar.gz \
     && wget -q "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" -O /tmp/kotlin-compiler.zip \
     && echo "${KOTLIN_COMPILER_SHA256}  /tmp/kotlin-compiler.zip" | sha256sum --check --strict \
     && unzip -q /tmp/kotlin-compiler.zip -d /opt \
     && ln -s /opt/kotlinc/bin/kotlinc /usr/local/bin/kotlinc \
-    && rm -rf /tmp/dotnet7 /tmp/dotnet7.tar.gz /tmp/kotlin-compiler.zip \
-    && rm -rf /var/lib/apt/lists/* \
+    && rm /tmp/kotlin-compiler.zip \
     && java -version >/dev/null \
     && dotnet --info >/dev/null \
-    && wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
-    && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}" \
     && kotlinc -version >/dev/null \
     && rustc --version >/dev/null
 
+# Standard .kt compilation does not use this scripting plugin, which embeds
+# vulnerable plexus-utils. Other compiler and language capabilities stay installed.
 RUN rm /opt/kotlinc/lib/kotlin-main-kts.jar
 
-RUN groupadd --gid 10001 runner \
-    && useradd --create-home --uid 10000 --gid runner --shell /usr/sbin/nologin runner-parent \
-    && useradd --create-home --uid 10001 --gid runner --shell /usr/sbin/nologin runner \
-    && groupadd --gid 10002 scorer \
-    && useradd --create-home --uid 10002 --gid scorer --shell /usr/sbin/nologin scorer
+RUN addgroup -g 10001 runner \
+    && adduser -D -u 10000 -G runner -s /sbin/nologin runner-parent \
+    && adduser -D -u 10001 -G runner -s /sbin/nologin runner \
+    && addgroup -g 10002 scorer \
+    && adduser -D -u 10002 -G scorer -s /sbin/nologin scorer
 WORKDIR /app
 
 COPY --chown=runner-parent:runner --from=builder /workspace/target/mm-ecs-runner-1.0.0.jar /app/mm-ecs-runner.jar

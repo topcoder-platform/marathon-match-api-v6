@@ -512,14 +512,7 @@ export class TesterCompilationService {
 
       const child = spawn(
         this.mavenBinary,
-        [
-          'clean',
-          'package',
-          '-f',
-          pomPath,
-          '-q',
-          '-DskipTests',
-        ],
+        ['clean', 'package', '-f', pomPath, '-q', '-DskipTests'],
         {
           env: compileEnv,
         },

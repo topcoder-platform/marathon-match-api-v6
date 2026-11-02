@@ -4,7 +4,9 @@ jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
 jest.mock('src/shared/modules/global/member-scorer-lock', () => ({
-  withMemberScorerLock: jest.fn((_challengeId, _memberId, work) => work()),
+  withMemberScorerLock: jest.fn(
+    (_challengeId, _memberId, work: () => Promise<unknown>) => work(),
+  ),
 }));
 
 import { MarathonMatchSubmissionHandler } from './marathon-match-submission.handler';
@@ -760,7 +762,7 @@ describe('MarathonMatchSubmissionHandler', () => {
       release = resolve;
     });
     (withMemberScorerLock as jest.Mock).mockImplementationOnce(
-      async (_challengeId, _memberId, work) => {
+      async (_challengeId, _memberId, work: () => Promise<unknown>) => {
         await lockReady;
         return work();
       },

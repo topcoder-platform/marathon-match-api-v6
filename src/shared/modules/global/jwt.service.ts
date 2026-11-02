@@ -45,7 +45,7 @@ export const isAdmin = (user: JwtUser): boolean => {
 
 @Injectable()
 export class JwtService implements OnModuleInit {
-    private static readonly AUTHORIZATION_VALIDATION_TIMEOUT_MS = 3000;
+  private static readonly AUTHORIZATION_VALIDATION_TIMEOUT_MS = 3000;
   private static readonly TOPCODER_API_ISSUERS = new Set([
     'https://api.topcoder.com',
     'https://api.topcoder-dev.com',
@@ -397,11 +397,7 @@ export class JwtService implements OnModuleInit {
     | undefined {
     try {
       const decodedRaw = jwt.decode(token, { complete: true });
-      const decoded = decodedRaw as
-        | (jwt.Jwt & {
-            payload?: Record<string, unknown> | string;
-          })
-        | null;
+      const decoded = decodedRaw;
 
       if (!decoded || typeof decoded !== 'object') {
         return undefined;
