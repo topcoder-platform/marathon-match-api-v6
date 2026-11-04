@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "environment": "dev",
+  "accountId": "811668436784",
+  "region": "us-east-1",
+  "deployRoleArn": "arn:aws:iam::811668436784:role/marathon-match-api-v6-dev-deploy",
+  "taskRoleArn": "arn:aws:iam::811668436784:role/AmazonMarathonMatchECSServiceRole",
+  "executionRoleArn": "arn:aws:iam::811668436784:role/ecsTaskExecutionRole",
+  "cluster": "tc-mm-serverless",
+  "service": "marathon-match-api-v6",
+  "taskFamily": "marathon-match-api-v6",
+  "circleciOrgId": "947bef5e-1669-415d-b83c-4fc85155b7df",
+  "circleciProjectId": "bae55d29-04de-4eb7-9eac-cce82da59bf8",
+  "repository": "github.com/topcoder-platform/marathon-match-api-v6",
+  "branch": "develop",
+  "images": {
+    "marathon-match-api-v6": "marathon-match-api-v6"
+  }
+}
