@@ -65,6 +65,7 @@ describe('JwtService', () => {
   function createToken(payload: Record<string, unknown>): string {
     return jwt.sign(
       {
+        emailVerified: true,
         iss: 'https://api.topcoder-dev.com',
         userId: '123',
         handle: 'tester',
