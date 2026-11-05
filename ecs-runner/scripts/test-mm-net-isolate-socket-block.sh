@@ -32,7 +32,7 @@ def socket_syscall_number():
     raise RuntimeError(f"unsupported machine for test: {machine}")
 
 
-libc = ctypes.CDLL("libc.so.6", use_errno=True)
+libc = ctypes.CDLL(None, use_errno=True)
 libc.syscall.restype = ctypes.c_long
 
 ctypes.set_errno(0)

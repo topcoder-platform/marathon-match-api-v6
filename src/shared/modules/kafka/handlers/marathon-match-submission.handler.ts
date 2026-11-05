@@ -26,5 +26,4 @@ export interface MarathonMatchSubmissionEventEnvelope {
  * an event-bus envelope (production publish through tc-bus).
  */
 export type MarathonMatchSubmissionKafkaMessage =
-  | MarathonMatchSubmissionEventPayload
-  | MarathonMatchSubmissionEventEnvelope;
+  MarathonMatchSubmissionEventPayload | MarathonMatchSubmissionEventEnvelope;

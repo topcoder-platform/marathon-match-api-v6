@@ -8,7 +8,9 @@ import {
 } from '@aws-sdk/client-ecs';
 
 jest.mock('@aws-sdk/client-ecs', () => ({
-  ...jest.requireActual('@aws-sdk/client-ecs'),
+  ...jest.requireActual<typeof import('@aws-sdk/client-ecs')>(
+    '@aws-sdk/client-ecs',
+  ),
   waitUntilTasksStopped: jest.fn(),
 }));
 
@@ -1064,19 +1066,19 @@ describe('EcsService', () => {
       beforeStop,
     );
 
-    expect(beforeStop.mock.calls.map(([task]) => task.phaseConfigType)).toEqual(
-      ['EXAMPLE', 'PROVISIONAL'],
-    );
+    expect(
+      beforeStop.mock.calls.map(([task]): unknown => task.phaseConfigType),
+    ).toEqual(['EXAMPLE', 'PROVISIONAL']);
     expect(cancelledTasks).toEqual([
       expect.objectContaining({
         taskArn: 'old-provisional-task',
         phaseConfigType: 'PROVISIONAL',
       }),
     ]);
-    expect(waitUntilTasksStopped).toHaveBeenCalledWith(
-      expect.anything(),
-      { cluster: 'cluster-1', tasks: ['old-provisional-task'] },
-    );
+    expect(waitUntilTasksStopped).toHaveBeenCalledWith(expect.anything(), {
+      cluster: 'cluster-1',
+      tasks: ['old-provisional-task'],
+    });
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({
         taskArn: 'old-example-task',

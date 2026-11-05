@@ -5706,6 +5706,8 @@ public class EcsRunnerMain {
                     "  <PropertyGroup>",
                     "    <TargetFramework>" + targetFramework + "</TargetFramework>",
                     "    <OutputType>Exe</OutputType>",
+                    "    <UseAppHost>false</UseAppHost>",
+                    "    <RollForward>Major</RollForward>",
                     "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>",
                     "  </PropertyGroup>",
                     "</Project>"

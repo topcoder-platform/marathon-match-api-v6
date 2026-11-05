@@ -4,15 +4,15 @@ This image is the runtime container for marathon match scoring tasks launched by
 
 ## What this image includes
 
-- Ubuntu OpenJDK 17 JDK/runtime for runner execution and Java submission compilation; Java submissions remain targeted to the Java 11 language/API level with `javac --release 11`
+- Alpine 3.24 OpenJDK 17 JDK/runtime for runner execution and Java submission compilation; Java submissions remain targeted to the Java 11 language/API level with `javac --release 11`
 - `mm-ecs-runner.jar` built from this folder
 - utility packages needed by common tester flows (`bash`, `coreutils`, `zip`, `unzip`)
-- C++23 toolchain support for tester-side submission compilation (`g++` via GCC 14)
+- C++23 toolchain support for tester-side submission compilation (`g++` via GCC 15)
 - Kotlin/JVM 2.4.10 compiler support for tester-side `.kt` submission compilation (`kotlinc`); the unused main-kts scripting plugin is omitted
-- Python 3.12 runtime support for tester-side submission execution (`python3`)
+- Python 3 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
-- C# (.NET 7 / C# 11 and .NET 10 / C# 14) support for tester-side submission compilation (`dotnet publish`); the maintained .NET 10 SDK compiles both targets and the image retains only the .NET 7 reference, host, and runtime packs required by `net7.0`
-- Rust latest stable compiler support for tester-side submission compilation (`rustc`)
+- C# (.NET 7 / C# 11 and .NET 10 / C# 14) support for tester-side submission compilation (`dotnet publish`); the maintained .NET 10 SDK compiles both targets and the image retains only the .NET 7 reference assemblies required to compile `net7.0`. Generated projects set `UseAppHost=false` and `RollForward=Major`, so both targets execute on patched .NET 10. The unsupported .NET 7 runtime is no longer installed
+- Alpine-maintained Rust compiler support for tester-side submission compilation (`rustc`)
 - native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, restrict submitted-solution filesystem access, block `io_uring`, and block non-`AF_UNIX` sockets for submitted solution processes
 
 ## Isolation model
@@ -165,3 +165,16 @@ The default process reports uid `10000` and exits quickly unless all required sc
 This compiles the native helper in no-user-drop test mode, runs a Python
 `ctypes` raw `socket` syscall probe under seccomp, and verifies that an
 `AF_INET` socket is denied while `AF_UNIX` socket pairs still work.
+
+## Runtime regression checks
+
+After building the image, run both checks without overriding its default non-root user:
+
+```bash
+docker run --rm --entrypoint /app/scripts/test-languages.sh mm-ecs-runner:local
+docker run --rm --entrypoint bash -v "$PWD:/source:ro" mm-ecs-runner:local /source/ecs-runner/scripts/test-mm-net-isolate-socket-block.sh
+```
+
+The language check invokes the actual runner compiler and scorer isolation bridge for Java, C++23, Python, Kotlin, Rust, Mono C#, legacy C# 11/net7.0, and C# 14/net10.0. The socket check verifies raw Internet socket calls remain blocked while Unix socket pairs work. Maven tests run during image construction.
+
+The distribution change uses musl instead of glibc and newer maintained compilers. Legacy `net7.0` submissions retain their compile-time API surface but execute on .NET 10; challenge-specific behavior and scoring should be checked in staging before promotion.

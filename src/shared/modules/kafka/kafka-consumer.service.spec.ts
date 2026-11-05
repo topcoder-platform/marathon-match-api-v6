@@ -434,9 +434,7 @@ describe('KafkaConsumerService recovery', () => {
     await (
       service as unknown as {
         consumeStream: (
-          messageStream: AsyncIterable<
-            Message<Buffer, Buffer, Buffer, Buffer>
-          >,
+          messageStream: AsyncIterable<Message<Buffer, Buffer, Buffer, Buffer>>,
         ) => Promise<void>;
       }
     ).consumeStream(stream);

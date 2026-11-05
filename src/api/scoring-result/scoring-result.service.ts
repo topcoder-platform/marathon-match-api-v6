@@ -4567,7 +4567,7 @@ export class ScoringResultService {
       return undefined;
     }
 
-    return value as Prisma.InputJsonValue;
+    return value;
   }
 
   /**

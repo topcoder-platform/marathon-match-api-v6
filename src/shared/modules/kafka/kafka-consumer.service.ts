@@ -45,10 +45,7 @@ export interface KafkaHealthStatus {
 }
 
 export type KafkaSaslMechanism =
-  | 'plain'
-  | 'scram-sha-256'
-  | 'scram-sha-512'
-  | 'oauthbearer';
+  'plain' | 'scram-sha-256' | 'scram-sha-512' | 'oauthbearer';
 
 export interface KafkaSaslOptions {
   mechanism: KafkaSaslMechanism;

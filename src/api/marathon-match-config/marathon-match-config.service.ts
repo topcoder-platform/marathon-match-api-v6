@@ -1028,10 +1028,7 @@ export class MarathonMatchConfigService {
             ),
         );
 
-        totalPages = parseTotalPages(
-          response.data,
-          response.headers as Record<string, unknown> | undefined,
-        );
+        totalPages = parseTotalPages(response.data, response.headers);
         page += 1;
       } while (page <= totalPages);
 
@@ -1662,7 +1659,7 @@ export class MarathonMatchConfigService {
       return undefined;
     }
 
-    return value as Record<string, unknown>;
+    return value;
   }
 
   /**
@@ -1756,10 +1753,7 @@ export class MarathonMatchConfigService {
         reviews.push(candidate);
       }
 
-      totalPages = this.parseTotalPages(
-        response.data,
-        response.headers as Record<string, unknown> | undefined,
-      );
+      totalPages = this.parseTotalPages(response.data, response.headers);
       page += 1;
     } while (page <= totalPages);
 

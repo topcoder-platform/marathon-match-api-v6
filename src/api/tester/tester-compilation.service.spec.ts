@@ -130,14 +130,16 @@ describe('TesterCompilationService', () => {
   });
 
   it('uses a writable configured volume when the root filesystem is read-only', async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mm-compile-root-'));
+    const tempDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'mm-compile-root-'),
+    );
     tempDirs.push(tempDir);
     jest.replaceProperty(process, 'env', {
       ...process.env,
       COMPILATION_TMP_DIR: tempDir,
     });
     const service = createService();
-    const realMkdir = fs.mkdir.bind(fs);
+    const realMkdir: typeof fs.mkdir = fs.mkdir.bind(fs);
     jest.spyOn(fs, 'mkdir').mockImplementation((candidate, options) => {
       if (candidate !== tempDir) {
         return Promise.reject(new Error('EROFS: read-only file system'));
@@ -190,14 +192,7 @@ describe('TesterCompilationService', () => {
     });
     expect(mockedSpawn).toHaveBeenCalledWith(
       'mvn',
-      [
-        'clean',
-        'package',
-        '-f',
-        '/tmp/project/pom.xml',
-        '-q',
-        '-DskipTests',
-      ],
+      ['clean', 'package', '-f', '/tmp/project/pom.xml', '-q', '-DskipTests'],
       {
         env: expect.objectContaining({
           JANSI_MODE: 'off',

@@ -70,8 +70,7 @@ export class CompilationWorkerService implements OnModuleInit, OnModuleDestroy {
       } as unknown as PgBoss.WorkOptions,
       async (
         jobOrJobs:
-          | PgBoss.Job<CompileTesterJobData>[]
-          | PgBoss.Job<CompileTesterJobData>,
+          PgBoss.Job<CompileTesterJobData>[] | PgBoss.Job<CompileTesterJobData>,
       ) => {
         const jobs = Array.isArray(jobOrJobs) ? jobOrJobs : [jobOrJobs];
 

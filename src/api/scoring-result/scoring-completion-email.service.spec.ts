@@ -1,4 +1,11 @@
-import { of } from 'rxjs';
+import { createBusApiClient } from 'tc-core-library-js';
+jest.mock('tc-core-library-js', () => ({
+  ...jest.requireActual<typeof import('tc-core-library-js')>(
+    'tc-core-library-js',
+  ),
+  createBusApiClient: jest.fn(),
+}));
+import { of, firstValueFrom } from 'rxjs';
 import { LoggerService } from 'src/shared/modules/global/logger.service';
 
 jest.mock('src/shared/modules/global/prisma.service', () => ({
@@ -38,6 +45,16 @@ describe('ScoringCompletionEmailService', () => {
       get: jest.fn(),
       post: jest.fn(),
     };
+    jest.mocked(createBusApiClient).mockImplementation((config) => ({
+      postEvent: async (event) =>
+        firstValueFrom(
+          httpService.post(config.BUSAPI_URL!, event, {
+            headers: { Authorization: `Bearer ${await config.getToken!()}` },
+            timeout: config.timeoutMs,
+          }),
+        ) as never,
+    }));
+
     const prisma = {
       $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn(),
@@ -61,7 +78,7 @@ describe('ScoringCompletionEmailService', () => {
     jest.clearAllMocks();
     process.env = {
       ...originalEnv,
-      BUS_API_URL: 'https://api.topcoder-dev.com/v5',
+      BUS_API_URL: 'https://api.topcoder-dev.com/v6',
       MEMBER_API_URL: 'https://api.topcoder-dev.com/v6',
       SENDGRID_TEMPLATE_ID_SCORING_COMPLETE: 'sendgrid-template-id',
       SENDGRID_TEMPLATE_ID_SCORING_FAILED: 'failed-template-id',
@@ -106,7 +123,7 @@ describe('ScoringCompletionEmailService', () => {
     );
 
     expect(httpService.post).toHaveBeenCalledWith(
-      'https://api.topcoder-dev.com/v5/bus/events',
+      'https://api.topcoder-dev.com/v6/bus/events',
       expect.objectContaining({
         payload: expect.objectContaining({
           recipients: ['competitor@example.com'],
@@ -172,7 +189,7 @@ describe('ScoringCompletionEmailService', () => {
       }),
     );
     expect(httpService.post).toHaveBeenCalledWith(
-      'https://api.topcoder-dev.com/v5/bus/events',
+      'https://api.topcoder-dev.com/v6/bus/events',
       expect.objectContaining({
         payload: expect.objectContaining({
           data: expect.objectContaining({
@@ -204,7 +221,7 @@ describe('ScoringCompletionEmailService', () => {
 
     expect(httpService.post).toHaveBeenCalledTimes(1);
     expect(httpService.post).toHaveBeenCalledWith(
-      'https://api.topcoder-dev.com/v5/bus/events',
+      'https://api.topcoder-dev.com/v6/bus/events',
       expect.objectContaining({
         topic: 'external.action.email',
         payload: expect.objectContaining({
@@ -273,7 +290,7 @@ describe('ScoringCompletionEmailService', () => {
     ).resolves.toBe(undefined);
 
     expect(httpService.post).toHaveBeenCalledWith(
-      'https://api.topcoder-dev.com/v5/bus/events',
+      'https://api.topcoder-dev.com/v6/bus/events',
       expect.objectContaining({
         payload: expect.objectContaining({
           recipients: ['competitor@example.com'],
@@ -326,7 +343,7 @@ describe('ScoringCompletionEmailService', () => {
     ).resolves.toBe(undefined);
 
     expect(httpService.post).toHaveBeenCalledWith(
-      'https://api.topcoder-dev.com/v5/bus/events',
+      'https://api.topcoder-dev.com/v6/bus/events',
       expect.objectContaining({
         payload: expect.objectContaining({
           data: expect.objectContaining({
