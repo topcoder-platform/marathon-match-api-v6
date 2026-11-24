@@ -55,7 +55,7 @@ Optional variables:
 - `PLATFORM`: Docker platform target (default `linux/amd64`).
 - `PUSH_LATEST`: set to `false` to skip `:latest`.
 
-The script prints the final pushed image URI(s), which can be referenced directly in an ECS task definition.
+Release builds pull current base images and refresh the Alpine runtime packages even when a previous build is cached. The script prints the final pushed image URI(s), which can be referenced directly in an ECS task definition.
 
 ## Configure marathon-match-api-v6 to use the image
 

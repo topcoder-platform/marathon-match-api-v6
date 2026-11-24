@@ -44,6 +44,8 @@ if [[ "${PUSH_LATEST}" == "true" ]]; then
 fi
 
 docker buildx build \
+  --pull \
+  --no-cache-filter runtime \
   --platform "${PLATFORM}" \
   -f "${RUNNER_DIR}/Dockerfile" \
   "${TAG_ARGS[@]}" \
