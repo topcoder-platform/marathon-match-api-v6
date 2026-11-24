@@ -9,7 +9,7 @@ COPY src/ /workspace/src/
 RUN mvn -B -ntp clean package
 
 # Runtime stage
-FROM alpine:3.24
+FROM alpine:3.24 AS runtime
 
 # Only reference assemblies are retained for the legacy C# 11 / net7.0 target.
 # Execution uses the maintained .NET 10 runtime through explicit roll-forward.
@@ -31,16 +31,14 @@ RUN apk upgrade --no-cache \
     && wget -q "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" -O /tmp/kotlin-compiler.zip \
     && echo "${KOTLIN_COMPILER_SHA256}  /tmp/kotlin-compiler.zip" | sha256sum --check --strict \
     && unzip -q /tmp/kotlin-compiler.zip -d /opt \
+    # Plain .kt compilation does not require the main-kts plugin or its bundled plexus-utils.
+    && rm /opt/kotlinc/lib/kotlin-main-kts.jar \
     && ln -s /opt/kotlinc/bin/kotlinc /usr/local/bin/kotlinc \
     && rm /tmp/kotlin-compiler.zip \
     && java -version >/dev/null \
     && dotnet --info >/dev/null \
     && kotlinc -version >/dev/null \
     && rustc --version >/dev/null
-
-# Standard .kt compilation does not use this scripting plugin, which embeds
-# vulnerable plexus-utils. Other compiler and language capabilities stay installed.
-RUN rm /opt/kotlinc/lib/kotlin-main-kts.jar
 
 RUN addgroup -g 10001 runner \
     && adduser -D -u 10000 -G runner -s /sbin/nologin runner-parent \
