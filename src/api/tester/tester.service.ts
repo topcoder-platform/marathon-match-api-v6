@@ -14,11 +14,11 @@ import {
   TesterPaginatedResponseDto,
   TesterResponseDto,
   TesterSummaryResponseDto,
-} from 'src/dto/tester.dto';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
+} from '../../dto/tester.dto';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { PrismaErrorService } from '../../shared/modules/global/prisma-error.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
 import { TesterCompilationService } from './tester-compilation.service';
 
 export interface UpdateTesterResult {

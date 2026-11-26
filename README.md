@@ -4,7 +4,7 @@ NestJS service for managing marathon match scorer configuration, compiling teste
 
 ## Development runtime
 
-Use Node.js 26.5.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
+Use Node.js 26.13.1 and pnpm 11.15.1. Run `nvm use` in this project before running pnpm commands.
 The production image uses Alpine's dynamically linked Node.js package and
 patched system OpenSSL, and runs as the unprivileged `app` user (UID 10001).
 Both Docker stages use the same Alpine release. The runtime accepts Alpine's

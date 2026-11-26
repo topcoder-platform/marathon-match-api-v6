@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 import { TesterCompilationService } from './tester-compilation.service';
 

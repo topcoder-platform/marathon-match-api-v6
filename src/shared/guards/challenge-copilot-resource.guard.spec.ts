@@ -1,9 +1,9 @@
 import { HttpService } from '@nestjs/axios';
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
+import { Scope } from '../enums/scopes.enum';
+import { UserRole } from '../enums/userRole.enum';
+import { JwtUser } from '../modules/global/jwt.service';
 import { ChallengeCopilotResourceGuard } from './challenge-copilot-resource.guard';
 
 type TestRequest = {

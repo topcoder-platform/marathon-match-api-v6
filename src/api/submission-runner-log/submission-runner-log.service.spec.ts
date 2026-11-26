@@ -1,7 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { of } from 'rxjs';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { UserRole } from '../../shared/enums/userRole.enum';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 jest.mock('src/shared/modules/global/m2m.service', () => ({
   M2MService: class M2MService {},

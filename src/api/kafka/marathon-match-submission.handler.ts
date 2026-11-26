@@ -3,22 +3,22 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
 import type { AxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
-import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
-import { M2MService } from 'src/shared/modules/global/m2m.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { withMemberScorerLock } from 'src/shared/modules/global/member-scorer-lock';
+import { resolveSubmissionApiBaseUrl } from '../../shared/config/submission-api-url.config';
+import { M2MService } from '../../shared/modules/global/m2m.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
+import { withMemberScorerLock } from '../../shared/modules/global/member-scorer-lock';
 import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
-} from 'src/shared/modules/global/ecs.service';
-import { BaseEventHandler } from 'src/shared/modules/kafka/base-event.handler';
+} from '../../shared/modules/global/ecs.service';
+import { BaseEventHandler } from '../../shared/modules/kafka/base-event.handler';
 import {
   MarathonMatchSubmissionEventEnvelope,
   MarathonMatchSubmissionEventPayload,
   MarathonMatchSubmissionKafkaMessage,
-} from 'src/shared/modules/kafka/handlers/marathon-match-submission.handler';
-import { KafkaHandlerRegistry } from 'src/shared/modules/kafka/kafka-handler.registry';
+} from '../../shared/modules/kafka/handlers/marathon-match-submission.handler';
+import { KafkaHandlerRegistry } from '../../shared/modules/kafka/kafka-handler.registry';
 
 interface ChallengePhaseResponse {
   id?: string;

@@ -15,7 +15,7 @@ jest.mock('nanoid', () => ({
 }));
 
 import { MarathonMatchConfigService } from './marathon-match-config.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 describe('MarathonMatchConfigService', () => {
   const mockLogger = {

@@ -29,14 +29,14 @@ import {
   TesterPaginatedResponseDto,
   TesterResponseQueryDto,
   TesterResponseDto,
-} from 'src/dto/tester.dto';
-import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
-import { Scopes } from 'src/shared/decorators/scopes.decorator';
-import { User } from 'src/shared/decorators/user.decorator';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { Roles } from 'src/shared/guards/tokenRoles.guard';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
+} from '../../dto/tester.dto';
+import { PaginationHeaderInterceptor } from '../../interceptors/PaginationHeaderInterceptor';
+import { Scopes } from '../../shared/decorators/scopes.decorator';
+import { User } from '../../shared/decorators/user.decorator';
+import { Scope } from '../../shared/enums/scopes.enum';
+import { UserRole } from '../../shared/enums/userRole.enum';
+import { Roles } from '../../shared/guards/tokenRoles.guard';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
 import { TesterService, UpdateTesterResult } from './tester.service';
 
 /**

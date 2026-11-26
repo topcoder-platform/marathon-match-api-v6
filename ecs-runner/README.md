@@ -11,7 +11,7 @@ This image is the runtime container for marathon match scoring tasks launched by
 - Kotlin/JVM 2.4.10 compiler support for tester-side `.kt` submission compilation (`kotlinc`); the unused main-kts scripting plugin is omitted
 - Python 3 runtime support for tester-side submission execution (`python3`)
 - C# (Mono) compiler/runtime support for tester-side submission compilation and execution (`mcs`, `mono`)
-- C# (.NET 7 / C# 11 and .NET 10 / C# 14) support for tester-side submission compilation (`dotnet publish`); the maintained .NET 10 SDK compiles both targets and the image retains only the .NET 7 reference assemblies required to compile `net7.0`. Generated projects set `UseAppHost=false` and `RollForward=Major`, so both targets execute on patched .NET 10. The unsupported .NET 7 runtime is no longer installed
+- C# (.NET 7 / C# 11 and .NET 10 / C# 14) support for tester-side submission compilation (`dotnet publish`); the maintained .NET 10 SDK compiles both targets and the image retains only the .NET 7 reference assemblies required to compile `net7.0`. Generated console projects use the installed targeting packs and skip downloads for unused frameworks. They set `UseAppHost=false` and `RollForward=Major`, so both targets execute on patched .NET 10. The unsupported .NET 7 runtime is no longer installed
 - Alpine-maintained Rust compiler support for tester-side submission compilation (`rustc`)
 - native `mm-runner-isolate` and `mm-scorer-isolate` helpers that scrub the child JVM environment, run the tester JVM as the non-root `runner` user, run submitted solutions as the separate non-root `scorer` user, restrict submitted-solution filesystem access, block `io_uring`, and block non-`AF_UNIX` sockets for submitted solution processes
 
@@ -55,7 +55,7 @@ Optional variables:
 - `PLATFORM`: Docker platform target (default `linux/amd64`).
 - `PUSH_LATEST`: set to `false` to skip `:latest`.
 
-The script prints the final pushed image URI(s), which can be referenced directly in an ECS task definition.
+Release builds pull current base images and refresh the Alpine runtime packages even when a previous build is cached. The script prints the final pushed image URI(s), which can be referenced directly in an ECS task definition.
 
 ## Configure marathon-match-api-v6 to use the image
 
@@ -171,7 +171,7 @@ This compiles the native helper in no-user-drop test mode, runs a Python
 After building the image, run both checks without overriding its default non-root user:
 
 ```bash
-docker run --rm --entrypoint /app/scripts/test-languages.sh mm-ecs-runner:local
+docker run --rm --network none --entrypoint /app/scripts/test-languages.sh mm-ecs-runner:local
 docker run --rm --entrypoint bash -v "$PWD:/source:ro" mm-ecs-runner:local /source/ecs-runner/scripts/test-mm-net-isolate-socket-block.sh
 ```
 
