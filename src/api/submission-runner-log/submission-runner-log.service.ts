@@ -10,12 +10,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
-import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { M2MService } from 'src/shared/modules/global/m2m.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
+import { resolveSubmissionApiBaseUrl } from '../../shared/config/submission-api-url.config';
+import { UserRole } from '../../shared/enums/userRole.enum';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { M2MService } from '../../shared/modules/global/m2m.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
 
 export interface GetSubmissionRunnerLogsOptions {
   taskArn?: string;

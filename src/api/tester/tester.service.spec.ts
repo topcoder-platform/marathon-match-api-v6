@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CompilationStatus } from '@prisma/client';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 jest.mock('nanoid', () => ({
   nanoid: jest.fn(() => 'generated-id'),

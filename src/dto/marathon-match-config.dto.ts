@@ -4,7 +4,7 @@ import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   MAX_SCORER_TASK_MEMORY_MIB,
   MIN_SCORER_TASK_MEMORY_MIB,
-} from 'src/shared/config/scorer-task-memory.config';
+} from '../shared/config/scorer-task-memory.config';
 import {
   IsBoolean,
   IsEnum,

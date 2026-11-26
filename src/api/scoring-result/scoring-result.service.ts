@@ -14,14 +14,14 @@ import {
 import { createHash } from 'crypto';
 import { Client as PgClient } from 'pg';
 import { firstValueFrom } from 'rxjs';
-import { resolveSubmissionApiBaseUrl } from 'src/shared/config/submission-api-url.config';
+import { resolveSubmissionApiBaseUrl } from '../../shared/config/submission-api-url.config';
 import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
-} from 'src/shared/modules/global/ecs.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { M2MService } from 'src/shared/modules/global/m2m.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
+} from '../../shared/modules/global/ecs.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { M2MService } from '../../shared/modules/global/m2m.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
 import {
   ScoringCompletionStatus,
   ScoringCompletionEmailService,

@@ -7,10 +7,10 @@ import {
 import { Task } from '@aws-sdk/client-ecs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import PgBoss = require('pg-boss');
-import { EcsService } from 'src/shared/modules/global/ecs.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PG_BOSS_TOKEN } from 'src/shared/modules/pg-boss/pg-boss.module';
-import { PgBossLifecycleService } from 'src/shared/modules/pg-boss/pg-boss-lifecycle.service';
+import { EcsService } from '../../shared/modules/global/ecs.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { PG_BOSS_TOKEN } from '../../shared/modules/pg-boss/pg-boss.module';
+import { PgBossLifecycleService } from '../../shared/modules/pg-boss/pg-boss-lifecycle.service';
 import { ScoringResultService } from './scoring-result.service';
 import {
   SYSTEM_TEST_TIMEOUT_QUEUE,

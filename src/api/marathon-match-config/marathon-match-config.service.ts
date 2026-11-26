@@ -29,24 +29,24 @@ import {
   TestSubmissionStatusResponseDto,
   TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
-} from 'src/dto/marathon-match-config.dto';
+} from '../../dto/marathon-match-config.dto';
 import {
   resolvePersistedSubmissionApiBaseUrl,
   resolveSubmissionApiBaseUrl,
-} from 'src/shared/config/submission-api-url.config';
+} from '../../shared/config/submission-api-url.config';
 import {
   DEFAULT_SCORER_TASK_MEMORY_MIB,
   getScorerTaskMemoryValidationError,
-} from 'src/shared/config/scorer-task-memory.config';
+} from '../../shared/config/scorer-task-memory.config';
 import {
   EcsService,
   MarathonMatchScorerTaskLaunchResult,
-} from 'src/shared/modules/global/ecs.service';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { M2MService } from 'src/shared/modules/global/m2m.service';
-import { PrismaErrorService } from 'src/shared/modules/global/prisma-error.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
+} from '../../shared/modules/global/ecs.service';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { M2MService } from '../../shared/modules/global/m2m.service';
+import { PrismaErrorService } from '../../shared/modules/global/prisma-error.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
 import {
   QueuedSystemScoreDispatchResult,
   ScoringResultService,

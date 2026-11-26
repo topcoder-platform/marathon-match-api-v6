@@ -5,8 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { of } from 'rxjs';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
+import { UserRole } from '../enums/userRole.enum';
+import { JwtUser } from '../modules/global/jwt.service';
 
 jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},
