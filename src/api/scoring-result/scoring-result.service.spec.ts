@@ -39,7 +39,7 @@ import {
   ScoringResultService,
   ScoringTestStatus,
 } from './scoring-result.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 const mockPgClientConstructor = PgClient as unknown as jest.Mock & {
   clients: MockPgClient[];

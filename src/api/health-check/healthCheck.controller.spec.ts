@@ -16,7 +16,7 @@ import {
   HealthCheckController,
   HealthCheckStatus,
 } from './healthCheck.controller';
-import { KafkaConnectionState } from 'src/shared/modules/kafka/kafka-consumer.service';
+import { KafkaConnectionState } from '../../shared/modules/kafka/kafka-consumer.service';
 
 describe('HealthCheckController', () => {
   const createController = (

@@ -7,9 +7,9 @@ import {
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Request } from 'express';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { JwtUser, isAdmin } from 'src/shared/modules/global/jwt.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { Scope } from '../enums/scopes.enum';
+import { JwtUser, isAdmin } from '../modules/global/jwt.service';
+import { LoggerService } from '../modules/global/logger.service';
 
 type RequestWithUser = Request & {
   user?: JwtUser;

@@ -17,16 +17,16 @@ import {
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { User } from 'src/shared/decorators/user.decorator';
-import { Scopes } from 'src/shared/decorators/scopes.decorator';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { UserRole } from 'src/shared/enums/userRole.enum';
+import { User } from '../../shared/decorators/user.decorator';
+import { Scopes } from '../../shared/decorators/scopes.decorator';
+import { Scope } from '../../shared/enums/scopes.enum';
+import { UserRole } from '../../shared/enums/userRole.enum';
 import {
   RunnerLogAccessRequest,
   SubmissionRunnerLogAccessGuard,
-} from 'src/shared/guards/submission-runner-log-access.guard';
-import { Roles } from 'src/shared/guards/tokenRoles.guard';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
+} from '../../shared/guards/submission-runner-log-access.guard';
+import { Roles } from '../../shared/guards/tokenRoles.guard';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
 import {
   GetSubmissionRunnerLogsOptions,
   SubmissionRunnerLogService,

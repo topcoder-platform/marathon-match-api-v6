@@ -8,11 +8,11 @@ import {
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Request } from 'express';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { JwtUser, isAdmin } from 'src/shared/modules/global/jwt.service';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
+import { Scope } from '../enums/scopes.enum';
+import { UserRole } from '../enums/userRole.enum';
+import { JwtUser, isAdmin } from '../modules/global/jwt.service';
+import { LoggerService } from '../modules/global/logger.service';
+import { PrismaService } from '../modules/global/prisma.service';
 
 export interface RunnerLogAccessRequest extends Request {
   user?: JwtUser;

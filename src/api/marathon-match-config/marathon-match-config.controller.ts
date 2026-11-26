@@ -40,15 +40,15 @@ import {
   TestSubmissionStatusResponseDto,
   TestSubmissionUploadDto,
   UpdateMarathonMatchConfigDto,
-} from 'src/dto/marathon-match-config.dto';
-import { PaginationHeaderInterceptor } from 'src/interceptors/PaginationHeaderInterceptor';
-import { Scopes } from 'src/shared/decorators/scopes.decorator';
-import { User } from 'src/shared/decorators/user.decorator';
-import { Scope } from 'src/shared/enums/scopes.enum';
-import { UserRole } from 'src/shared/enums/userRole.enum';
-import { ChallengeCopilotResourceGuard } from 'src/shared/guards/challenge-copilot-resource.guard';
-import { Roles } from 'src/shared/guards/tokenRoles.guard';
-import { JwtUser } from 'src/shared/modules/global/jwt.service';
+} from '../../dto/marathon-match-config.dto';
+import { PaginationHeaderInterceptor } from '../../interceptors/PaginationHeaderInterceptor';
+import { Scopes } from '../../shared/decorators/scopes.decorator';
+import { User } from '../../shared/decorators/user.decorator';
+import { Scope } from '../../shared/enums/scopes.enum';
+import { UserRole } from '../../shared/enums/userRole.enum';
+import { ChallengeCopilotResourceGuard } from '../../shared/guards/challenge-copilot-resource.guard';
+import { Roles } from '../../shared/guards/tokenRoles.guard';
+import { JwtUser } from '../../shared/modules/global/jwt.service';
 import { MarathonMatchConfigService } from './marathon-match-config.service';
 
 /**

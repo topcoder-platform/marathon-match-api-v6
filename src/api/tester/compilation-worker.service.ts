@@ -6,9 +6,9 @@ import {
 } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import PgBoss = require('pg-boss');
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PG_BOSS_TOKEN } from 'src/shared/modules/pg-boss/pg-boss.module';
-import { PgBossLifecycleService } from 'src/shared/modules/pg-boss/pg-boss-lifecycle.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { PG_BOSS_TOKEN } from '../../shared/modules/pg-boss/pg-boss.module';
+import { PgBossLifecycleService } from '../../shared/modules/pg-boss/pg-boss-lifecycle.service';
 import {
   CompileTesterJobData,
   TesterCompilationService,

@@ -10,8 +10,8 @@ jest.mock('src/shared/modules/global/member-scorer-lock', () => ({
 }));
 
 import { MarathonMatchSubmissionHandler } from './marathon-match-submission.handler';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { withMemberScorerLock } from 'src/shared/modules/global/member-scorer-lock';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { withMemberScorerLock } from '../../shared/modules/global/member-scorer-lock';
 
 describe('MarathonMatchSubmissionHandler', () => {
   const mockLogger = {

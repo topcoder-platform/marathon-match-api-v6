@@ -3,7 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { LoggerService } from './logger.service';
 import { PrismaErrorService } from './prisma-error.service';
-import { getStore } from 'src/shared/request/requestStore';
+import { getStore } from '../../request/requestStore';
 import { Utils } from './utils.service';
 
 enum auditField {

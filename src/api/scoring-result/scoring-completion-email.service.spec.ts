@@ -6,7 +6,7 @@ jest.mock('tc-core-library-js', () => ({
   createBusApiClient: jest.fn(),
 }));
 import { of, firstValueFrom } from 'rxjs';
-import { LoggerService } from 'src/shared/modules/global/logger.service';
+import { LoggerService } from '../../shared/modules/global/logger.service';
 
 jest.mock('src/shared/modules/global/prisma.service', () => ({
   PrismaService: class PrismaService {},

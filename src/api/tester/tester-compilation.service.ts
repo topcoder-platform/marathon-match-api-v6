@@ -7,9 +7,9 @@ import * as os from 'os';
 import * as path from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import PgBoss = require('pg-boss');
-import { LoggerService } from 'src/shared/modules/global/logger.service';
-import { PrismaService } from 'src/shared/modules/global/prisma.service';
-import { PG_BOSS_TOKEN } from 'src/shared/modules/pg-boss/pg-boss.module';
+import { LoggerService } from '../../shared/modules/global/logger.service';
+import { PrismaService } from '../../shared/modules/global/prisma.service';
+import { PG_BOSS_TOKEN } from '../../shared/modules/pg-boss/pg-boss.module';
 
 export interface CompileTesterJobData {
   testerId: string;
